@@ -1,0 +1,55 @@
+{
+ "permits": [
+  "There are no permits required for this site",
+  "This site is covered by an existing permit",
+  "A permit must be obtained before visiting this site",
+  "Indigenous Land Council Permission Required"
+ ],
+ "biosecurity": [
+  "General clean",
+  "Biosecurity declaration",
+  "Washdown and Virkon treatment"
+ ],
+ "threatened_habitat": [
+  "There are no known threatened habitat communities at this site",
+  "There are known threatened habitat communities at this site",
+  "Threatened Habitat communities are found in the local area"
+ ],
+ "threatened_flora": [
+  "There are no known threatened plants at this site",
+  "There are known threatened plants at this site",
+  "Threatened plants are found in the local area"
+ ],
+ "threatened_fauna": [
+  "There are no known threatened animals at this site",
+  "There are known threatened animals at this site",
+  "Threatened animals are found in the local area"
+ ],
+ "diseases": [
+  "There are no known disease and pathogen concerns at this site",
+  "There are known disease and pathogen concerns at this site"
+ ],
+ "indigenous_areas": [
+  "There are no known Indigenous protected areas at this site",
+  "There are known Indigenous protected areas at this site"
+ ],
+ "heritage": [
+  "There are no known heritage considerations for this site",
+  "There are known heritage considerations for this site"
+ ],
+ "invasive_plants": [
+  "There are no known invasive plants at this site",
+  "There are known invasive plants at this site",
+  "Invasive plants are found in the local area"
+ ],
+ "invasive_animals": [
+  "There are no known invasive animals at this site",
+  "There are known invasive animals  at this site",
+  "Invasive animals are found in the local area"
+ ],
+ "biosecurity_detail": {
+  "General clean": "Prior to a trip vehicles and toolboxes undergo general cleaning.  As standard practice all cars, tools and personal items(ie; boots) should be kept clean and free of organic materials.",
+  "Biosecurity declaration": "Vehicle and Equipment Washdown by trained individual (Biosecurity) Declaration required.",
+  "Washdown and Virkon treatment": "Vehicles and toolboxes will undergo a general washdown and cleanliness check prior to visiting the site.  This will Include removing of any organic material (such as grass and seed) from the vehicle cabin. Shoes must also be disinfected using a Virkon wash"
+ }
+}

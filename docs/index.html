@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ESS Workbench — Documentation</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; color: #17242e; background: #f4f6f8; }
+    @media (prefers-color-scheme: dark) { body { color: #e7eef3; background: #0e1519; } a { color: #6fb0e0; } .card { background: #16212a !important; border-color: #2a3a45 !important; } }
+    h1 { font-size: 26px; margin-bottom: 2px; }
+    .sub { color: #52616b; margin-top: 0; }
+    a { color: #12507b; }
+    .back { display: inline-block; margin-bottom: 18px; text-decoration: none; }
+    .card { display: block; background: #fff; border: 1px solid #d9e0e6; border-radius: 12px; padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit; }
+    .card:hover { border-color: #12507b; }
+    .card h2 { font-size: 17px; margin: 0 0 4px; }
+    .card p { margin: 0; color: #52616b; font-size: 14px; }
+    code { background: rgba(128,128,128,.18); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <a class="back" href="../">← Back to the tool</a>
+  <h1>🌿 ESS Workbench — Documentation</h1>
+  <p class="sub">Environmental Site Summary desktop-assessment assistant.</p>
+
+  <p>These pages are Markdown; they render best in the
+    <a href="https://github.com/">GitHub</a> repository view. Quick links:</p>
+
+  <a class="card" href="ARCHITECTURE.md">
+    <h2>Architecture →</h2>
+    <p>How the browser tool, the agent skill and the shared <code>data/</code> registry fit together, and the data model.</p>
+  </a>
+  <a class="card" href="ROADMAP.md">
+    <h2>Roadmap →</h2>
+    <p>What's built, what's deliberately manual, and a prioritised backlog with next-session instructions.</p>
+  </a>
+  <a class="card" href="ADDING-A-SOURCE.md">
+    <h2>Adding a source →</h2>
+    <p>The main way this grows: add one object to <code>data/sources.json</code> and it appears in both front-ends.</p>
+  </a>
+  <a class="card" href="PROFORMA-MAPPING.md">
+    <h2>Proforma mapping →</h2>
+    <p>How each ESS spreadsheet section, dropdown and autofill cell maps to the tool.</p>
+  </a>
+  <a class="card" href="../build/README.md">
+    <h2>Data build →</h2>
+    <p>Regenerating the station JSON from the BOM workbook.</p>
+  </a>
+</body>
+</html>
