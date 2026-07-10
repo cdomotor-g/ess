@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ESS Workbench — Environmental Site Summary assistant</title>
+  <meta name="description" content="Look up a Bureau site by name or coordinates and run the ESS desktop assessment: deep-links and live checks for every environmental & heritage source, with a report that flags what was found, what was empty and what failed." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🌿</span>
+        <div>
+          <h1>ESS Workbench</h1>
+          <p class="tagline">Environmental Site Summary — desktop assessment assistant</p>
+        </div>
+      </div>
+      <div class="topbar-meta" id="topbar-meta">
+        <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- Load / error banner -->
+    <div id="load-banner" class="banner" hidden></div>
+
+    <!-- STEP 1 — choose a site -->
+    <section class="card" id="site-picker">
+      <div class="card-head">
+        <h2><span class="step">1</span> Choose a site</h2>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab is-active" data-tab="by-name" role="tab">By station name</button>
+        <button class="tab" data-tab="by-coords" role="tab">By coordinates</button>
+      </div>
+
+      <div class="tab-panel is-active" data-panel="by-name">
+        <label for="station-search" class="field-label">Start typing a station name or number</label>
+        <div class="autocomplete">
+          <input id="station-search" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="e.g. Woodgate, 540001, radar…" />
+          <ul id="station-results" class="ac-list" hidden></ul>
+        </div>
+        <p class="hint" id="station-count-hint"></p>
+      </div>
+
+      <div class="tab-panel" data-panel="by-coords">
+        <div class="coord-grid">
+          <div>
+            <label class="field-label" for="in-lat">Latitude</label>
+            <input id="in-lat" type="number" step="any" placeholder="-25.0891" />
+          </div>
+          <div>
+            <label class="field-label" for="in-lon">Longitude</label>
+            <input id="in-lon" type="number" step="any" placeholder="152.5489" />
+          </div>
+          <div>
+            <label class="field-label" for="in-name">Site name <span class="opt">(optional)</span></label>
+            <input id="in-name" type="text" placeholder="Site / project name" />
+          </div>
+          <div>
+            <label class="field-label" for="in-state">State</label>
+            <select id="in-state">
+              <option value="">Auto-detect</option>
+              <option>QLD</option><option>NSW</option><option>VIC</option><option>TAS</option>
+              <option>ACT</option><option>WA</option><option>NT</option><option>SA</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn primary" id="load-coords">Load site</button>
+        <p class="hint">Paste a decimal lat/long (southern-hemisphere latitudes are negative).</p>
+      </div>
+    </section>
+
+    <!-- Everything below appears once a site is loaded -->
+    <div id="workspace" hidden>
+
+      <!-- Site summary (proforma header replica) -->
+      <section class="card" id="site-summary">
+        <div class="card-head">
+          <h2><span class="step">2</span> Site summary</h2>
+          <div class="head-actions">
+            <button class="btn ghost" id="btn-clear-site" title="Choose a different site">Change site</button>
+          </div>
+        </div>
+        <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
+        <div class="summary-editable">
+          <div>
+            <label class="field-label" for="fld-date">Assessment date</label>
+            <input id="fld-date" type="date" />
+          </div>
+          <div class="grow">
+            <label class="field-label" for="fld-maintenance">Site maintenance <span class="opt">(not auto-populated)</span></label>
+            <input id="fld-maintenance" type="text" placeholder="e.g. quarterly; last visit 04/2026" />
+          </div>
+        </div>
+      </section>
+
+      <!-- Progress -->
+      <section class="card compact" id="progress">
+        <div class="progress-row">
+          <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+          <div class="progress-legend" id="progress-legend"></div>
+        </div>
+      </section>
+
+      <!-- STEP 3 — collection dashboard -->
+      <section class="card" id="dashboard">
+        <div class="card-head">
+          <h2><span class="step">3</span> Collect location metadata</h2>
+          <div class="head-actions">
+            <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
+            <button class="btn ghost" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
+          </div>
+        </div>
+        <p class="dash-note">
+          Each source opens pre-aimed at this location where the site supports it. Set a result for every source:
+          <span class="chip found">Found</span>
+          <span class="chip none">Nothing found</span>
+          <span class="chip failed">Search failed</span>
+          <span class="chip manual">Needs manual check</span>.
+          Sources marked <b>API</b> can be checked live in your browser.
+        </p>
+        <div id="dashboard-groups"><!-- filled by JS --></div>
+      </section>
+
+      <!-- STEP 4 — report -->
+      <section class="card" id="report">
+        <div class="card-head">
+          <h2><span class="step">4</span> ESS report</h2>
+          <div class="head-actions">
+            <button class="btn ghost" id="btn-print">🖨 Print / PDF</button>
+            <button class="btn ghost" id="btn-download-html">⬇ HTML</button>
+            <button class="btn ghost" id="btn-download-json">⬇ JSON</button>
+            <button class="btn primary" id="btn-copy-summary">Copy summary</button>
+          </div>
+        </div>
+        <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
+        <div id="report-sections"><!-- filled by JS --></div>
+      </section>
+
+    </div><!-- /workspace -->
+
+    <footer class="foot">
+      <p>Client-side only — nothing you enter leaves your browser. Work is saved locally per site. <span id="foot-meta"></span></p>
+      <p class="foot-links">
+        <a href="https://pmst.environment.gov.au/" target="_blank" rel="noopener">EPBC PMST</a> ·
+        <a href="https://biocache.ala.org.au/" target="_blank" rel="noopener">Atlas of Living Australia</a> ·
+        <a href="mailto:enviro@bom.gov.au">enviro@bom.gov.au</a>
+      </p>
+    </footer>
+  </main>
+
+  <!-- report render target for export/print -->
+  <div id="print-root" aria-hidden="true"></div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

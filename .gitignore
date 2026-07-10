@@ -1,0 +1,25 @@
+# Raw internal source workbook(s) — NOT published. Only the derived, reviewed
+# JSON in data/ is committed. Drop the BOM template here to regenerate.
+build/source/
+*.xlsx
+*.xlsm
+
+# Node / test tooling (browser tests run outside the repo; nothing committed)
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local scratch
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Claude Code local (session-specific permissions, not shared)
+.claude/settings.local.json
