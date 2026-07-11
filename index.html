@@ -19,6 +19,7 @@
         </div>
       </div>
       <div class="topbar-meta" id="topbar-meta">
+        <button class="ghost-link" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">🔑 Agent</button>
         <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
       </div>
     </div>
@@ -28,6 +29,9 @@
     <!-- Load / error banner -->
     <div id="load-banner" class="banner" hidden></div>
 
+    <!-- Optional BYOK agent settings panel (filled + toggled by assets/agent.js) -->
+    <div id="agent-panel" class="agent-panel" hidden></div>
+
     <!-- STEP 1 — choose a site -->
     <section class="card" id="site-picker">
       <div class="card-head">
@@ -36,6 +40,7 @@
       <div class="tabs" role="tablist">
         <button class="tab is-active" data-tab="by-name" role="tab">By station name</button>
         <button class="tab" data-tab="by-coords" role="tab">By coordinates</button>
+        <button class="tab" data-tab="import" role="tab">Import agent findings</button>
       </div>
 
       <div class="tab-panel is-active" data-panel="by-name">
@@ -74,6 +79,15 @@
         <button class="btn primary" id="load-coords">Load site</button>
         <p class="hint">Paste a decimal lat/long (southern-hemisphere latitudes are negative).</p>
       </div>
+
+      <div class="tab-panel" data-panel="import">
+        <label class="field-label" for="import-file">Load an ESS findings file (JSON)</label>
+        <input id="import-file" type="file" accept="application/json,.json" />
+        <p class="hint" style="margin:12px 0 5px">…or paste the JSON:</p>
+        <textarea id="import-text" rows="4" placeholder='{"schema":"ess-findings/1", "site": {…}, "collection_log": […]}'></textarea>
+        <button class="btn primary" id="import-load" style="margin-top:12px">Import findings</button>
+        <p class="hint">Produced by the <code>ess-collect</code> agent skill (<code>resolve.py --template</code>, filled in) or exported from this tool. Manual &amp; failed sources are flagged so you can finish them here.</p>
+      </div>
     </section>
 
     <!-- Everything below appears once a site is loaded -->
@@ -108,12 +122,18 @@
         </div>
       </section>
 
+      <!-- attention banner (after import / agent run) -->
+      <div id="attention-banner" class="attention" hidden></div>
+
       <!-- STEP 3 — collection dashboard -->
       <section class="card" id="dashboard">
         <div class="card-head">
           <h2><span class="step">3</span> Collect location metadata</h2>
           <div class="head-actions">
             <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
+            <button class="btn ghost" id="btn-filter-attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
+            <button class="btn ghost" id="btn-copy-agent-prompt" title="Copy a ready prompt to run the ess-collect agent skill for this site">📋 Agent prompt</button>
+            <button class="btn ghost" id="btn-run-agent" hidden title="Run the whole desktop assessment with Claude (uses your API key)">🤖 Run agent</button>
             <button class="btn ghost" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
           </div>
         </div>
@@ -159,5 +179,6 @@
   <div id="print-root" aria-hidden="true"></div>
 
   <script src="assets/app.js"></script>
+  <script src="assets/agent.js"></script>
 </body>
 </html>

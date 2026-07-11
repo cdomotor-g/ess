@@ -16,9 +16,17 @@ slice. Each backlog item names the files to touch and how to verify.
   Living Australia check, per-source Found/None/Failed/Manual, report builder
   with standardized wording, export to Print/HTML/JSON, localStorage
   persistence. Static → GitHub Pages.
-- **Agent skill** — `ess-collect` with a deterministic `resolve.py` helper and a
-  full playbook, emitting the same status taxonomy + JSON.
-- **Docs** — architecture, this roadmap, how to add a source, proforma mapping.
+- **Agent skill** — `ess-collect` with a deterministic `resolve.py` helper
+  (incl. `--template` → the `ess-findings/1` skeleton) and a full playbook,
+  emitting the same status taxonomy + JSON.
+- **Agent ↔ tool interoperability** — one shared `ess-findings/1` schema; the
+  tool imports the agent's findings (**Import agent findings** tab), surfaces
+  Manual/Failed for review, and re-exports. "Copy agent prompt" for the reverse.
+- **BYOK in-browser agent** (beta) — `assets/agent.js` runs the whole assessment
+  from the browser with the user's own Anthropic key (server-side web
+  search/fetch bypass CORS), filling the dashboard live. No backend.
+- **Docs** — architecture, this roadmap, how to add a source, proforma mapping,
+  agent mode.
 
 ## Deliberately manual (by nature, not backlog)
 
@@ -75,7 +83,22 @@ query it server-side.
 - [ ] **EAMS attachment helper** — pre-fill the Station Information tab text and
       naming (`ESS_Station Name_Station type_MM YYYY`) from the report object.
 
-### Phase 4 — Orchestration
+### Phase 4 — Orchestration & shared agent access
+- [x] **Agent as engine + file/live handoff** — done (see Built).
+- [ ] **Shared / default key via a proxy.** So users don't paste their own key
+      (a shared key *can't* live in static Pages — it would be published). Stand
+      up a tiny access-controlled proxy (Cloudflare Worker / Lambda behind BOM
+      SSO) holding the Anthropic key server-side (a GitHub secret can feed the
+      Worker secret); point the browser at it. *Files:* new `proxy/` (worker +
+      `wrangler.toml` + README); in `assets/agent.js` swap the `API_BASE`
+      constant to the proxy origin and add a "My key / Shared endpoint" toggle.
+      Must be authenticated + rate-limited (an open proxy on a shared key is an
+      open wallet).
+- [ ] **Managed Agents (CMA) variant** — instead of a self-run loop, broker an
+      Anthropic-hosted session (loop + sandbox tools server-side) and render its
+      SSE stream; still needs the credential home from the proxy above.
+- [ ] **Streaming UX** for the BYOK agent (token-level progress) — currently
+      updates per turn.
 - [ ] **One-click "run everything the browser can"** already exists (⚡ Run
       auto-checks); extend as more `api` sources land.
 - [ ] **Scheduled re-assessment** — re-run a site periodically and diff findings

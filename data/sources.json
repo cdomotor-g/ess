@@ -21,6 +21,19 @@
   {"id": "disease", "label": "Disease and Pathogens", "proforma_section": "Diseases and Pathogens", "dropdown": "diseases"},
   {"id": "additional", "label": "Additional Information (PFAS / soils / locality)", "proforma_section": "Additional Information", "dropdown": null}
  ],
+ "report_sections": [
+  {"id": "permits", "title": "Permits and permissions", "dropdown": "permits", "cats": ["permits"]},
+  {"id": "biosecurity", "title": "Biosecurity", "dropdown": "biosecurity", "cats": ["biosecurity"], "bioDetail": true},
+  {"id": "threatened_habitat", "title": "Threatened Habitat", "dropdown": "threatened_habitat", "cats": ["threatened"]},
+  {"id": "threatened_flora", "title": "Threatened Flora", "dropdown": "threatened_flora", "cats": ["threatened"]},
+  {"id": "threatened_fauna", "title": "Threatened Fauna", "dropdown": "threatened_fauna", "cats": ["threatened"]},
+  {"id": "indigenous_areas", "title": "Indigenous Protected Areas", "dropdown": "indigenous_areas", "cats": ["indigenous_heritage"]},
+  {"id": "heritage", "title": "Heritage Considerations", "dropdown": "heritage", "cats": ["indigenous_heritage"]},
+  {"id": "invasive_plants", "title": "Invasive Plants", "dropdown": "invasive_plants", "cats": ["invasive_plants"], "ref": "invasive_plants"},
+  {"id": "invasive_animals", "title": "Invasive Animals", "dropdown": "invasive_animals", "cats": ["invasive_animals"], "ref": "invasive_animals"},
+  {"id": "diseases", "title": "Diseases and Pathogens", "dropdown": "diseases", "cats": ["disease"], "ref": "diseases"},
+  {"id": "additional", "title": "Additional Information", "dropdown": null, "cats": ["additional"]}
+ ],
  "epbc_matters": [
   "Protected areas – Terrestrial",
   "Protected areas – Marine",

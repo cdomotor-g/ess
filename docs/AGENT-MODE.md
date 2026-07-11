@@ -1,0 +1,95 @@
+# Agent mode — running the assessment with Claude
+
+The `ess-collect` agent can do the desktop research for you and fill the same
+review/export surface a human uses. There are **two ways** to run it; both
+produce the same `ess-findings/1` object.
+
+```
+                        ess-findings/1  (one schema)
+                       ┌───────────────┐
+   Claude Code ───────▶│  collection   │◀─────── BYOK in-browser agent
+   (file handoff)      │     log +     │         (this browser + your key)
+                       │   sections    │
+                       └───────┬───────┘
+                               ▼
+              ESS Workbench: review Manual/Failed → finalise → export
+```
+
+---
+
+## A. File handoff (agent runs in Claude Code)
+
+Runs where an Anthropic credential already lives — no key in the browser.
+
+1. In the browser tool, load the site and click **📋 Agent prompt** to copy a
+   ready prompt (or just ask a Claude Code session in this repo:
+   *"Run an ESS for WOODGATE ALERT"*).
+2. The `ess-collect` skill resolves the site, works every source it can reach,
+   and outputs a completed `ess-findings/1` JSON (it fills the skeleton from
+   `resolve.py --template`).
+3. Save that JSON and, in the browser tool, open **Choose a site → Import agent
+   findings**, paste it (or pick the file), and **Import**.
+4. The dashboard fills with the agent's results; an attention banner flags the
+   **Manual** and **Failed** items still needing a human. Finish those, then
+   export.
+
+Best when: batches of sites, or you're already in Claude Code. The agent can't
+drive interactive portals (EPBC PMST) or log into SharePoint — those come back
+`manual` for you to finish in the browser.
+
+---
+
+## B. BYOK in-browser agent (this browser + your key)
+
+Runs the whole thing live from the browser — **beta**. Click **🔑 Agent** in the
+top bar.
+
+### How it works
+- You paste **your own Anthropic API key**. The browser calls
+  `api.anthropic.com` directly (with the `anthropic-dangerous-direct-browser-access`
+  header). Claude runs a tool-use loop:
+  - **web_search / web_fetch** — Anthropic **server-side** tools; they run on
+    Anthropic's infrastructure, so they bypass the browser CORS wall that blocks
+    ordinary client-side fetches of government sites.
+  - **query_ala** — a client-side tool the browser runs against the Atlas of
+    Living Australia (which is CORS-friendly) for structured conservation data.
+  - **set_source_result** — the browser applies each result to the dashboard as
+    the agent works, so cards fill live.
+- When every source has a result, it stops. You review Manual/Failed and export.
+
+### The key
+- Stored **only** in this browser's `localStorage`; sent **only** to
+  `api.anthropic.com`; never to any other server (there is no backend).
+- **Clear key** wipes it. Because it lives in the browser, a page compromise
+  (XSS) could read it — use a key you can rotate/limit, not an unrestricted org
+  key.
+
+### Cost
+- Each run makes many search/fetch calls plus tokens, billed to your key —
+  expect **a few cents to some tens of cents per site**. The panel shows a live
+  token + rough-dollar readout. The system prompt + tools are prompt-cached to
+  cut cost on the turns within a run. Pick **Haiku 4.5** in the model dropdown
+  for a cheaper/faster run (it uses basic web search and no web-fetch).
+
+### Limits
+- Interactive-only portals and internal SharePoint still come back **manual** —
+  the agent records the aimed link + steps rather than guessing.
+- Egress-blocked or erroring sources come back **failed** (honestly flagged).
+
+---
+
+## Shared / default key (not built)
+
+A shared "default key" so users don't paste their own **cannot live safely in a
+static GitHub Pages site** — a key baked into the build would be published. The
+safe way is a tiny access-controlled proxy (e.g. a Cloudflare Worker behind SSO)
+that holds the key server-side; the browser calls the proxy instead of Anthropic.
+The client is written to make this a one-line change: swap `API_BASE` in
+`assets/agent.js` to the proxy origin. See [ROADMAP.md](ROADMAP.md).
+
+## The schema (`ess-findings/1`)
+
+`{ schema, generated, tool, site, sections[], collection_log[] }` — the exact
+object the browser tool imports and exports, and that `resolve.py --template`
+scaffolds. Statuses: `found` / `none` / `failed` / `manual` / `unset`. Keeping
+one schema is why both agent paths and the reviewer UI interoperate.

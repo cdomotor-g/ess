@@ -41,7 +41,10 @@
     report: {},        // sectionId -> { choice, note }
     date: "",
     maintenance: "",
+    filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
+    showAttention: false,   // show the attention banner (after import / agent run)
   };
+  const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -77,6 +80,7 @@
     DATA.sources = out.sources.sources;
     DATA.dropdowns = out.dropdowns;
     DATA.meta = out.meta;
+    REPORT_SECTIONS = out.sources.report_sections || [];
   }
 
   function showBanner(kind, html) {
@@ -161,15 +165,56 @@
     state.report = {};
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
+    state.filterAttention = false;
+    state.showAttention = false;
     restore(); // pull any saved progress for this site
+    renderWorkspace();
+  }
+
+  function renderWorkspace() {
     $("#workspace").hidden = false;
     renderSummary();
     renderDashboard();
     renderReport();
     renderProgress();
+    syncFilterButton();
     $("#fld-date").value = state.date;
     $("#fld-maintenance").value = state.maintenance;
     $("#workspace").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Load a completed (or partial) ess-findings/1 object — from the agent skill
+  // or a prior export — and populate the same review/export surface.
+  function importFindings(json) {
+    if (!json || typeof json !== "object" || !json.site || !Array.isArray(json.collection_log))
+      throw new Error("Not an ESS findings file — expected a `site` object and a `collection_log` array.");
+    const si = json.site;
+    const lat = parseFloat(si.lat), lon = parseFloat(si.lon);
+    if (isNaN(lat) || isNaN(lon)) throw new Error("The findings file has no valid site latitude/longitude.");
+    const st = si.state || stateFromCoords(lat, lon);
+    state.site = {
+      name: si.name || `Site @ ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+      station_num: si.station_num || "", wmo: si.wmo || "", region: st, state: st,
+      delivery_group: si.delivery_group || "", facility_types: si.facility_types || [],
+      primary_facility: (si.facility_types && si.facility_types[0]) || "",
+      lat, lon, operating_authority: "", ident: "", refs: refsForState(st), manual: !si.station_num,
+    };
+    state.findings = {};
+    json.collection_log.forEach((c) => {
+      if (!c || !c.id) return;
+      state.findings[c.id] = {
+        status: c.status || STATUS.UNSET, note: c.note || "",
+        result: c.result_text ? { html: esc(c.result_text).replace(/\n/g, "<br>"), ts: Date.now() } : null,
+      };
+    });
+    state.report = {};
+    (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "" }; });
+    state.date = si.assessment_date || new Date().toISOString().slice(0, 10);
+    state.maintenance = si.site_maintenance || "";
+    state.filterAttention = false;
+    state.showAttention = true; // surface what the agent left for the human
+    renderWorkspace();
+    save();
   }
 
   // ---------------------------------------------------------------- summary
@@ -228,7 +273,9 @@
     const wrap = $("#dashboard-groups");
     wrap.innerHTML = "";
     const cats = DATA.sourcesMeta.categories;
-    const list = sourcesForSite();
+    let list = sourcesForSite();
+    if (state.filterAttention)
+      list = list.filter((s) => ATTENTION.includes((state.findings[s.id] || {}).status || "unset"));
     for (const cat of cats) {
       const inCat = list.filter((s) => s.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
       if (!inCat.length) continue;
@@ -240,6 +287,9 @@
       inCat.forEach((src) => group.append(renderSourceCard(src)));
       wrap.append(group);
     }
+    if (!wrap.children.length)
+      wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" },
+        state.filterAttention ? "✓ Nothing needs attention — every source has a result." : "No sources for this site."));
   }
 
   function renderSourceCard(src) {
@@ -307,6 +357,51 @@
   }
 
   // ---------------------------------------------------------------- ALA check
+  // Pure query: hit the Atlas of Living Australia and return a status + an HTML
+  // card summary + a plain-text summary (for the agent). Shared by the card
+  // "Check live" button and the BYOK agent's query_ala tool.
+  async function alaQuery(lat, lon, radius, endpoint) {
+    const base = endpoint || "https://biocache-ws.ala.org.au/ws/occurrences/search";
+    const geo = `lat=${lat}&lon=${lon}&radius=${radius}`;
+    const a = await fetchJson(`${base}?q=*%3A*&${geo}&pageSize=0&facets=stateConservation,countryConservation&flimit=30`);
+    const total = a.totalRecords ?? 0;
+    const consFacets = (a.facetResults || []).filter((fr) => /Conservation/i.test(fr.fieldName) && fr.fieldResult && fr.fieldResult.length);
+    const statusCounts = [];
+    consFacets.forEach((fr) => fr.fieldResult.forEach((r) => {
+      const label = (r.label || "").trim();
+      if (label && !/^unknown$/i.test(label)) statusCounts.push([label, r.count]);
+    }));
+    let speciesHtml = "", speciesText = "", listedCount = 0;
+    if (statusCounts.length) {
+      try {
+        const b = await fetchJson(`${base}?q=*%3A*&fq=${encodeURIComponent("(stateConservation:* OR countryConservation:*)")}&${geo}&pageSize=0&facets=species&flimit=40`);
+        const sp = ((b.facetResults || []).find((fr) => fr.fieldName === "species") || {}).fieldResult || [];
+        listedCount = sp.length;
+        if (sp.length) {
+          speciesHtml = `<ul class="r-species">${sp.slice(0, 25).map((r) => `<li>${esc(r.label)} <span style="opacity:.6">(${r.count})</span></li>`).join("")}</ul>`;
+          speciesText = " Listed taxa: " + sp.slice(0, 25).map((r) => `${r.label} (${r.count})`).join("; ") + ".";
+        }
+      } catch (_) { /* species drill-down is best-effort */ }
+    }
+    const dedup = {};
+    statusCounts.forEach(([l, c]) => { dedup[l] = (dedup[l] || 0) + c; });
+    const statusStr = Object.entries(dedup).map(([l, c]) => `${esc(l)} (${c})`).join(", ");
+    const statusStrPlain = Object.entries(dedup).map(([l, c]) => `${l} (${c})`).join(", ");
+    if (statusCounts.length) {
+      return { status: STATUS.FOUND,
+        html: `<b>${listedCount || "Multiple"} conservation-listed taxa</b> within ${radius} km.<br>Status classes: ${statusStr}.${speciesHtml}<div style="margin-top:6px;opacity:.7">${total.toLocaleString()} total occurrence records in radius. Source: Atlas of Living Australia.</div>`,
+        text: `${listedCount || "Multiple"} conservation-listed taxa within ${radius} km. Status classes: ${statusStrPlain}.${speciesText} ${total} total occurrence records.` };
+    }
+    if (total > 0) {
+      return { status: STATUS.NONE,
+        html: `${total.toLocaleString()} occurrence records within ${radius} km, but <b>none carry a state/national conservation status</b>. Corroborate with EPBC PMST &amp; state tools.`,
+        text: `${total} occurrence records within ${radius} km, but none carry a state/national conservation status.` };
+    }
+    return { status: STATUS.NONE,
+      html: `<b>No occurrence records</b> within ${radius} km (sparsely surveyed area — this does not rule out species presence).`,
+      text: `No occurrence records within ${radius} km (sparsely surveyed area; does not rule out species presence).` };
+  }
+
   async function runAla(src) {
     const btn = $(`#run-${src.id}`);
     const res = $(`#res-${src.id}`);
@@ -314,53 +409,10 @@
     const radius = (src.api && src.api.radius_km) || 10;
     btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`;
     res.className = "src-result show"; res.innerHTML = "Querying Atlas of Living Australia…";
-    const base = src.api.endpoint;
-    const geo = `lat=${s.lat}&lon=${s.lon}&radius=${radius}`;
     try {
-      // Headline: total records + conservation-status facets in radius.
-      const facets = "stateConservation,countryConservation";
-      const urlA = `${base}?q=*%3A*&${geo}&pageSize=0&facets=${facets}&flimit=30`;
-      const a = await fetchJson(urlA);
-      const total = a.totalRecords ?? 0;
-      const consFacets = (a.facetResults || []).filter((fr) => /Conservation/i.test(fr.fieldName) && fr.fieldResult && fr.fieldResult.length);
-      const statusCounts = [];
-      consFacets.forEach((fr) => fr.fieldResult.forEach((r) => {
-        const label = (r.label || "").trim();
-        if (label && !/^unknown$/i.test(label)) statusCounts.push([label, r.count]);
-      }));
-
-      let speciesHtml = "";
-      let listedCount = 0;
-      if (statusCounts.length) {
-        // Follow-up: which listed species (name facet, filtered to conservation-listed).
-        try {
-          const urlB = `${base}?q=*%3A*&fq=${encodeURIComponent("(stateConservation:* OR countryConservation:*)")}&${geo}&pageSize=0&facets=species&flimit=40`;
-          const b = await fetchJson(urlB);
-          const spFacet = (b.facetResults || []).find((fr) => fr.fieldName === "species");
-          const sp = (spFacet && spFacet.fieldResult) || [];
-          listedCount = sp.length;
-          if (sp.length) speciesHtml = `<ul class="r-species">${sp.slice(0, 25).map((r) => `<li>${esc(r.label)} <span style="opacity:.6">(${r.count})</span></li>`).join("")}</ul>`;
-        } catch (_) { /* species drill-down is best-effort */ }
-      }
-
-      const dedup = {};
-      statusCounts.forEach(([l, c]) => { dedup[l] = (dedup[l] || 0) + c; });
-      const statusStr = Object.entries(dedup).map(([l, c]) => `${esc(l)} (${c})`).join(", ");
-
-      let status, html;
-      if (statusCounts.length) {
-        status = STATUS.FOUND;
-        html = `<b>${listedCount || "Multiple"} conservation-listed taxa</b> within ${radius} km.<br>Status classes: ${statusStr}.${speciesHtml}
-          <div style="margin-top:6px;opacity:.7">${total.toLocaleString()} total occurrence records in radius. Source: Atlas of Living Australia.</div>`;
-      } else if (total > 0) {
-        status = STATUS.NONE;
-        html = `${total.toLocaleString()} occurrence records within ${radius} km, but <b>none carry a state/national conservation status</b>. Corroborate with EPBC PMST &amp; state tools.`;
-      } else {
-        status = STATUS.NONE;
-        html = `<b>No occurrence records</b> within ${radius} km (sparsely surveyed area — this does not rule out species presence).`;
-      }
+      const r = await alaQuery(s.lat, s.lon, radius, src.api && src.api.endpoint);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
-      f.status = status; f.result = { html, ts: Date.now() };
+      f.status = r.status; f.result = { html: r.html, ts: Date.now() };
       save(); refreshCard(src.id); renderProgress(); renderReport();
     } catch (err) {
       const f = state.findings[src.id] || (state.findings[src.id] = {});
@@ -396,23 +448,43 @@
       `<span class="chip none">${counts.none} none</span>` +
       `<span class="chip failed">${counts.failed} failed</span>` +
       `<span class="chip manual">${counts.manual} manual</span>`;
+    renderAttention();
+  }
+
+  // Banner drawing the eye to sources a human still owns (shown after an import
+  // or agent run). Updates live as items are resolved; hides when dismissed.
+  function renderAttention() {
+    const b = $("#attention-banner");
+    if (!b) return;
+    if (!state.showAttention || !state.site) { b.hidden = true; return; }
+    const list = sourcesForSite();
+    const need = list.filter((s) => ATTENTION.includes((state.findings[s.id] || {}).status || "unset")).length;
+    const done = list.length - need;
+    b.hidden = false;
+    b.className = "attention" + (need === 0 ? " clear" : "");
+    b.innerHTML = "";
+    const msg = need === 0
+      ? el("span", {}, `All ${list.length} sources resolved — review the report and export.`)
+      : el("span", { html: `<b>${done}</b> automated · <b>${need}</b> still need you (Manual / Failed / Not&nbsp;checked). Open each aimed link, then set its result.` });
+    const actions = el("span", { style: "display:flex;gap:8px;flex-wrap:wrap" });
+    if (need > 0) actions.append(el("button", {
+      class: "btn tiny" + (state.filterAttention ? " on" : ""),
+      onclick: () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); },
+    }, state.filterAttention ? "Show all" : "Show only these"));
+    actions.append(el("button", { class: "btn tiny", onclick: () => { state.showAttention = false; renderAttention(); } }, "Dismiss"));
+    b.append(msg, actions);
+  }
+
+  function syncFilterButton() {
+    const btn = $("#btn-filter-attention");
+    if (btn) btn.classList.toggle("on", state.filterAttention);
   }
 
   // ---------------------------------------------------------------- report
-  // Maps a report section to the source categories whose findings inform it.
-  const REPORT_SECTIONS = [
-    { id: "permits", title: "Permits and permissions", dropdown: "permits", cats: ["permits"] },
-    { id: "biosecurity", title: "Biosecurity", dropdown: "biosecurity", cats: ["biosecurity"], bioDetail: true },
-    { id: "threatened_habitat", title: "Threatened Habitat", dropdown: "threatened_habitat", cats: ["threatened"] },
-    { id: "threatened_flora", title: "Threatened Flora", dropdown: "threatened_flora", cats: ["threatened"] },
-    { id: "threatened_fauna", title: "Threatened Fauna", dropdown: "threatened_fauna", cats: ["threatened"] },
-    { id: "indigenous_areas", title: "Indigenous Protected Areas", dropdown: "indigenous_areas", cats: ["indigenous_heritage"] },
-    { id: "heritage", title: "Heritage Considerations", dropdown: "heritage", cats: ["indigenous_heritage"] },
-    { id: "invasive_plants", title: "Invasive Plants", dropdown: "invasive_plants", cats: ["invasive_plants"] },
-    { id: "invasive_animals", title: "Invasive Animals", dropdown: "invasive_animals", cats: ["invasive_animals"] },
-    { id: "diseases", title: "Diseases and Pathogens", dropdown: "diseases", cats: ["disease"] },
-    { id: "additional", title: "Additional Information", dropdown: null, cats: ["additional"] },
-  ];
+  // Report sections mirror the ESS proforma. The definition is the single
+  // source of truth in data/sources.json (`report_sections`) so the browser
+  // tool and the ess-collect skill stay in lockstep; populated on load.
+  let REPORT_SECTIONS = [];
 
   // Suggest a dropdown option based on the findings in the relevant categories.
   function suggestChoice(section) {
@@ -456,7 +528,7 @@
       }
 
       // Reference link for invasive/disease sections (mirrors the proforma hyperlinks)
-      const ref = { invasive_plants: state.site.refs && state.site.refs.invasive_plants, invasive_animals: state.site.refs && state.site.refs.invasive_animals, diseases: state.site.refs && state.site.refs.diseases }[section.id];
+      const ref = section.ref && state.site.refs && state.site.refs[section.ref];
       if (ref) box.append(el("p", { class: "r-sub" }, "Reference: ", el("a", { href: ref, target: "_blank", rel: "noopener" }, ref)));
 
       const ta = el("textarea", { placeholder: "Free-text comments for this section…", oninput: (e) => { rstate.note = e.target.value; save(); } });
@@ -520,6 +592,7 @@
   function reportObject() {
     const s = state.site;
     return {
+      schema: "ess-findings/1",
       generated: new Date().toISOString(),
       tool: "ESS Workbench",
       data_version: DATA.meta && DATA.meta.generated_utc,
@@ -601,6 +674,36 @@
     r.collection_log.forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
     copy(lines.join("\n"));
   }
+  function copyAgentPrompt() {
+    const s = state.site;
+    const idpart = s.station_num ? `station ${s.station_num}` : "no station number";
+    copy(
+      `Run the ess-collect skill in this repo for ${s.name} (${idpart}, ${s.state || "?"}, ` +
+      `lat ${s.lat} lon ${s.lon}). Attempt every source you can reach, assign FOUND / NONE / ` +
+      `FAILED / MANUAL with evidence, and output the completed ess-findings/1 JSON ` +
+      `(fill in \`python .claude/skills/ess-collect/resolve.py --station "${s.name}" --template\`) ` +
+      `so I can import it into the ESS Workbench.`);
+  }
+
+  function doImport() {
+    const text = $("#import-text").value.trim();
+    const file = $("#import-file").files && $("#import-file").files[0];
+    const parse = (raw) => {
+      try { importFindings(JSON.parse(raw)); toast("Findings imported"); }
+      catch (err) { alert("Import failed: " + err.message); }
+    };
+    if (file) {
+      const r = new FileReader();
+      r.onload = () => parse(String(r.result));
+      r.onerror = () => alert("Could not read the file.");
+      r.readAsText(file);
+    } else if (text) {
+      parse(text);
+    } else {
+      alert("Choose a findings file or paste the JSON first.");
+    }
+  }
+
   const slug = (s) => s.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").slice(0, 40);
   function copy(text) {
     navigator.clipboard ? navigator.clipboard.writeText(text).then(() => toast("Copied")) : toast("Copy not available");
@@ -638,8 +741,11 @@
     document.addEventListener("click", (e) => { if (!e.target.closest(".autocomplete")) $("#station-results").hidden = true; });
 
     $("#load-coords").addEventListener("click", loadCoordSite);
+    $("#import-load").addEventListener("click", doImport);
     $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
+    $("#btn-filter-attention").addEventListener("click", () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); });
+    $("#btn-copy-agent-prompt").addEventListener("click", copyAgentPrompt);
     $("#btn-run-auto").addEventListener("click", runAllAuto);
     $("#fld-date").addEventListener("change", save);
     $("#fld-maintenance").addEventListener("input", save);
@@ -667,7 +773,38 @@
       `${DATA.stations.length.toLocaleString()} Bureau sites · ${DATA.sources.length} sources · data ${DATA.meta.generated_utc ? DATA.meta.generated_utc.slice(0, 10) : ""}`;
     $("#foot-meta").textContent = `${DATA.stations.length.toLocaleString()} sites · ${DATA.sources.length} sources.`;
     $("#station-search").focus();
+    document.dispatchEvent(new CustomEvent("ess:ready")); // signals the optional agent module
   }
+
+  // ------------------------------------------------- integration API (agent.js)
+  // Minimal surface the optional BYOK agent module uses to read the site + its
+  // sources and write results into the same review/export state. If agent.js
+  // isn't loaded, none of this runs.
+  const VALID_STATUS = new Set(["found", "none", "failed", "manual", "unset"]);
+  window.ESS = {
+    ready: () => !!state.site,
+    site: () => state.site && { name: state.site.name, station_num: state.site.station_num, wmo: state.site.wmo,
+      state: state.site.state, delivery_group: state.site.delivery_group, facility_types: state.site.facility_types,
+      lat: state.site.lat, lon: state.site.lon },
+    sources: () => sourcesForSite().map((s) => ({
+      id: s.id, name: s.name, category: s.category, jurisdiction: s.jurisdiction, method: s.method,
+      internal: !!s.internal, url: buildUrl(s), what_to_find: s.what_to_find || "",
+      web_search: fillTemplate(s.web_search || ""), is_ala: !!(s.api && s.api.kind === "ala_biocache"),
+      no_result_means: s.no_result_means || "",
+    })),
+    setResult: (id, status, note, resultText) => {
+      if (!DATA.sources.find((x) => x.id === id) || !VALID_STATUS.has(status)) return false;
+      const f = state.findings[id] || (state.findings[id] = {});
+      f.status = status;
+      if (note != null) f.note = String(note);
+      if (resultText) f.result = { html: esc(String(resultText)).replace(/\n/g, "<br>"), ts: Date.now() };
+      save(); refreshCard(id); renderProgress(); renderReport();
+      return true;
+    },
+    queryAla: (radius) => alaQuery(state.site.lat, state.site.lon, radius || 10),
+    beginRun: () => { state.showAttention = false; renderAttention(); },
+    endRun: () => { state.showAttention = true; renderProgress(); },
+  };
 
   document.addEventListener("DOMContentLoaded", init);
 })();

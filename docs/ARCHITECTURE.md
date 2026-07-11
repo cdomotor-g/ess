@@ -74,6 +74,40 @@ through each source, when to use each status, the ALA API recipe, and the report
 format. The agent can reach sources a browser can't (server-side fetch, web
 search) and reason about page content.
 
+## Agent paths and the shared findings schema
+
+The tool is the **reviewer/exporter**; the agent is the **engine**. Two agent
+paths fill the same state, and the browser's own live checks (ALA) do too:
+
+```
+   Claude Code (file handoff)          BYOK in-browser agent (assets/agent.js)
+   resolve.py --template → fill        your key → api.anthropic.com direct;
+   → ess-findings/1 JSON → Import      server-side web_search/web_fetch (no CORS)
+            │                          + client tools query_ala / set_source_result
+            └───────────────┬───────────────────────┘
+                            ▼
+             app.js state.findings / state.report
+             (importFindings ‖ setResult ‖ live ALA check)
+                            ▼
+        review Manual/Failed  →  finalise wording  →  export (PDF / HTML / JSON)
+```
+
+**One schema ties it together — `ess-findings/1`:**
+`{ schema, generated, tool, site, sections[], collection_log[] }`, statuses
+`found|none|failed|manual|unset`. It is emitted by `app.js reportObject()`,
+scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
+— so a file the skill writes and a file the tool exports are interchangeable.
+
+**Integration seam.** `app.js` exposes a tiny `window.ESS` (`site()`,
+`sources()`, `setResult()`, `queryAla()`, `beginRun()`/`endRun()`). The optional
+`assets/agent.js` consumes only that surface — if it isn't loaded, nothing about
+the core tool changes. The BYOK agent holds the key in `localStorage`, calls
+`api.anthropic.com` directly (`anthropic-dangerous-direct-browser-access`), and
+runs a manual tool-use loop (server tools resolve inline; client tools
+`query_ala` / `set_source_result` the browser executes; `pause_turn` re-sends).
+`API_BASE` is a single constant so a future default-key proxy is a one-line swap.
+See [AGENT-MODE.md](AGENT-MODE.md).
+
 ## Data model
 
 ### `stations.json` — array of

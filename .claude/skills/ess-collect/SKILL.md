@@ -57,6 +57,9 @@ python .claude/skills/ess-collect/resolve.py --lat -25.0891 --lon 152.5489 --nam
 
 # add --json for a machine-readable payload (site + sources + epbc_matters + dropdowns)
 python .claude/skills/ess-collect/resolve.py --station "WOODGATE ALERT" --json
+
+# --template prints the empty ess-findings/1 skeleton you will fill in (see Step 3)
+python .claude/skills/ess-collect/resolve.py --station "WOODGATE ALERT" --template
 ```
 
 The site block it prints is the ESS header (station number, WMO, state, delivery
@@ -128,30 +131,50 @@ Read `totalRecords` and `facetResults`. Interpretation:
   records ≠ absence of species).
 - request errors → **FAILED**.
 
-## Step 3 — Produce the report
+## Step 3 — Produce the findings
 
-Output Markdown with these parts. Keep it tight and specific.
+You must produce **two** things: the machine-readable findings object (so it
+imports straight into the browser tool) and a short human-readable summary.
+
+### 3a. The findings JSON (required, `ess-findings/1`)
+
+Run `resolve.py --template` to get the empty skeleton, then fill it in — it is
+the same schema the browser tool imports and exports, so a filled template drops
+straight into **Import agent findings** for review and export:
+
+```
+python .claude/skills/ess-collect/resolve.py --station "WOODGATE ALERT" --template > findings.json
+```
+
+The skeleton already has the `site` block, every applicable source pre-listed in
+`collection_log` (with `status:"unset"`), and every proforma `section`. Your job:
+
+- For **each `collection_log` entry**: set `status` to `found` / `none` /
+  `failed` / `manual`, put the specifics in `note` (species names, listing IDs,
+  outbreak names, lease conditions), and — for anything you actually queried —
+  the raw result in `result_text`. Never leave a source `unset`.
+- For **each `section`**: set `choice` to the exact standardized statement from
+  `data/dropdowns.json` (the "known…" variant when that section's sources were
+  FOUND, else the "no known…" variant), and add any free-text in `note`. For the
+  `biosecurity` section, put the declaration text (from
+  `dropdowns.json.biosecurity_detail`) in `detail`.
+
+Emit the completed object as a fenced ```json block (and/or write it to a file)
+so it can be copied into the tool verbatim.
+
+### 3b. The human summary (required)
+
+A tight Markdown recap:
 
 1. **Header** — the resolved site block (name, station #, WMO, state, delivery
    group, facility, lat/long, assessment date).
-2. **Section findings**, in proforma order: Permits & Permissions · Biosecurity ·
-   Threatened Habitat · Threatened Flora · Threatened Fauna · Indigenous
-   Protected Areas · Heritage · Invasive Plants · Invasive Animals · Diseases &
-   Pathogens · Additional Information (PFAS / acid sulfate / locality). For each,
-   give a one-line finding and the **suggested standardized statement** from
-   `data/dropdowns.json` (use the exact wording — e.g. *"There are known
-   threatened plants at this site"* when the threatened checks were FOUND, else
-   the "no known" variant).
+2. **Section findings**, in proforma order, each a one-line finding + the chosen
+   standardized statement.
 3. **Collection log** — a table of every source: name · status
-   (FOUND/NONE/FAILED/MANUAL) · evidence or reason · link. This is the record
-   that proves the assessment was done and shows the gaps.
+   (FOUND/NONE/FAILED/MANUAL) · evidence or reason · link.
 4. **Outstanding manual checks** — bullet the MANUAL/FAILED items with their
-   aimed links so a human can finish them (PMST report, internal SharePoint,
-   interactive GIS portals).
-
-Optionally also emit the JSON findings object (same schema the browser tool
-exports: `site`, `sections`, `collection_log`) so results can be archived or
-loaded elsewhere.
+   aimed links so a human can finish them in the browser tool (PMST report,
+   internal SharePoint, interactive GIS portals).
 
 ### Suggesting the standardized statements
 

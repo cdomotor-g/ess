@@ -45,19 +45,24 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
 Your work is saved in the browser (localStorage) per site, so you can come back
 to it.
 
-### Use the skill
+### Let the agent do the collection
 
-In a Claude Code session in this repo:
+The `ess-collect` agent can research every source and fill the tool's dashboard
+for you. Two ways to run it — both produce the same `ess-findings/1` object and
+feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT-MODE.md)):
 
-> Run an ESS desktop assessment for WOODGATE ALERT
+- **File handoff (Claude Code).** In a session in this repo: *"Run an ESS for
+  WOODGATE ALERT"*. The skill outputs a completed findings JSON; paste it into
+  the tool's **Choose a site → Import agent findings** tab. No key in the
+  browser. Best for batches.
+- **BYOK in-browser (beta).** Click **🔑 Agent**, paste your **own** Anthropic
+  API key, and **Run full assessment**. The browser drives Claude directly
+  (Anthropic's server-side web search/fetch bypass CORS) and fills the dashboard
+  live. The key stays in your browser; ~a few cents per site.
 
-or
-
-> Do an ESS for lat -25.0891 lon 152.5489
-
-The `ess-collect` skill resolves the site, works through every source, and
-produces a findings report with a status for each. See
-[`.claude/skills/ess-collect/SKILL.md`](.claude/skills/ess-collect/SKILL.md).
+Either way, the tool then flags the **Manual** and **Failed** items still needing
+a human (interactive portals, internal SharePoint), you finish those, and export.
+See [`.claude/skills/ess-collect/SKILL.md`](.claude/skills/ess-collect/SKILL.md).
 
 ---
 
@@ -125,6 +130,8 @@ docs/                          Architecture, roadmap, how to add a source, mappi
 
 - [Architecture](docs/ARCHITECTURE.md) — how the pieces fit and the data model.
 - [Roadmap](docs/ROADMAP.md) — what's built, what's next, the automation backlog.
+- [Agent mode](docs/AGENT-MODE.md) — the file-handoff and BYOK in-browser agent
+  paths, key handling, and cost.
 - [Adding a source](docs/ADDING-A-SOURCE.md) — extend the registry (the main way
   this grows).
 - [Proforma mapping](docs/PROFORMA-MAPPING.md) — how tool output maps back to the

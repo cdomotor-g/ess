@@ -16,7 +16,7 @@ Usage:
 Paths default to the repo's data/ directory (three levels up from this file).
 """
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse, datetime, json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -107,6 +107,42 @@ def build(site, sources):
     return srcs
 
 
+def findings_template(site, sources, srcs):
+    """Emit the canonical ess-findings/1 skeleton for the agent to fill in.
+
+    Same schema the browser tool imports/exports (assets/app.js reportObject).
+    The agent sets each collection_log entry's status/note/result_text and each
+    section's choice/note, then returns the completed object.
+    """
+    today = datetime.date.today().isoformat()
+    sections = [
+        {"id": r["id"], "title": r["title"], "choice": "", "note": "",
+         "detail": ""}
+        for r in sources.get("report_sections", [])
+    ]
+    log = [
+        {"id": s["id"], "name": s["name"], "category": s["category"],
+         "jurisdiction": s["jurisdiction"], "url": s["url"],
+         "status": "unset", "note": "", "result_text": ""}
+        for s in srcs
+    ]
+    return {
+        "schema": "ess-findings/1",
+        "generated": today,
+        "tool": "ess-collect",
+        "site": {
+            "name": site["name"], "station_num": site.get("station_num", ""),
+            "wmo": site.get("wmo", ""), "state": site.get("state", ""),
+            "delivery_group": site.get("delivery_group", ""),
+            "facility_types": site.get("facility_types", []),
+            "lat": site["lat"], "lon": site["lon"],
+            "assessment_date": today, "site_maintenance": "",
+        },
+        "sections": sections,
+        "collection_log": log,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--station")
@@ -115,6 +151,8 @@ def main():
     ap.add_argument("--state")
     ap.add_argument("--name")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--template", action="store_true",
+                    help="emit the ess-findings/1 skeleton to fill in and import")
     a = ap.parse_args()
 
     stations = load("stations.json")
@@ -138,6 +176,11 @@ def main():
         ap.error("provide --station OR --lat/--lon")
 
     srcs = build(site, sources)
+
+    if a.template:
+        print(json.dumps(findings_template(site, sources, srcs), indent=2, ensure_ascii=False))
+        return
+
     payload = {"site": site, "sources": srcs, "epbc_matters": sources.get("epbc_matters", []),
                "dropdowns": load("dropdowns.json")}
 
