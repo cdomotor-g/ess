@@ -17,25 +17,33 @@ produce the same `ess-findings/1` object.
 
 ---
 
-## A. File handoff (agent runs in Claude Code)
+## A. File handoff (any external LLM — or Claude Code)
 
-Runs where an Anthropic credential already lives — no key in the browser.
+Runs the research outside the browser, then imports the result. No key in the
+browser.
 
-1. In the browser tool, load the site and click **📋 Agent prompt** to copy a
-   ready prompt (or just ask a Claude Code session in this repo:
-   *"Run an ESS for WOODGATE ALERT"*).
-2. The `ess-collect` skill resolves the site, works every source it can reach,
-   and outputs a completed `ess-findings/1` JSON (it fills the skeleton from
-   `resolve.py --template`).
+1. In the browser tool, load the site and click **📋 Copy prompt**. This copies
+   a complete, self-contained, **model-agnostic** prompt for that site — every
+   step, every applicable source (deep-linked to the location), the
+   standardized report wording, and a ready-to-fill `ess-findings/1` skeleton.
+   Paste it into whichever assistant you like (ChatGPT, Gemini, Claude,
+   Copilot…).
+   *Shortcut:* if you're already in a Claude Code session in this repo, the
+   copied prompt's top note lets you run the packaged `ess-collect` skill
+   instead (or just ask *"Run an ESS for WOODGATE ALERT"*); it fills the same
+   skeleton via `resolve.py --template`.
+2. The assistant works every source it can reach, assigns
+   `found` / `none` / `failed` / `manual` with evidence, and returns the
+   completed `ess-findings/1` JSON.
 3. Save that JSON and, in the browser tool, open **Choose a site → Import agent
    findings**, paste it (or pick the file), and **Import**.
 4. The dashboard fills with the agent's results; an attention banner flags the
    **Manual** and **Failed** items still needing a human. Finish those, then
    export.
 
-Best when: batches of sites, or you're already in Claude Code. The agent can't
-drive interactive portals (EPBC PMST) or log into SharePoint — those come back
-`manual` for you to finish in the browser.
+Best when: batches of sites, or you want to use an LLM you already pay for. No
+agent can drive interactive portals (EPBC PMST) or log into SharePoint — those
+come back `manual` for you to finish in the browser.
 
 ---
 

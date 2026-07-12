@@ -674,23 +674,13 @@
     r.collection_log.forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
     copy(lines.join("\n"));
   }
-  function copyAgentPrompt() {
-    const s = state.site;
-    const idpart = s.station_num ? `station ${s.station_num}` : "no station number";
-    copy(
-      `Run the ess-collect skill in this repo for ${s.name} (${idpart}, ${s.state || "?"}, ` +
-      `lat ${s.lat} lon ${s.lon}). Attempt every source you can reach, assign FOUND / NONE / ` +
-      `FAILED / MANUAL with evidence, and output the completed ess-findings/1 JSON ` +
-      `(fill in \`python .claude/skills/ess-collect/resolve.py --station "${s.name}" --template\`) ` +
-      `so I can import it into the ESS Workbench.`);
-  }
-
   // Build a complete, self-contained, model-agnostic prompt for the current
-  // site. Unlike copyAgentPrompt (which drives the in-repo ess-collect skill),
-  // this embeds every step, every applicable source aimed at the location, the
-  // standardized report wording, and a ready-to-fill ess-findings/1 skeleton —
-  // so a user can paste it into ANY LLM/assistant, do the research externally,
-  // and hand the JSON straight back into "Import agent findings".
+  // site. It embeds every step, every applicable source aimed at the location,
+  // the standardized report wording, and a ready-to-fill ess-findings/1
+  // skeleton — so a user can paste it into ANY LLM/assistant, do the research
+  // externally, and hand the JSON straight back into "Import agent findings".
+  // A short top note points Claude Code users at the packaged ess-collect skill
+  // as a shortcut (it produces the same schema).
   function buildFullPrompt() {
     const s = state.site;
     const date = ($("#fld-date") && $("#fld-date").value) || state.date || new Date().toISOString().slice(0, 10);
@@ -700,6 +690,7 @@
     const L = [];
 
     L.push(`# Environmental Site Summary (ESS) — desktop assessment`, ``);
+    L.push(`> Running Claude Code inside this project's repository? You can skip the manual research and run the packaged \`ess-collect\` skill instead (e.g. ask: "Run an ESS for ${s.name}"); it fills the same JSON described below. Otherwise, ignore this note and follow the prompt in any AI assistant.`, ``);
     L.push(`## Your task`);
     L.push(`You are an environmental desktop-research assistant. Carry out a desk-based Environmental Site Summary for the Australian site below. This is an office/desktop review only — do NOT arrange or assume a site visit. Use the public web pages listed here plus your own web browsing/search to establish what environmental, heritage and biosecurity matters affect the location, then return the single JSON object at the end so the findings can be imported back into the ESS Workbench tool.`);
     L.push(`This prompt is self-contained and model-agnostic: you need no special repository, plugin or API key — a web browser or web-search capability is enough. Work through every source, then produce the JSON.`, ``);
@@ -858,7 +849,6 @@
     $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
     $("#btn-filter-attention").addEventListener("click", () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); });
-    $("#btn-copy-agent-prompt").addEventListener("click", copyAgentPrompt);
     $("#btn-copy-prompt").addEventListener("click", copyFullPrompt);
     $("#btn-run-auto").addEventListener("click", runAllAuto);
     $("#fld-date").addEventListener("change", save);
