@@ -685,6 +685,119 @@
       `so I can import it into the ESS Workbench.`);
   }
 
+  // Build a complete, self-contained, model-agnostic prompt for the current
+  // site. Unlike copyAgentPrompt (which drives the in-repo ess-collect skill),
+  // this embeds every step, every applicable source aimed at the location, the
+  // standardized report wording, and a ready-to-fill ess-findings/1 skeleton —
+  // so a user can paste it into ANY LLM/assistant, do the research externally,
+  // and hand the JSON straight back into "Import agent findings".
+  function buildFullPrompt() {
+    const s = state.site;
+    const date = ($("#fld-date") && $("#fld-date").value) || state.date || new Date().toISOString().slice(0, 10);
+    const list = sourcesForSite();
+    const cats = (DATA.sourcesMeta && DATA.sourcesMeta.categories) || [];
+    const idpart = s.station_num ? `Bureau station ${s.station_num}` : "manual coordinate entry (no station number)";
+    const L = [];
+
+    L.push(`# Environmental Site Summary (ESS) — desktop assessment`, ``);
+    L.push(`## Your task`);
+    L.push(`You are an environmental desktop-research assistant. Carry out a desk-based Environmental Site Summary for the Australian site below. This is an office/desktop review only — do NOT arrange or assume a site visit. Use the public web pages listed here plus your own web browsing/search to establish what environmental, heritage and biosecurity matters affect the location, then return the single JSON object at the end so the findings can be imported back into the ESS Workbench tool.`);
+    L.push(`This prompt is self-contained and model-agnostic: you need no special repository, plugin or API key — a web browser or web-search capability is enough. Work through every source, then produce the JSON.`, ``);
+
+    L.push(`## The site`);
+    L.push(`- Station name: ${s.name}`);
+    L.push(`- Identifier: ${idpart}${s.wmo ? `, WMO ${s.wmo}` : ""}`);
+    L.push(`- State / territory: ${s.state || "unknown"}`);
+    if (s.delivery_group) L.push(`- Delivery group: ${s.delivery_group}`);
+    const fac = (s.facility_types && s.facility_types.length && s.facility_types.join(", ")) || s.primary_facility;
+    if (fac) L.push(`- Facility type(s): ${fac}`);
+    L.push(`- Latitude: ${s.lat}`);
+    L.push(`- Longitude: ${s.lon}`);
+    L.push(`- Assessment date: ${date}`, ``);
+
+    L.push(`## How to record each source`);
+    L.push(`Check every source in the list below. For each, choose one status and write a short evidence note:`);
+    L.push(`- **found** — the source shows a relevant matter at or near the site (a listed/threatened species or community, heritage place, protected/Indigenous area, declared weed or pest, disease outbreak, PFAS or contamination site, etc.). Say what it is and how close.`);
+    L.push(`- **none** — you were able to check and nothing relevant was found. (Each source has an "if nothing found" line explaining what that means.)`);
+    L.push(`- **failed** — you tried but could not complete the check (page unreachable, blocked, timed out, errored). Say what stopped you.`);
+    L.push(`- **manual** — the check needs a human: an interactive-only map/portal you cannot drive, an internal or login-only system, or a step like drawing a search box. Record the link and the exact steps so a person can finish it fast.`);
+    L.push(`Prefer a real answer over "manual" whenever the information is reachable on the open web. Use latitude ${s.lat}, longitude ${s.lon} to place the site precisely, and treat "near" as roughly within 10 km unless a source says otherwise.`, ``);
+
+    L.push(`## Sources to check (${list.length})`);
+    for (const cat of cats) {
+      const inCat = list.filter((x) => x.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
+      if (!inCat.length) continue;
+      L.push(``, `### ${cat.label}`);
+      inCat.forEach((src) => {
+        const flags = [src.jurisdiction === "national" ? "national" : (s.state || "state")];
+        if (src.internal) flags.push("internal / login-only");
+        if (src.method === "api") flags.push("live-data API");
+        else if (src.method === "manual") flags.push("interactive portal");
+        else if (src.method === "web_search") flags.push("web search");
+        L.push(``, `**${src.name}** _(${flags.join(", ")})_`);
+        L.push(`- Open: ${buildUrl(src)}`);
+        if (src.what_to_find) L.push(`- Find: ${src.what_to_find}`);
+        if (src.instructions) L.push(`- Steps: ${src.instructions}`);
+        if (src.id === "epbc-pmst" && DATA.sourcesMeta.epbc_matters)
+          L.push(`- Record which of these matter types are returned: ${DATA.sourcesMeta.epbc_matters.join("; ")}.`);
+        if (src.web_search) L.push(`- Web-search idea: "${fillTemplate(src.web_search)}"`);
+        if (src.no_result_means) L.push(`- If nothing found → \`none\`: ${src.no_result_means}`);
+        if (src.internal) L.push(`- Note: internal Bureau of Meteorology system — an external assistant cannot log in, so this is normally \`manual\` (record the link + steps for staff).`);
+      });
+    }
+    L.push(``);
+
+    L.push(`## Report wording — pick the exact standardized phrase`);
+    L.push(`For each report section, choose one phrase verbatim from its list (this is the wording the ESS proforma requires). If you are unsure, leave it blank and the tool will suggest one from your source findings.`);
+    REPORT_SECTIONS.forEach((sec) => {
+      const opts = sec.dropdown ? (DATA.dropdowns[sec.dropdown] || []) : [];
+      L.push(``, `**${sec.title}** (id: \`${sec.id}\`)`);
+      if (opts.length) opts.forEach((o) => L.push(`  - ${o}`));
+      else L.push(`  - (free text — summarise the relevant findings in the note)`);
+    });
+    L.push(``);
+
+    const skeleton = {
+      schema: "ess-findings/1",
+      tool: "external-llm",
+      site: {
+        name: s.name, station_num: s.station_num || "", wmo: s.wmo || "",
+        state: s.state || "", delivery_group: s.delivery_group || "",
+        facility_types: s.facility_types || [], lat: s.lat, lon: s.lon,
+        assessment_date: date, site_maintenance: "",
+      },
+      sections: REPORT_SECTIONS.map((sec) => ({ id: sec.id, title: sec.title, choice: "", note: "" })),
+      collection_log: list.map((src) => ({ id: src.id, name: src.name, url: buildUrl(src), status: "", note: "", result_text: "" })),
+    };
+
+    L.push(`## What to return`);
+    L.push(`Fill in the JSON object below and return **only** that object — no commentary, no markdown fences — so it can be pasted directly into the tool at "Choose a site → Import agent findings".`);
+    L.push(`Rules:`);
+    L.push(`- Keep every \`id\` exactly as given; do not add, remove or rename entries in \`collection_log\` or \`sections\`.`);
+    L.push(`- In \`collection_log\`, set \`status\` to one of: found, none, failed, manual. Put a one-line evidence summary in \`note\`, and any longer detail (counts, species names, distances, dates) in \`result_text\`.`);
+    L.push(`- In \`sections\`, set \`choice\` to one of that section's allowed phrases above (copied verbatim), or leave it "" to let the tool auto-suggest.`);
+    L.push(`- Leave the \`site\` block unchanged.`, ``);
+    L.push("```json");
+    L.push(JSON.stringify(skeleton, null, 2));
+    L.push("```");
+
+    return L.join("\n");
+  }
+
+  // Briefly flash a button to confirm a click/copy (see .btn.flash in styles.css).
+  function flashButton(btn) {
+    if (!btn) return;
+    btn.classList.remove("flash");
+    void btn.offsetWidth; // force reflow so the animation can restart on rapid clicks
+    btn.classList.add("flash");
+    btn.addEventListener("animationend", () => btn.classList.remove("flash"), { once: true });
+  }
+
+  function copyFullPrompt(e) {
+    copy(buildFullPrompt());
+    flashButton((e && e.currentTarget) || $("#btn-copy-prompt"));
+  }
+
   function doImport() {
     const text = $("#import-text").value.trim();
     const file = $("#import-file").files && $("#import-file").files[0];
@@ -746,6 +859,7 @@
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
     $("#btn-filter-attention").addEventListener("click", () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); });
     $("#btn-copy-agent-prompt").addEventListener("click", copyAgentPrompt);
+    $("#btn-copy-prompt").addEventListener("click", copyFullPrompt);
     $("#btn-run-auto").addEventListener("click", runAllAuto);
     $("#fld-date").addEventListener("change", save);
     $("#fld-maintenance").addEventListener("input", save);

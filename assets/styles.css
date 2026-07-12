@@ -115,6 +115,18 @@ textarea { resize: vertical; min-height: 62px; }
 .btn:disabled { opacity: .5; cursor: default; }
 .inline-check { font-size: 12.5px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 
+/* Click feedback: a quick flash used to confirm "copied to clipboard" */
+@keyframes btn-flash {
+  0%   { background: var(--accent); border-color: var(--accent); color: #fff; transform: scale(1.05); }
+  55%  { background: var(--accent); border-color: var(--accent); color: #fff; transform: scale(1); }
+  100% { background: transparent; border-color: var(--line); color: var(--ink); transform: scale(1); }
+}
+.btn.flash { animation: btn-flash .6s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes btn-flash { 0% { background: var(--accent); color: #fff; } 100% { background: transparent; color: var(--ink); } }
+  .btn.flash { animation-duration: .3s; }
+}
+
 /* ---------- summary grid ---------- */
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 26px; background: var(--surface-2); border-radius: 10px; padding: 14px 16px; }
 .summary-item { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
