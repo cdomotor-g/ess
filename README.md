@@ -51,10 +51,13 @@ The `ess-collect` agent can research every source and fill the tool's dashboard
 for you. Two ways to run it — both produce the same `ess-findings/1` object and
 feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT-MODE.md)):
 
-- **File handoff (Claude Code).** In a session in this repo: *"Run an ESS for
-  WOODGATE ALERT"*. The skill outputs a completed findings JSON; paste it into
-  the tool's **Choose a site → Import agent findings** tab. No key in the
-  browser. Best for batches.
+- **File handoff (any LLM).** Load the site and click **📋 Copy prompt** to copy
+  a complete, self-contained, model-agnostic prompt; paste it into any assistant
+  (ChatGPT, Gemini, Claude, Copilot…), then paste the JSON it returns into the
+  tool's **Choose a site → Import agent findings** tab. No key in the browser.
+  Best for batches. *(In a Claude Code session in this repo, the prompt's top
+  note lets you run the `ess-collect` skill instead — same JSON — or just ask
+  "Run an ESS for WOODGATE ALERT".)*
 - **BYOK in-browser (beta).** Click **🔑 Agent**, paste your **own** Anthropic
   API key, and **Run full assessment**. The browser drives Claude directly
   (Anthropic's server-side web search/fetch bypass CORS) and fills the dashboard
