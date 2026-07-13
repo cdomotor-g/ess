@@ -102,6 +102,22 @@
           </div>
         </div>
         <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
+
+        <div class="site-map-section" id="site-map-section">
+          <div class="map-head">
+            <label class="field-label" id="map-label">Location map <span class="opt">(satellite — auto-populated, carried through to the report &amp; export)</span></label>
+            <div class="map-controls">
+              <span class="map-presets" id="map-presets"><!-- preset buttons filled by JS --></span>
+              <label class="map-km-field" for="map-km">Side
+                <input id="map-km" type="number" min="1" max="2000" step="5" value="100" inputmode="numeric" />
+                <span>km</span>
+              </label>
+              <button class="btn tiny" id="btn-map-refresh" title="Reload the satellite map for this location">↻ Refresh</button>
+            </div>
+          </div>
+          <figure class="site-map" id="site-map"><!-- filled by JS: map image / loading / error --></figure>
+        </div>
+
         <div class="summary-editable">
           <div>
             <label class="field-label" for="fld-date">Assessment date</label>
