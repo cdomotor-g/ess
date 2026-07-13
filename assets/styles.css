@@ -144,6 +144,12 @@ textarea { resize: vertical; min-height: 62px; }
 
 /* ---------- dashboard ---------- */
 .dash-note { font-size: 13px; color: var(--ink-soft); margin: 0 0 14px; }
+.status-filter-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }
+.status-filter-bar .sfb-label { font-size: 12px; color: var(--ink-soft); margin-right: 2px; }
+.sfb-btn.on[data-status=found] { background: var(--found-bg); border-color: var(--found); color: var(--found); }
+.sfb-btn.on[data-status=none] { background: var(--none-bg); border-color: var(--none); color: var(--none); }
+.sfb-btn.on[data-status=failed] { background: var(--failed-bg); border-color: var(--failed); color: var(--failed); }
+.sfb-btn.on[data-status=manual] { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
 .group { margin-bottom: 22px; }
 .group-head { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
 .group-head h3 { font-size: 14.5px; }
@@ -157,6 +163,9 @@ textarea { resize: vertical; min-height: 62px; }
 .src.status-unset { border-left: 4px solid var(--line); }
 .src-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .src-name { font-weight: 650; }
+.src-num { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+  padding: 0 5px; margin-right: 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-soft);
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: middle; }
 .src-name .tag { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 5px; margin-left: 8px; vertical-align: middle; }
 .tag.api { background: var(--found-bg); color: var(--found); }
 .tag.internal { background: var(--manual-bg); color: var(--manual); }
