@@ -241,9 +241,9 @@ a.photo-credit:hover { text-decoration: underline; }
 .map-km-field input { width: 74px; padding: 6px 8px; }
 .site-map { margin: 0; }
 .map-frame { position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
-  background: var(--surface-2); aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center; }
+  background: var(--surface-2); aspect-ratio: 3 / 1; display: flex; align-items: center; justify-content: center; }
 .map-frame .map-img { display: block; width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
-.map-frame.is-loading, .map-frame.is-error { aspect-ratio: 16 / 7; }
+.map-frame.is-loading, .map-frame.is-error { aspect-ratio: 3 / 1; }
 .site-map .map-cap { display: block; font-size: 11.5px; color: var(--ink-soft); margin: 6px 2px 0; }
 .map-msg { text-align: center; color: var(--ink-soft); font-size: 13px; padding: 16px; }
 .map-msg p { margin: 0 0 6px; }
