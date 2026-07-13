@@ -62,7 +62,10 @@ top bar.
   - **query_ala** — a client-side tool the browser runs against the Atlas of
     Living Australia (which is CORS-friendly) for structured conservation data.
   - **set_source_result** — the browser applies each result to the dashboard as
-    the agent works, so cards fill live.
+    the agent works, so cards fill live. For species/subject sources it marks
+    `found`, the agent also passes `image_subjects` (the species/subjects it
+    identified); the browser auto-fetches a labelled Wikipedia reference photo for
+    each onto that card (gated by the "Auto-fetch reference images" toggle).
 - When every source has a result, it stops. You review Manual/Failed and export.
 
 ### The key
@@ -105,4 +108,10 @@ one schema is why both agent paths and the reviewer UI interoperate.
 optional `images: [{ caption, data_url, credit?, source_url? }]` — photos
 attached in the browser tool (uploaded, or reference images auto-sourced from
 Wikipedia, which also set `credit`/`source_url`); agents don't produce these,
-but re-importing an exported file preserves them.
+but re-importing an exported file preserves them. A species/subject
+`collection_log[]` entry may also carry `image_subjects: string[]` — the
+identifiable species/subjects the agent found. It isn't photo data: on import
+(and during a live BYOK run) the browser tool fetches a labelled Wikipedia
+reference photo for each name into that card. If it's omitted, the tool falls
+back to extracting subjects from `note`/`result_text`. Backward compatible —
+older files simply have no `image_subjects`.

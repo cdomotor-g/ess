@@ -37,9 +37,11 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
 2. The site summary auto-populates (station #, WMO, state, delivery group,
    facility, lat/long) — this replicates the workbook's VLOOKUP autofill. A
    **satellite locator map** is generated automatically with a pin on the
-   station; pick how many km it spans (default 100) and it re-renders. Add
-   **station photos** here — paste from the clipboard, drag a file, or use the
-   file picker. The map and photos travel with the report and every export.
+   station; pick how many km it spans (default 100) and it re-renders. Toggle
+   **Roads & labels** to overlay road and locality/place names on the imagery
+   (on by default). Add **station photos** here — paste from the clipboard, drag
+   a file, or use the file picker. The map and photos travel with the report and
+   every export.
 3. Work down the **collection dashboard**. Each source opens aimed at the site.
    Hit **Check live** on the Atlas of Living Australia card; set a result on the
    rest: Found / Nothing found / Search failed / Manual. Sources for weeds,
@@ -47,7 +49,11 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
    dropzone — attach evidence when a check comes back **Found**. On the species
    cards (weeds, feral animals, disease, threatened species) you can also type a
    name and hit **🔎 Fetch image** to pull a labelled reference photo straight
-   from Wikipedia — no hunting for one — with its licensing credit attached.
+   from Wikipedia — no hunting for one — with its licensing credit attached. Or
+   hit **✨ Auto from notes** and the tool reads the species/subjects out of that
+   card's findings text and fetches a photo for each; with **Auto-fetch reference
+   images** on (top of the dashboard, default on) this also happens as you finish
+   editing a card, and automatically on **Import** and during agent runs.
 4. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Export to **Print/PDF**,
    **HTML**, or **JSON** — photos travel with the export (embedded, so the
