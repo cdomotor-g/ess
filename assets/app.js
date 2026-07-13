@@ -468,6 +468,19 @@
     });
   }
 
+  // Split a pasted "lat, lon" pair into its two parts. Accepts any mix of
+  // commas and/or whitespace as the separator (e.g. "-25.089111, 152.5489",
+  // "-25.089111,152.5489" or "-25.089111  152.5489"). Returns null unless the
+  // paste is exactly two numeric tokens, so single-value pastes fall through
+  // to the browser's normal behaviour.
+  function splitLatLonPaste(raw) {
+    if (!raw) return null;
+    const parts = String(raw).trim().split(/[\s,]+/).filter(Boolean);
+    if (parts.length !== 2) return null;
+    if (!isFinite(Number(parts[0])) || !isFinite(Number(parts[1]))) return null;
+    return { lat: parts[0], lon: parts[1] };
+  }
+
   function loadCoordSite() {
     const lat = parseFloat($("#in-lat").value), lon = parseFloat($("#in-lon").value);
     if (isNaN(lat) || isNaN(lon)) { alert("Enter a valid latitude and longitude."); return; }
@@ -1588,6 +1601,20 @@
     document.addEventListener("click", (e) => { if (!e.target.closest(".autocomplete")) $("#station-results").hidden = true; });
 
     $("#load-coords").addEventListener("click", loadCoordSite);
+    // Pasting a combined "lat, lon" into either coordinate box splits the pair
+    // across both boxes, stripping the comma / spaces automatically.
+    ["#in-lat", "#in-lon"].forEach((sel) => {
+      const input = $(sel);
+      if (!input) return;
+      input.addEventListener("paste", (e) => {
+        const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+        const pair = splitLatLonPaste(text);
+        if (!pair) return;
+        e.preventDefault();
+        $("#in-lat").value = pair.lat;
+        $("#in-lon").value = pair.lon;
+      });
+    });
     $("#import-load").addEventListener("click", doImport);
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
     const mapKmInput = $("#map-km");
