@@ -102,6 +102,7 @@ object the browser tool imports and exports, and that `resolve.py --template`
 scaffolds. Statuses: `found` / `none` / `failed` / `manual` / `unset`. Keeping
 one schema is why both agent paths and the reviewer UI interoperate.
 `site` and each `sections[]`/`collection_log[]` entry may also carry an
-optional `images: [{ caption, data_url }]` — photos attached in the browser
-tool; agents don't produce these, but re-importing an exported file preserves
-them.
+optional `images: [{ caption, data_url, credit?, source_url? }]` — photos
+attached in the browser tool (uploaded, or reference images auto-sourced from
+Wikipedia, which also set `credit`/`source_url`); agents don't produce these,
+but re-importing an exported file preserves them.

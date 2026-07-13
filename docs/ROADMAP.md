@@ -16,6 +16,11 @@ slice. Each backlog item names the files to touch and how to verify.
   Living Australia check, per-source Found/None/Failed/Manual, report builder
   with standardized wording, export to Print/HTML/JSON, localStorage
   persistence. Static → GitHub Pages.
+- **Photo evidence + auto-sourced reference images** — paste/drag/file-pick
+  station and per-source evidence photos, plus a one-click **Fetch image** on the
+  species cards (weeds, feral animals, disease, threatened) that pulls a labelled
+  reference photo from Wikipedia with licensing attribution. All photos are
+  embedded as data URLs, so they travel into the report and every export.
 - **Agent skill** — `ess-collect` with a deterministic `resolve.py` helper
   (incl. `--template` → the `ess-findings/1` skeleton) and a full playbook,
   emitting the same status taxonomy + JSON.

@@ -42,7 +42,10 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
    Hit **Check live** on the Atlas of Living Australia card; set a result on the
    rest: Found / Nothing found / Search failed / Manual. Sources for weeds,
    pests, disease, threatened species and biosecurity get their own photo
-   dropzone — attach evidence when a check comes back **Found**.
+   dropzone — attach evidence when a check comes back **Found**. On the species
+   cards (weeds, feral animals, disease, threatened species) you can also type a
+   name and hit **🔎 Fetch image** to pull a labelled reference photo straight
+   from Wikipedia — no hunting for one — with its licensing credit attached.
 4. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Export to **Print/PDF**,
    **HTML**, or **JSON** — photos travel with the export (embedded, so the
