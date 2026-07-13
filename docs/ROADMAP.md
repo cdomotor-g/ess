@@ -16,11 +16,22 @@ slice. Each backlog item names the files to touch and how to verify.
   Living Australia check, per-source Found/None/Failed/Manual, report builder
   with standardized wording, export to Print/HTML/JSON, localStorage
   persistence. Static → GitHub Pages.
+- **Satellite locator map + reference overlays** — an auto-generated Esri World
+  Imagery locator (pinned, per-site km span) with optional road + locality/place
+  overlays composited on top (default on, toggleable), baked into a self-contained
+  exportable JPEG.
 - **Photo evidence + auto-sourced reference images** — paste/drag/file-pick
   station and per-source evidence photos, plus a one-click **Fetch image** on the
   species cards (weeds, feral animals, disease, threatened) that pulls a labelled
   reference photo from Wikipedia with licensing attribution. All photos are
   embedded as data URLs, so they travel into the report and every export.
+- **Automatic reference-image sourcing** — the same Wikipedia pipeline runs
+  hands-free: an **Auto from notes** button (and note-blur) extracts species/
+  subjects from a card's free-text findings, and **imports + live agent runs**
+  fetch photos from the agent's `image_subjects` (or extracted text). Extraction
+  is high-precision (curated lists + scientific binomials only); a global toggle
+  governs it. Schema: optional `image_subjects[]` on species `collection_log`
+  entries.
 - **Agent skill** — `ess-collect` with a deterministic `resolve.py` helper
   (incl. `--template` → the `ess-findings/1` skeleton) and a full playbook,
   emitting the same status taxonomy + JSON.
@@ -51,8 +62,9 @@ slice. Each backlog item names the files to touch and how to verify.
       in build output + `data/meta.json`.
 - [ ] **Adjustable ALA radius** in the UI (currently 10 km). *Files:*
       `assets/app.js` (`runAla`), a small control near the ALA card.
-- [ ] **Map preview** of the site + buffer (Leaflet from a self-hosted tile or a
-      static image). Keep it dependency-free / offline-friendly.
+- [x] **Map preview** of the site — done: a dependency-free satellite locator
+      (Esri tiles stitched on a canvas) with road/locality overlays, in the site
+      summary + report. A drawn search *buffer* ring could still be added.
 - [ ] **Batch mode** for the skill: take a list of stations and emit one report
       each. *Files:* `.claude/skills/ess-collect/` (a loop wrapper).
 

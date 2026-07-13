@@ -153,6 +153,13 @@ The skeleton already has the `site` block, every applicable source pre-listed in
   `failed` / `manual`, put the specifics in `note` (species names, listing IDs,
   outbreak names, lease conditions), and — for anything you actually queried —
   the raw result in `result_text`. Never leave a source `unset`.
+- For **species/subject entries** (invasive plants, invasive animals, disease,
+  threatened — they have an `image_subjects` array in the skeleton) that you mark
+  `found`: list the identifiable species/subject names in `image_subjects`
+  (common or scientific, e.g. `["Gamba grass", "Phytophthora cinnamomi"]`). On
+  import the browser tool auto-fetches a labelled Wikipedia reference photo for
+  each, so a reviewer sees what they're looking for. Leave it `[]` for
+  none/failed/manual or where you can't name the subject.
 - For **each `section`**: set `choice` to the exact standardized statement from
   `data/dropdowns.json` (the "known…" variant when that section's sources were
   FOUND, else the "no known…" variant), and add any free-text in `note`. For the

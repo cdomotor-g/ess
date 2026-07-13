@@ -75,7 +75,19 @@ Vanilla JS, no dependencies, no build. It:
   photo, plus a licensing `credit` + `source_url`), and attaches it to the card
   — so a user doesn't have to go and find one. Runs entirely in the user's
   browser (MediaWiki returns anonymous CORS; `upload.wikimedia.org` allows the
-  cross-origin canvas read); network/CORS failures are non-fatal;
+  cross-origin canvas read); network/CORS failures are non-fatal. The same
+  pipeline runs **automatically**: an "Auto from notes" button (and note-blur,
+  when enabled) scans a card's free-text findings for subjects and fetches a
+  photo for each; imports and live agent runs do the same from `image_subjects`
+  (or extracted text). Extraction is deliberately high-precision — only curated
+  reference-list names and scientific binomials, never bare capitalised words —
+  so a wrong photo isn't attached; a global toggle (default on) governs it;
+- renders the auto **satellite locator map** by stitching keyless Esri World
+  Imagery tiles onto a canvas with a pin, and (default on, toggleable) composites
+  transparent Esri road + locality/place **reference overlays** on top — same
+  host/CORS as the imagery, so the result stays a self-contained, exportable
+  JPEG. The chosen span (km) and the labels toggle persist per site and travel
+  into the report + exports;
 - persists per-site state (including photos) in `localStorage`;
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three.
@@ -115,7 +127,14 @@ scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
 browser tool (uploaded photos, or reference images auto-sourced from Wikipedia,
 which also set `credit`/`source_url`; agents don't attach photos); re-importing
 a previously exported file restores them (the `source_url` link is constrained
-to `http(s)` on import).
+to `http(s)` on import). Each **species/subject** `collection_log[]` entry
+(invasive plants/animals, disease, threatened) may also carry an optional
+`image_subjects: string[]` — the identifiable species/subjects an agent found.
+It's a *hint*, not stored photo data: on import (and during a live agent run) the
+browser tool fetches a labelled Wikipedia reference photo for each name and adds
+it to that card's `images`. When it's absent, the tool falls back to extracting
+subjects from the entry's `note`/`result_text`. Auto-fetch is gated by a
+tool-side toggle (default on) and never overwrites existing photos.
 
 **Integration seam.** `app.js` exposes a tiny `window.ESS` (`site()`,
 `sources()`, `setResult()`, `queryAla()`, `beginRun()`/`endRun()`). The optional

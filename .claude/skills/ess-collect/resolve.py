@@ -107,12 +107,21 @@ def build(site, sources):
     return srcs
 
 
+# Categories whose cards show reference photos — the browser tool auto-fetches a
+# labelled Wikipedia image per identified subject, so their log entries carry an
+# `image_subjects` hint for the agent to fill (see assets/app.js).
+WIKI_IMAGE_CATEGORIES = {"invasive_plants", "invasive_animals", "disease", "threatened"}
+
+
 def findings_template(site, sources, srcs):
     """Emit the canonical ess-findings/1 skeleton for the agent to fill in.
 
     Same schema the browser tool imports/exports (assets/app.js reportObject).
     The agent sets each collection_log entry's status/note/result_text and each
-    section's choice/note, then returns the completed object.
+    section's choice/note, then returns the completed object. Species/subject
+    entries also carry an `image_subjects` list: fill it with the identifiable
+    species/subject names when the entry is `found` and the tool auto-fetches a
+    reference photo for each on import.
     """
     today = datetime.date.today().isoformat()
     sections = [
@@ -120,12 +129,14 @@ def findings_template(site, sources, srcs):
          "detail": ""}
         for r in sources.get("report_sections", [])
     ]
-    log = [
-        {"id": s["id"], "name": s["name"], "category": s["category"],
-         "jurisdiction": s["jurisdiction"], "url": s["url"],
-         "status": "unset", "note": "", "result_text": ""}
-        for s in srcs
-    ]
+    log = []
+    for s in srcs:
+        entry = {"id": s["id"], "name": s["name"], "category": s["category"],
+                 "jurisdiction": s["jurisdiction"], "url": s["url"],
+                 "status": "unset", "note": "", "result_text": ""}
+        if s["category"] in WIKI_IMAGE_CATEGORIES:
+            entry["image_subjects"] = []
+        log.append(entry)
     return {
         "schema": "ess-findings/1",
         "generated": today,

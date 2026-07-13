@@ -27,6 +27,15 @@
     threatened: "e.g. Koala, Wollemi pine…",
   };
 
+  // Global preference: auto-source reference photos for the species/subjects
+  // identified in a card's findings (from note edits, imports, and agent runs).
+  // Persisted in localStorage; default on. Auto-fetch only ever *adds* images —
+  // the user can delete any, and the manual "Fetch image" field always works.
+  const LS_AUTO_IMAGES = "ess-workbench:v1:auto-images";
+  const autoImagesOn = () => { try { return localStorage.getItem(LS_AUTO_IMAGES) !== "0"; } catch (_) { return true; } };
+  const setAutoImagesPref = (on) => { try { localStorage.setItem(LS_AUTO_IMAGES, on ? "1" : "0"); } catch (_) {} };
+  const MAX_AUTO_IMAGES_PER_CARD = 3; // cap per source so a wordy note can't spam fetches
+
   // ---------------------------------------------------------------- site map
   // A satellite locator map is auto-generated for every site: tiles are fetched
   // from Esri World Imagery (keyless, CORS-enabled), stitched onto a canvas with
@@ -42,10 +51,21 @@
   const MAP_TILE_TIMEOUT = 9000;   // per-tile load timeout (ms)
   const MERCATOR_M_PER_PX0 = 156543.03392; // ground metres/pixel at zoom 0, equator
   const MAP_ATTRIB = "Imagery © Esri, Maxar, Earthstar Geographics";
+  const MAP_REF_ATTRIB = "Roads & places © Esri, HERE, Garmin"; // credit for the overlay layers
   // Esri World Imagery tiled basemap — URL order is /{z}/{y}/{x}. Sends
   // Access-Control-Allow-Origin, so tiles fetched with crossOrigin stay
   // canvas-exportable (toDataURL won't taint).
   const mapTileUrl = (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  // Transparent Esri "reference" overlays on the SAME host/CDN as the imagery
+  // above — so they carry the identical CORS headers and stay canvas-exportable.
+  // World_Transportation draws roads/rail; World_Boundaries_and_Places draws
+  // locality/place labels and admin boundaries. Composited over the imagery (in
+  // this order, labels last so text sits on top) when the "Roads & labels"
+  // toggle is on, giving the satellite locator readable road + place context.
+  const MAP_REF_LAYERS = [
+    (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/${z}/${y}/${x}`,
+    (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`,
+  ];
 
   // Rough state bounding boxes (mirrors build/build_data.py). Heuristic only —
   // user can override with the State selector. Most-specific first.
@@ -74,7 +94,8 @@
     report: {},        // sectionId -> { choice, note }
     siteImages: [],    // [{id, dataUrl, caption, ts}] — general station photos
     mapKm: MAP_DEFAULT_KM, // satellite map side length (km across)
-    mapImage: null,    // { dataUrl, km, zoom, lat, lon, ts } — generated locator map (persisted, exported)
+    mapLabels: true,   // overlay roads + locality/place labels on the imagery
+    mapImage: null,    // { dataUrl, km, zoom, labels, lat, lon, ts } — generated locator map (persisted, exported)
     mapStatus: "idle", // transient: idle | loading | ready | error (not persisted)
     mapError: "",      // transient: last map-generation error message
     date: "",
@@ -310,6 +331,163 @@
     toast(`Added “${found.title}”`);
   }
 
+  // -------------------------------------------------- subject extraction (auto)
+  // The findings fields are free text, so pulling subjects out of them is
+  // necessarily heuristic. We keep it HIGH-PRECISION so a wrong photo is never
+  // attached to a government report, accepting only two unambiguous signals:
+  //   (a) names from the curated reference lists (weeds, notable diseases), and
+  //   (b) scientific binomials — "Genus species" (e.g. Phytophthora cinnamomi),
+  //       incl. an optional infraspecific epithet (subsp./var./f.).
+  // Generic Capitalised words are deliberately NOT harvested (place names,
+  // headings, sentence starts produce too many false positives). Where the agent
+  // supplies explicit `image_subjects`, those are used directly and this is only
+  // the fallback. Callers pass the source category to scope the reference list.
+  const DISEASE_TERMS = [
+    "Myrtle rust", "Phytophthora dieback", "Phytophthora cinnamomi", "Austropuccinia psidii",
+    "Chytrid fungus", "Panama disease", "Fire blight", "Ceratocystis", "Chalara", "Ceratocystis wilt",
+  ];
+  // "Genus species" with an optional "subsp./var./ssp./f. epithet" tail.
+  const BINOMIAL_RE = /\b([A-Z][a-z]{2,})\s+([a-z]{3,})(?:\s+(?:subsp|var|ssp|f)\.?\s+([a-z]{3,}))?\b/g;
+  // Reject a candidate whose leading word is a sentence-opener/status/qualifier
+  // word, or whose second word is a generic report/admin noun — so "Local area",
+  // "No records", "Status classes", "Recent surveys", "Delivery group" don't
+  // become fake species, while real two-word names ("Feral pig", "Cane toad",
+  // "Phytophthora cinnamomi") survive. Deliberately conservative toward rejection.
+  const SUBJECT_STOP_LEAD = new Set(("the this that these those there a an and or but of in at on near far no not none nil " +
+    "found known listed local locally site sites status record records report reports species specie state national " +
+    "within around data note notes source sources result results search map maps tool tools protected threatened " +
+    "vulnerable endangered critically declared restricted prohibited occurrence occurrences several multiple recent " +
+    "numerous various many some all any two three no-known").split(" "));
+  const SUBJECT_STOP_TAIL = new Set(("area areas site sites record records species specie status class classes conservation " +
+    "tool tools search report reports map maps list lists data note notes result results level levels zone zones " +
+    "matter matters place places within around near group groups officer officers survey surveys visit visits " +
+    "inspection council park parks forest forests region regions team network authority department register " +
+    "permit permits condition conditions summary section sections project projects program programs animal animals " +
+    "plant plants pest pests weed weeds population populations community communities habitat habitats " +
+    // common verbs/participles/adjectives that follow a noun in findings text, so
+    // a real genus + English word ("Parthenium recorded") isn't read as a binomial
+    "recorded observed found noted present absent detected confirmed seen reported identified mapped sighted " +
+    "occurs occurring located situated known likely possible probable nearby adjacent common abundant widespread " +
+    "established naturalised naturalized listed").split(" "));
+
+  function extractSubjects(category, text) {
+    if (!text || !WIKI_IMAGE_CATEGORIES.has(category)) return [];
+    const out = [], seen = new Set();
+    const add = (name) => { const k = name.toLowerCase(); if (name && !seen.has(k)) { seen.add(k); out.push(name); } };
+    const lower = text.toLowerCase();
+
+    // (a) curated reference-list names for the category
+    const ref = category === "invasive_plants" ? DATA.weeds
+      : category === "disease" ? DISEASE_TERMS : [];
+    ref.forEach((name) => { if (name && lower.includes(name.toLowerCase())) add(name); });
+
+    // (b) scientific binomials anywhere in the text
+    let m; BINOMIAL_RE.lastIndex = 0;
+    while ((m = BINOMIAL_RE.exec(text))) {
+      if (SUBJECT_STOP_LEAD.has(m[1].toLowerCase()) || SUBJECT_STOP_TAIL.has(m[2].toLowerCase())) continue;
+      add(m[3] ? `${m[1]} ${m[2]} ${m[3]}` : `${m[1]} ${m[2]}`);
+    }
+    return out.slice(0, MAX_AUTO_IMAGES_PER_CARD * 2); // a little headroom for dedupe/misses
+  }
+
+  // Auto-source reference photos for a list of subject names into a source card,
+  // skipping any already attached (by term or resolved article title) and capping
+  // the count. Best-effort per term (a miss/blocked image is swallowed). Renders
+  // once at the end. Returns the number of images added.
+  //
+  // Serialised per source: the blur-triggered run and the button (or import + a
+  // stray blur) can fire together, and each would otherwise snapshot the same
+  // "already have" set and fetch every subject twice. A second concurrent call
+  // for the same source is a no-op until the first finishes.
+  const autoFetchInFlight = new Set();
+  async function autoFetchImages(sourceId, terms, opts = {}) {
+    terms = (terms || []).map((t) => String(t).trim()).filter(Boolean);
+    if (!terms.length || autoFetchInFlight.has(sourceId)) return 0;
+    autoFetchInFlight.add(sourceId);
+    const site = state.site; // guard against a site switch mid-fetch (see addSiteImages)
+    const f = state.findings[sourceId] || (state.findings[sourceId] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    if (!f.images) f.images = [];
+    const have = new Set(f.images.map((im) => (im.caption || "").toLowerCase()));
+    const cap = opts.max || MAX_AUTO_IMAGES_PER_CARD;
+    let added = 0;
+    try {
+      for (const term of terms) {
+        if (added >= cap) break;
+        if (have.has(term.toLowerCase())) continue;
+        try {
+          const found = await wmFindLeadImage(term);
+          if (!found || have.has((found.title || "").toLowerCase())) continue;
+          const dataUrl = await wmImageToDataUrl(found.imageUrl);
+          const credit = await wmImageCredit(found.fileTitle);
+          if (state.site !== site) return added; // superseded — drop silently
+          f.images.push({
+            id: newImgId(), dataUrl, caption: found.title,
+            credit: credit ? `Wikipedia · ${credit}` : "Source: Wikipedia",
+            source_url: found.pageUrl, ts: Date.now(), auto: true,
+          });
+          have.add((found.title || "").toLowerCase()); have.add(term.toLowerCase());
+          added++;
+        } catch (_) { /* best-effort per term */ }
+      }
+    } finally {
+      autoFetchInFlight.delete(sourceId);
+    }
+    if (added && state.site === site) { save(); refreshCard(sourceId); renderReport(); }
+    return added;
+  }
+
+  // Task-2 path: scan THIS card's own note + result text for subjects and fetch a
+  // reference photo for each new one. Triggered by the card's "Auto-fetch" button
+  // and (when the global preference is on) when the note field loses focus.
+  function findingText(f) {
+    if (!f) return "";
+    const resultText = f.result && f.result.html ? f.result.html.replace(/<[^>]+>/g, " ") : "";
+    return [f.note || "", resultText].filter(Boolean).join(" ");
+  }
+  async function autoFetchFromNotes(sourceId, btn, quiet) {
+    const src = DATA.sources.find((s) => s.id === sourceId);
+    if (!src || !WIKI_IMAGE_CATEGORIES.has(src.category)) return;
+    const terms = extractSubjects(src.category, findingText(state.findings[sourceId]));
+    if (!terms.length) { if (!quiet) toast("No species/subject names detected in the notes yet."); return; }
+    const orig = btn ? btn.innerHTML : "";
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Fetching…`; }
+    try {
+      const n = await autoFetchImages(sourceId, terms);
+      // On a quiet (blur-triggered) run, only speak up when we actually added
+      // something; the explicit button always reports the outcome.
+      if (n) toast(`Added ${n} reference image${n > 1 ? "s" : ""}.`);
+      else if (!quiet) toast("No new reference images found for the detected names.");
+    } finally {
+      if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = orig; }
+    }
+  }
+
+  // Task-3 path: after a source is resolved by the API/agent (live BYOK run, the
+  // ALA check, or an import), auto-source reference photos for a species card
+  // that came back FOUND and has no evidence yet — using the agent's explicit
+  // `image_subjects` when given, else subjects extracted from the finding text.
+  // Never overwrites existing photos; silent + best-effort.
+  function maybeAutoFetchForSource(id, imageSubjects) {
+    if (!autoImagesOn()) return;
+    const src = DATA.sources.find((s) => s.id === id);
+    if (!src || !WIKI_IMAGE_CATEGORIES.has(src.category)) return;
+    const f = state.findings[id];
+    if (!f || f.status !== STATUS.FOUND || (f.images && f.images.length)) return;
+    let terms = Array.isArray(imageSubjects) ? imageSubjects : [];
+    if (!terms.length) terms = extractSubjects(src.category, findingText(f));
+    if (terms.length) autoFetchImages(id, terms);
+  }
+
+  // Sweep an imported collection_log, kicking off an auto-fetch per species card
+  // (honours each entry's optional `image_subjects`). Runs after the workspace is
+  // rendered so cards fill in as their photos arrive.
+  function autoFetchAfterImport(collectionLog) {
+    if (!autoImagesOn()) return;
+    (collectionLog || []).forEach((c) => {
+      if (c && c.id) maybeAutoFetchForSource(c.id, Array.isArray(c.image_subjects) ? c.image_subjects : null);
+    });
+  }
+
   // Editable thumbnail (remove button + caption field) — used in the picker galleries.
   // Auto-sourced images (from Wikipedia) also carry a read-only `credit` line so
   // the licensing attribution stays attached to the photo everywhere it appears.
@@ -517,6 +695,7 @@
     state.report = {};
     state.siteImages = [];
     state.mapKm = MAP_DEFAULT_KM;
+    state.mapLabels = true;
     state.mapImage = null;
     state.mapStatus = "idle";
     state.mapError = "";
@@ -534,6 +713,7 @@
     renderSummary();
     renderSiteImages();
     if ($("#map-km")) $("#map-km").value = state.mapKm;
+    if ($("#map-labels")) $("#map-labels").checked = state.mapLabels;
     renderMapPresets();
     ensureSiteMap();
     renderDashboard();
@@ -567,8 +747,9 @@
     // auto-generate for the imported coordinates.
     const impMap = si.map && (si.map.data_url || si.map.dataUrl);
     state.mapKm = (si.map && +si.map.km) || MAP_DEFAULT_KM;
+    state.mapLabels = !si.map || si.map.labels !== false; // default on unless the file says otherwise
     state.mapImage = (impMap && DATA_IMG_RE.test(impMap))
-      ? { dataUrl: impMap, km: (+si.map.km) || MAP_DEFAULT_KM, zoom: si.map.zoom || 0, lat, lon, ts: Date.now() }
+      ? { dataUrl: impMap, km: (+si.map.km) || MAP_DEFAULT_KM, zoom: si.map.zoom || 0, labels: state.mapLabels, lat, lon, ts: Date.now() }
       : null;
     state.mapStatus = state.mapImage ? "ready" : "idle";
     state.mapError = "";
@@ -590,6 +771,7 @@
     state.showAttention = true; // surface what the agent left for the human
     renderWorkspace();
     save();
+    autoFetchAfterImport(json.collection_log); // async, best-effort (Task 3)
   }
 
   // ---------------------------------------------------------------- summary
@@ -637,8 +819,9 @@
 
   // Load one tile as a CORS-clean image (so the canvas stays exportable). Resolves
   // to the image, or null on error/timeout/out-of-range — a few missing tiles just
-  // leave the neutral backdrop rather than failing the whole map.
-  function loadTile(z, x, y, n) {
+  // leave the neutral backdrop rather than failing the whole map. `urlFn` selects
+  // the layer (imagery base, or a transparent reference overlay).
+  function loadTile(z, x, y, n, urlFn = mapTileUrl) {
     return new Promise((resolve) => {
       if (y < 0 || y >= n) { resolve(null); return; }
       const xx = ((x % n) + n) % n; // wrap longitude at the date line
@@ -649,7 +832,7 @@
       const timer = setTimeout(() => finish(null), MAP_TILE_TIMEOUT);
       img.onload = () => finish(img);
       img.onerror = () => finish(null);
-      img.src = mapTileUrl(z, xx, y);
+      img.src = urlFn(z, xx, y);
     });
   }
 
@@ -675,16 +858,18 @@
   }
 
   // Bottom-right imagery attribution + a bottom-left scale label, baked into the
-  // image so they survive every export.
-  function drawMapOverlay(ctx, w, h, km) {
+  // image so they survive every export. When the road/place overlays are on,
+  // their credit is appended.
+  function drawMapOverlay(ctx, w, h, km, labels) {
     ctx.save();
     ctx.font = "600 12px -apple-system, Segoe UI, Roboto, Arial, sans-serif";
     const pad = 6, th = 18;
-    const aw = ctx.measureText(MAP_ATTRIB).width + pad * 2;
+    const attrib = MAP_ATTRIB + (labels ? " · " + MAP_REF_ATTRIB : "");
+    const aw = ctx.measureText(attrib).width + pad * 2;
     ctx.fillStyle = "rgba(0,0,0,.55)";
     ctx.fillRect(w - aw, h - th, aw, th);
     ctx.fillStyle = "#fff"; ctx.textBaseline = "middle";
-    ctx.fillText(MAP_ATTRIB, w - aw + pad, h - th / 2 + 1);
+    ctx.fillText(attrib, w - aw + pad, h - th / 2 + 1);
     const label = `${(+km).toLocaleString()} km across`;
     const lw = ctx.measureText(label).width + pad * 2;
     ctx.fillStyle = "rgba(0,0,0,.55)";
@@ -695,9 +880,11 @@
   }
 
   // Fetch + stitch the satellite tiles for (lat, lon) spanning `km`, returning a
-  // self-contained JPEG data URL. Throws if no tiles load or the canvas can't be
-  // exported (tainted — a CORS regression at the tile host).
-  async function buildMapDataUrl(lat, lon, km) {
+  // self-contained JPEG data URL. With `labels`, transparent Esri road + place
+  // overlays are composited on top of the imagery (same host → still exportable).
+  // Throws if no imagery tiles load or the canvas can't be exported (tainted — a
+  // CORS regression at the tile host).
+  async function buildMapDataUrl(lat, lon, km, labels) {
     const z = pickZoom(lat, km);
     const n = Math.pow(2, z);
     const worldPx = 256 * n;
@@ -709,12 +896,17 @@
     const txMin = Math.floor(left / 256), txMax = Math.floor((left + srcPx) / 256);
     const tyMin = Math.floor(top / 256), tyMax = Math.floor((top + srcPx) / 256);
 
+    // Layer 0 is the imagery base; any further layers are transparent overlays
+    // drawn on top in order. Tiles are keyed by layer so the composite is stacked
+    // correctly regardless of network completion order.
+    const layers = [mapTileUrl].concat(labels ? MAP_REF_LAYERS : []);
     const jobs = [];
-    for (let tx = txMin; tx <= txMax; tx++)
-      for (let ty = tyMin; ty <= tyMax; ty++)
-        jobs.push(loadTile(z, tx, ty, n).then((img) => ({ img, tx, ty })));
+    for (let li = 0; li < layers.length; li++)
+      for (let tx = txMin; tx <= txMax; tx++)
+        for (let ty = tyMin; ty <= tyMax; ty++)
+          jobs.push(loadTile(z, tx, ty, n, layers[li]).then((img) => ({ img, tx, ty, li })));
     const tiles = await Promise.all(jobs);
-    if (!tiles.some((t) => t.img)) throw new Error("no satellite tiles could be loaded");
+    if (!tiles.some((t) => t.li === 0 && t.img)) throw new Error("no satellite tiles could be loaded");
 
     const canvas = document.createElement("canvas");
     canvas.width = MAP_PX; canvas.height = MAP_PX;
@@ -722,14 +914,15 @@
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
     ctx.fillStyle = "#243039"; ctx.fillRect(0, 0, MAP_PX, MAP_PX); // backdrop for any missing tile
     const d = 256 * scale;
-    for (const t of tiles) if (t.img)
-      ctx.drawImage(t.img, Math.round((t.tx * 256 - left) * scale), Math.round((t.ty * 256 - top) * scale), Math.ceil(d), Math.ceil(d));
+    for (let li = 0; li < layers.length; li++)
+      for (const t of tiles) if (t.li === li && t.img)
+        ctx.drawImage(t.img, Math.round((t.tx * 256 - left) * scale), Math.round((t.ty * 256 - top) * scale), Math.ceil(d), Math.ceil(d));
     drawPin(ctx, MAP_PX / 2, MAP_PX / 2);
-    drawMapOverlay(ctx, MAP_PX, MAP_PX, km);
+    drawMapOverlay(ctx, MAP_PX, MAP_PX, km, labels);
     let dataUrl;
     try { dataUrl = canvas.toDataURL("image/jpeg", 0.85); }
     catch (err) { throw new Error("map could not be exported (imagery blocked cross-origin export)"); }
-    return { dataUrl, km, zoom: z, lat, lon, ts: Date.now() };
+    return { dataUrl, km, zoom: z, labels: !!labels, lat, lon, ts: Date.now() };
   }
 
   // Kick off (or re-use) the locator map for the current site. Regenerates when
@@ -738,7 +931,7 @@
     const s = state.site;
     if (!s) return;
     const m = state.mapImage;
-    const fresh = m && m.lat === s.lat && m.lon === s.lon && m.km === state.mapKm;
+    const fresh = m && m.lat === s.lat && m.lon === s.lon && m.km === state.mapKm && m.labels === state.mapLabels;
     if (fresh && !force) { state.mapStatus = "ready"; renderSiteMap(); return; }
     generateSiteMap();
   }
@@ -746,11 +939,11 @@
   async function generateSiteMap() {
     const s = state.site;
     if (!s) return;
-    const site = s, km = state.mapKm, token = ++mapGenToken;
+    const site = s, km = state.mapKm, labels = state.mapLabels, token = ++mapGenToken;
     state.mapStatus = "loading"; state.mapError = "";
     renderSiteMap();
     try {
-      const map = await buildMapDataUrl(s.lat, s.lon, km);
+      const map = await buildMapDataUrl(s.lat, s.lon, km, labels);
       if (token !== mapGenToken || state.site !== site) return; // superseded (site/size changed)
       state.mapImage = map; state.mapStatus = "ready"; state.mapError = "";
       save(); renderSiteMap(); renderReport();
@@ -770,6 +963,17 @@
     state.mapKm = km;
     save();
     renderMapPresets();
+    generateSiteMap();
+  }
+
+  // Toggle the road/place overlay on the locator map and re-render it.
+  function setMapLabels(on) {
+    on = !!on;
+    if (on === state.mapLabels) return;
+    state.mapLabels = on;
+    const cb = $("#map-labels");
+    if (cb && cb.checked !== on) cb.checked = on;
+    save();
     generateSiteMap();
   }
 
@@ -912,7 +1116,13 @@
       actions.append(el("a", { href: `https://www.google.com/search?q=${q}`, target: "_blank", rel: "noopener", class: "btn tiny" }, "Web search ↗"));
     }
 
-    const note = el("textarea", { placeholder: "Notes / evidence for the report…", oninput: (e) => { f.note = e.target.value; save(); } });
+    // onchange fires on blur; when auto-fetch is on and this is a species card,
+    // scan the just-edited notes for subjects and pull reference photos (Task 2).
+    const note = el("textarea", {
+      placeholder: "Notes / evidence for the report…",
+      oninput: (e) => { f.note = e.target.value; save(); },
+      onchange: () => { if (autoImagesOn() && WIKI_IMAGE_CATEGORIES.has(src.category)) autoFetchFromNotes(src.id, null, true); },
+    });
     note.value = f.note || "";
 
     let photoBlock = null;
@@ -957,9 +1167,15 @@
     });
     const btn = el("button", { type: "button", class: "btn tiny", onclick: () => fetchWikiImage(src.id, inp, btn) }, "🔎 Fetch image");
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fetchWikiImage(src.id, inp, btn); } });
+    // Auto-fetch: scan this card's notes for species/subjects and fetch a photo
+    // for each — no need to type each name. (Runs automatically on note blur too
+    // when "Auto-fetch reference images" is on.)
+    const autoBtn = el("button", { type: "button", class: "btn tiny",
+      title: "Scan this card's notes and fetch a labelled Wikipedia photo for every species/subject detected",
+      onclick: () => autoFetchFromNotes(src.id, autoBtn) }, "✨ Auto from notes");
     const row = el("div", { class: "wiki-row" },
       el("span", { class: "wiki-lead" }, "🌐 Reference image from Wikipedia:"),
-      inp, btn);
+      inp, btn, autoBtn);
     if (useList) {
       const dl = el("datalist", { id: listId });
       DATA.weeds.forEach((w) => dl.append(el("option", { value: w })));
@@ -1061,6 +1277,7 @@
       const f = state.findings[src.id] || (state.findings[src.id] = {});
       f.status = r.status; f.result = { html: r.html, ts: Date.now() };
       save(); refreshCard(src.id); renderProgress(); renderReport();
+      maybeAutoFetchForSource(src.id); // reference photos for any listed taxa (Task 3)
     } catch (err) {
       const f = state.findings[src.id] || (state.findings[src.id] = {});
       f.status = STATUS.FAILED;
@@ -1175,7 +1392,7 @@
       const box = el("div", { class: "rsection" }, el("h3", {}, "Location map"));
       box.append(el("figure", { class: "report-map" },
         el("img", { src: m.dataUrl, alt: "Satellite locator map", onclick: () => window.open(m.dataUrl, "_blank") }),
-        el("figcaption", {}, `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}`)));
+        el("figcaption", {}, `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
       wrap.append(box);
     }
     if ((state.siteImages || []).length) {
@@ -1261,7 +1478,7 @@
     const key = LS_PREFIX + siteKey(state.site);
     const payload = {
       site: state.site, findings: state.findings, report: state.report, siteImages: state.siteImages,
-      mapKm: state.mapKm, mapImage: state.mapImage,
+      mapKm: state.mapKm, mapLabels: state.mapLabels, mapImage: state.mapImage,
       date: $("#fld-date") ? $("#fld-date").value : state.date,
       maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
     };
@@ -1290,6 +1507,7 @@
       state.report = d.report || {};
       state.siteImages = d.siteImages || [];
       state.mapKm = d.mapKm || MAP_DEFAULT_KM;
+      state.mapLabels = d.mapLabels !== false; // default on for older saves
       state.mapImage = (d.mapImage && DATA_IMG_RE.test(d.mapImage.dataUrl || "")) ? d.mapImage : null;
       state.mapStatus = state.mapImage ? "ready" : "idle";
       state.date = d.date || state.date;
@@ -1333,7 +1551,8 @@
         lat: s.lat, lon: s.lon, assessment_date: $("#fld-date").value, site_maintenance: $("#fld-maintenance").value,
         images: (state.siteImages || []).map(exportImage),
         map: state.mapImage && state.mapImage.dataUrl
-          ? { km: state.mapImage.km, zoom: state.mapImage.zoom, source: MAP_ATTRIB, data_url: state.mapImage.dataUrl }
+          ? { km: state.mapImage.km, zoom: state.mapImage.zoom, labels: !!state.mapImage.labels,
+              source: MAP_ATTRIB + (state.mapImage.labels ? " · " + MAP_REF_ATTRIB : ""), data_url: state.mapImage.dataUrl }
           : null,
       },
       sections: REPORT_SECTIONS.map((sec) => ({
@@ -1514,7 +1733,13 @@
         assessment_date: date, site_maintenance: "",
       },
       sections: REPORT_SECTIONS.map((sec) => ({ id: sec.id, title: sec.title, choice: "", note: "" })),
-      collection_log: list.map((src) => ({ id: src.id, name: src.name, url: buildUrl(src), status: "", note: "", result_text: "" })),
+      collection_log: list.map((src) => {
+        const entry = { id: src.id, name: src.name, url: buildUrl(src), status: "", note: "", result_text: "" };
+        // Species/subject sources carry an image_subjects hint so the tool can
+        // auto-fetch a labelled reference photo per identified species on import.
+        if (WIKI_IMAGE_CATEGORIES.has(src.category)) entry.image_subjects = [];
+        return entry;
+      }),
     };
 
     L.push(`## What to return`);
@@ -1522,6 +1747,7 @@
     L.push(`Rules:`);
     L.push(`- Keep every \`id\` exactly as given; do not add, remove or rename entries in \`collection_log\` or \`sections\`.`);
     L.push(`- In \`collection_log\`, set \`status\` to one of: found, none, failed, manual. Put a one-line evidence summary in \`note\`, and any longer detail (counts, species names, distances, dates) in \`result_text\`.`);
+    L.push(`- Where an entry has an \`image_subjects\` array (the species/subject sources) and you marked it \`found\`, list the identifiable species/subject names there (common or scientific, e.g. "Gamba grass", "Phytophthora cinnamomi"). The tool auto-fetches a labelled reference photo for each on import. Leave it empty otherwise.`);
     L.push(`- In \`sections\`, set \`choice\` to one of that section's allowed phrases above (copied verbatim), or leave it "" to let the tool auto-suggest.`);
     L.push(`- Leave the \`site\` block unchanged.`, ``);
     L.push("```json");
@@ -1619,9 +1845,19 @@
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
     const mapKmInput = $("#map-km");
     if (mapKmInput) mapKmInput.addEventListener("change", () => setMapKm(parseInt(mapKmInput.value, 10)));
+    const mapLabelsCb = $("#map-labels");
+    if (mapLabelsCb) mapLabelsCb.addEventListener("change", () => setMapLabels(mapLabelsCb.checked));
     $("#btn-map-refresh").addEventListener("click", () => generateSiteMap());
     $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
+    const autoImgCb = $("#toggle-auto-images");
+    if (autoImgCb) {
+      autoImgCb.checked = autoImagesOn();
+      autoImgCb.addEventListener("change", () => {
+        setAutoImagesPref(autoImgCb.checked);
+        toast(autoImgCb.checked ? "Auto-fetch reference images: on" : "Auto-fetch reference images: off");
+      });
+    }
     $("#btn-filter-attention").addEventListener("click", () => {
       state.filterAttention = !state.filterAttention;
       if (state.filterAttention) state.filterStatus = null;
@@ -1681,13 +1917,14 @@
       web_search: fillTemplate(s.web_search || ""), is_ala: !!(s.api && s.api.kind === "ala_biocache"),
       no_result_means: s.no_result_means || "",
     })),
-    setResult: (id, status, note, resultText) => {
+    setResult: (id, status, note, resultText, imageSubjects) => {
       if (!DATA.sources.find((x) => x.id === id) || !VALID_STATUS.has(status)) return false;
       const f = state.findings[id] || (state.findings[id] = {});
       f.status = status;
       if (note != null) f.note = String(note);
       if (resultText) f.result = { html: esc(String(resultText)).replace(/\n/g, "<br>"), ts: Date.now() };
       save(); refreshCard(id); renderProgress(); renderReport();
+      maybeAutoFetchForSource(id, imageSubjects); // reference photos for species cards (Task 3)
       return true;
     },
     queryAla: (radius) => alaQuery(state.site.lat, state.site.lon, radius || 10),

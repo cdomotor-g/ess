@@ -160,7 +160,7 @@
       } catch (e) { return toolResult(id, "ALA query failed (network/CORS): " + e.message, true); }
     }
     if (name === "set_source_result") {
-      const ok = window.ESS.setResult(input.id, input.status, input.note, input.result_text);
+      const ok = window.ESS.setResult(input.id, input.status, input.note, input.result_text, input.image_subjects);
       return toolResult(id, ok ? "recorded" : `error: unknown source id or invalid status (${input.id} / ${input.status})`, !ok);
     }
     return toolResult(id, "unsupported tool: " + name, true);
@@ -207,6 +207,8 @@
       "- failed: you tried but could not get an answer (blocked, error, unreachable, no data at the URL).",
       "- manual: the source needs a human — an interactive/draw-a-polygon map (e.g. EPBC Protected Matters), an INTERNAL SharePoint page, or a portal with no readable data at the URL. Put the aimed link + the steps in note; do NOT invent a result.",
       "",
+      "For species/subject sources (categories invasive_plants, invasive_animals, disease, threatened) that you mark FOUND, also fill image_subjects with the identifiable species/subject names you found (common or scientific, e.g. \"Gamba grass\", \"Phytophthora cinnamomi\") — the tool auto-fetches a labelled reference photo for each. Leave it empty for non-species sources and for none/failed/manual.",
+      "",
       "Rules: never leave a source unrecorded. Be honest — 'none' (checked, absent) and 'failed' (unknown) are different and both matter. Record specifics, not just yes/no. Don't fabricate. The EPBC Protected Matters Search Tool has no API — record it as manual with the 50 km-buffer steps. When every source has been recorded, briefly summarise and stop.",
       "",
       "SOURCES:",
@@ -233,6 +235,8 @@
           status: { type: "string", enum: ["found", "none", "failed", "manual"] },
           note: { type: "string", description: "one-line finding, or the steps for a manual source" },
           result_text: { type: "string", description: "raw detail / evidence (optional)" },
+          image_subjects: { type: "array", items: { type: "string" },
+            description: "Only for FOUND species/subject sources (invasive plants, invasive animals, disease, threatened): identifiable species/subject names (common or scientific) — the tool fetches a labelled reference photo for each. Omit otherwise." },
         },
         required: ["id", "status", "note"],
       },
