@@ -101,3 +101,7 @@ The client is written to make this a one-line change: swap `API_BASE` in
 object the browser tool imports and exports, and that `resolve.py --template`
 scaffolds. Statuses: `found` / `none` / `failed` / `manual` / `unset`. Keeping
 one schema is why both agent paths and the reviewer UI interoperate.
+`site` and each `sections[]`/`collection_log[]` entry may also carry an
+optional `images: [{ caption, data_url }]` — photos attached in the browser
+tool; agents don't produce these, but re-importing an exported file preserves
+them.

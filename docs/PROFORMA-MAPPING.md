@@ -69,6 +69,9 @@ matching text under the chosen level.
 - A **collection log**: every source checked, with an explicit
   Found/None/Failed/Manual status and a link. The proforma records conclusions;
   this records the evidence and the gaps behind them.
+- **Photo evidence**: a general station photo gallery, plus per-source photos
+  on weed/pest/disease/threatened-species/biosecurity sources — pasted, dragged
+  or picked in the browser and carried through to every export.
 - **Coordinate entry** for sites not in the station list.
 - **Deep-links aimed at the site** and one **live check** (ALA), so the
   conclusions are faster to reach and easier to justify.
