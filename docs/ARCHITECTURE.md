@@ -64,8 +64,13 @@ Vanilla JS, no dependencies, no build. It:
 - calls the one live API (Atlas of Living Australia) directly from the browser;
 - tracks a status per source and assembles a report using the standardized
   wording from `dropdowns.json`;
-- persists per-site state in `localStorage`;
-- exports Print/PDF, self-contained HTML, and a JSON findings object.
+- lets you attach photos — pasted from the clipboard, dragged in, or chosen via
+  a file picker — both a general station gallery and per-source evidence
+  photos on biosecurity-relevant sources (weeds, pests, disease, threatened
+  species); photos are downscaled client-side and kept as JPEG data URLs;
+- persists per-site state (including photos) in `localStorage`;
+- exports Print/PDF, self-contained HTML, and a JSON findings object — photos
+  are embedded inline in all three.
 
 ### Agent skill (`.claude/skills/ess-collect/`)
 `resolve.py` does the deterministic half (resolve station, filter sources, fill
@@ -97,6 +102,9 @@ paths fill the same state, and the browser's own live checks (ALA) do too:
 `found|none|failed|manual|unset`. It is emitted by `app.js reportObject()`,
 scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
 — so a file the skill writes and a file the tool exports are interchangeable.
+`site` and each `sections[]`/`collection_log[]` entry may carry an optional
+`images: [{ caption, data_url }]` — populated by the browser tool (agents don't
+attach photos); re-importing a previously exported file restores them.
 
 **Integration seam.** `app.js` exposes a tiny `window.ESS` (`site()`,
 `sources()`, `setResult()`, `queryAla()`, `beginRun()`/`endRun()`). The optional

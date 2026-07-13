@@ -13,6 +13,9 @@
   const STATUS_LABEL = { found: "Found", none: "Nothing found", failed: "Search failed", manual: "Manual", unset: "Not checked" };
   const BBOX_DELTA = 0.03; // ~3 km half-box for extent deep-links
   const LS_PREFIX = "ess-workbench:v1:";
+  // Source categories where a site photo is useful evidence (weeds, pests, disease,
+  // listed species, biosecurity, heritage) — these get an "evidence photo" dropzone.
+  const PHOTO_CATEGORIES = new Set(["invasive_plants", "invasive_animals", "disease", "threatened", "biosecurity", "indigenous_heritage"]);
 
   // Rough state bounding boxes (mirrors build/build_data.py). Heuristic only —
   // user can override with the State selector. Most-specific first.
@@ -37,8 +40,9 @@
   const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null };
   const state = {
     site: null,        // { name, station_num, wmo, state, delivery_group, facility_types, lat, lon, refs, primary_facility, manual }
-    findings: {},      // sourceId -> { status, note, result }
+    findings: {},      // sourceId -> { status, note, result, images: [{id,dataUrl,caption,ts}] }
     report: {},        // sectionId -> { choice, note }
+    siteImages: [],    // [{id, dataUrl, caption, ts}] — general station photos
     date: "",
     maintenance: "",
     filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
@@ -60,6 +64,164 @@
     return n;
   };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // ---------------------------------------------------------------- images
+  // Station/evidence photos are downscaled client-side (canvas) before being kept
+  // as JPEG data URLs — keeps localStorage + exported JSON/HTML a sane size while
+  // staying fully self-contained (no server, no separate image files).
+  const MAX_IMG_DIM = 1600, IMG_QUALITY = 0.82;
+  let imgSeq = 0;
+  const newImgId = () => `img${Date.now()}_${imgSeq++}`;
+
+  function fileToResizedDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type || !file.type.startsWith("image/")) { reject(new Error("not an image file")); return; }
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("could not read file"));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("could not decode image"));
+        img.onload = () => {
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (w > MAX_IMG_DIM || h > MAX_IMG_DIM) {
+            const scale = MAX_IMG_DIM / Math.max(w, h);
+            w = Math.round(w * scale); h = Math.round(h * scale);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", IMG_QUALITY));
+        };
+        img.src = String(reader.result);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function filesFromClipboard(e) {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    const out = [];
+    for (const item of items) if (item.kind === "file" && item.type && item.type.startsWith("image/")) { const f = item.getAsFile(); if (f) out.push(f); }
+    return out;
+  }
+
+  // Wires a dropzone element for drag-drop / paste-while-focused / an explicit
+  // "choose a file" button (zone.querySelector(".pick-btn"), if present), calling
+  // onFiles(File[]) with whatever image files it collects. Shared by the
+  // station-photo zone and each biosecurity source card's evidence-photo zone.
+  // Deliberately does NOT open the file picker on a plain click on the zone body:
+  // that would steal focus to the native OS dialog, so a click-then-paste gesture
+  // (the zone's own instructions) would never reach the paste listener below.
+  function wireDropzone(zone, input, onFiles) {
+    const pickBtn = zone.querySelector(".pick-btn");
+    if (pickBtn) pickBtn.addEventListener("click", (e) => { e.stopPropagation(); input.click(); });
+    // Only when the zone itself (not a bubbled event from the nested pick button,
+    // which already activates on Enter/Space natively) is the keydown target.
+    zone.addEventListener("keydown", (e) => { if (e.target === zone && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); input.click(); } });
+    input.addEventListener("change", () => { if (input.files.length) onFiles(Array.from(input.files)); input.value = ""; });
+    zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drag"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("drag"));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault(); zone.classList.remove("drag");
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []).filter((f) => f.type && f.type.startsWith("image/"));
+      if (files.length) onFiles(files);
+    });
+    zone.addEventListener("paste", (e) => {
+      const files = filesFromClipboard(e);
+      if (files.length) { e.preventDefault(); onFiles(files); }
+    });
+  }
+
+  async function addImagesTo(list, files) {
+    for (const file of files) {
+      try {
+        const dataUrl = await fileToResizedDataUrl(file);
+        list.push({ id: newImgId(), dataUrl, caption: "", ts: Date.now() });
+      } catch (err) { toast(`Skipped ${file.name || "file"}: ${err.message}`); }
+    }
+  }
+
+  async function addSiteImages(files) {
+    // fileToResizedDataUrl() is async (FileReader + canvas); if the user switches
+    // to a different site before it resolves, loadSite() has already reassigned
+    // state.siteImages to a fresh array — pushing into the (now orphaned) array we
+    // captured here would silently lose the photo with no render/save to show it.
+    const site = state.site;
+    await addImagesTo(state.siteImages, files);
+    if (state.site !== site) { toast("Site changed before the photo finished processing — discarded"); return; }
+    save(); renderSiteImages(); renderReport();
+  }
+  function removeSiteImage(id) {
+    state.siteImages = state.siteImages.filter((im) => im.id !== id);
+    save(); renderSiteImages(); renderReport();
+  }
+
+  async function addFindingImages(sourceId, files) {
+    const site = state.site;
+    const f = state.findings[sourceId] || (state.findings[sourceId] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    if (!f.images) f.images = [];
+    await addImagesTo(f.images, files);
+    if (state.site !== site) { toast("Site changed before the photo finished processing — discarded"); return; }
+    save(); refreshCard(sourceId); renderReport();
+  }
+  function removeFindingImage(sourceId, imgId) {
+    const f = state.findings[sourceId];
+    if (!f || !f.images) return;
+    f.images = f.images.filter((im) => im.id !== imgId);
+    save(); refreshCard(sourceId); renderReport();
+  }
+
+  // Editable thumbnail (remove button + caption field) — used in the picker galleries.
+  function renderPhotoThumb(im, onRemove, onCaption) {
+    // oninput saves as-you-type; onchange (fires on blur) refreshes the report
+    // preview's figcaption — re-rendering on every keystroke would rebuild the
+    // input out from under the user's cursor mid-edit.
+    const cap = el("input", { type: "text", class: "photo-cap", placeholder: "Caption…",
+      oninput: (e) => onCaption(e.target.value), onchange: () => renderReport() });
+    cap.value = im.caption || "";
+    return el("figure", { class: "photo-thumb" },
+      el("img", { src: im.dataUrl, alt: im.caption || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
+      el("button", { type: "button", class: "photo-remove", title: "Remove photo", onclick: onRemove }, "×"),
+      cap);
+  }
+  // Read-only thumbnail — used in the report preview.
+  function photoFigure(im, altFallback) {
+    return el("figure", { class: "photo-thumb view" },
+      el("img", { src: im.dataUrl, alt: im.caption || altFallback || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
+      (im.caption || altFallback) ? el("figcaption", {}, im.caption || altFallback) : null);
+  }
+  // Static HTML string version — used by the print view / HTML export / JSON export inputs.
+  function photosHtml(images) {
+    if (!images || !images.length) return "";
+    // esc() the data URL too, not just the caption — this string is injected via
+    // innerHTML (print view) / a raw <script> template (HTML export), so an
+    // unescaped value could break out of the src="" attribute (stored XSS) if it
+    // ever originated from an imported findings file rather than our own canvas.
+    return `<div class="pr-photos">${images.map((im) =>
+      `<figure><img src="${esc(im.data_url)}" alt="${esc(im.caption || "")}">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`
+    ).join("")}</div>`;
+  }
+
+  // A data: URL is the only form these images should ever take (our own canvas
+  // export, or a previously-exported findings file). Rejecting anything else at
+  // the import boundary keeps a crafted findings JSON from smuggling in a URL
+  // that could misbehave when later interpolated into exported HTML.
+  const DATA_IMG_RE = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i;
+
+  // Rehydrate images from an exported ess-findings/1 file ({caption, data_url}) back
+  // into the tool's internal shape, so export -> import round-trips photos too.
+  function importImages(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map((im) => ({ id: newImgId(), dataUrl: (im && (im.data_url || im.dataUrl)) || "", caption: (im && im.caption) || "", ts: Date.now() }))
+      .filter((im) => DATA_IMG_RE.test(im.dataUrl));
+  }
+
+  function renderSiteImages() {
+    const grid = $("#site-photo-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    (state.siteImages || []).forEach((im) => grid.append(renderPhotoThumb(im, () => removeSiteImage(im.id), (v) => { im.caption = v; save(); })));
+  }
 
   // ---------------------------------------------------------------- data load
   async function loadData() {
@@ -159,10 +321,11 @@
   function siteKey(site) { return site.station_num ? `num:${site.station_num}` : `xy:${site.lat.toFixed(5)},${site.lon.toFixed(5)}`; }
 
   function loadSite(site) {
-    // persist current before switching
+    flushSave(); // persist any pending debounced edit for the previous site before switching
     state.site = site;
     state.findings = {};
     state.report = {};
+    state.siteImages = [];
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
     state.filterAttention = false;
@@ -174,6 +337,7 @@
   function renderWorkspace() {
     $("#workspace").hidden = false;
     renderSummary();
+    renderSiteImages();
     renderDashboard();
     renderReport();
     renderProgress();
@@ -188,6 +352,7 @@
   function importFindings(json) {
     if (!json || typeof json !== "object" || !json.site || !Array.isArray(json.collection_log))
       throw new Error("Not an ESS findings file — expected a `site` object and a `collection_log` array.");
+    flushSave(); // persist any pending debounced edit for the previously loaded site first
     const si = json.site;
     const lat = parseFloat(si.lat), lon = parseFloat(si.lon);
     if (isNaN(lat) || isNaN(lon)) throw new Error("The findings file has no valid site latitude/longitude.");
@@ -199,12 +364,14 @@
       primary_facility: (si.facility_types && si.facility_types[0]) || "",
       lat, lon, operating_authority: "", ident: "", refs: refsForState(st), manual: !si.station_num,
     };
+    state.siteImages = importImages(si.images);
     state.findings = {};
     json.collection_log.forEach((c) => {
       if (!c || !c.id) return;
       state.findings[c.id] = {
         status: c.status || STATUS.UNSET, note: c.note || "",
         result: c.result_text ? { html: esc(c.result_text).replace(/\n/g, "<br>"), ts: Date.now() } : null,
+        images: importImages(c.images),
       };
     });
     state.report = {};
@@ -293,7 +460,8 @@
   }
 
   function renderSourceCard(src) {
-    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null });
+    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    if (!f.images) f.images = [];
     const card = el("div", { class: `src status-${f.status}`, id: `src-${src.id}` });
 
     const tags = [];
@@ -323,15 +491,30 @@
     const note = el("textarea", { placeholder: "Notes / evidence for the report…", oninput: (e) => { f.note = e.target.value; save(); } });
     note.value = f.note || "";
 
-    card.append(
+    let photoBlock = null;
+    if (PHOTO_CATEGORIES.has(src.category)) {
+      const input = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
+      const pickBtn = el("button", { type: "button", class: "pick-btn" }, "choose a file");
+      const zone = el("div", { class: "dropzone small", tabindex: "0", "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
+        "📷 Evidence photo — drag & drop, paste, or ", pickBtn);
+      wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
+      const grid = el("div", { class: "photo-grid small" });
+      f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; save(); })));
+      photoBlock = el("div", { class: "src-photos" }, zone, input, grid);
+    }
+
+    // card.append() is the native DOM method (not the el() helper), which stringifies
+    // a null argument to the literal text "null" instead of skipping it — filter first.
+    card.append(...[
       el("div", { class: "src-top" },
         el("div", { class: "src-name" }, src.name, ...tags),
         el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status])),
       el("div", { class: "src-desc" }, src.what_to_find || ""),
       actions,
       el("div", { class: "src-note" }, note),
+      photoBlock,
       el("div", { class: "src-result" + (f.result ? " show" : ""), id: `res-${src.id}`, html: f.result ? f.result.html : "" }),
-    );
+    ].filter(Boolean));
     return card;
   }
 
@@ -504,9 +687,24 @@
       .filter((x) => x.f.status && x.f.status !== "unset");
   }
 
+  // Photos for a section, independent of whether a status has been set yet — a
+  // photo is evidence on its own, and should still reach Print/PDF/HTML/JSON
+  // exports even if the user attached it before clicking a status chip.
+  function photosForSection(section) {
+    const rel = sourcesForSite().filter((s) => section.cats.includes(s.category));
+    return rel.flatMap((s) => ((state.findings[s.id] || {}).images || []).map((im) => ({ im, src: s })));
+  }
+
   function renderReport() {
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
+    if ((state.siteImages || []).length) {
+      const box = el("div", { class: "rsection" }, el("h3", {}, "Site photographs"));
+      const grid = el("div", { class: "photo-grid" });
+      state.siteImages.forEach((im) => grid.append(photoFigure(im)));
+      box.append(grid);
+      wrap.append(box);
+    }
     REPORT_SECTIONS.forEach((section) => {
       const rstate = state.report[section.id] || (state.report[section.id] = { choice: null, note: "" });
       if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
@@ -542,6 +740,13 @@
         ev.forEach(({ src, f }) => evWrap.append(el("span", { class: "chip " + f.status }, `${src.name}: ${STATUS_LABEL[f.status]}`), " "));
         box.append(evWrap);
       }
+      // Evidence photos attached to any source feeding this section
+      const evImages = photosForSection(section);
+      if (evImages.length) {
+        const grid = el("div", { class: "photo-grid small" });
+        evImages.forEach(({ im, src }) => grid.append(photoFigure(im, src.name)));
+        box.append(grid);
+      }
       wrap.append(box);
     });
   }
@@ -554,15 +759,45 @@
   }
 
   // ---------------------------------------------------------------- persistence
+  // Debounced: photos can make the per-site state multi-MB, and save() now fires
+  // on every keystroke (captions, notes) — writing that synchronously per key
+  // would jank typing. In-memory state (what renders/exports) is unaffected.
+  let saveTimer = null;
   function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 400);
+  }
+  // Persist immediately, bypassing the debounce — used right before anything that
+  // reassigns state.site (switching site, importing) or unloads the page, so a
+  // pending edit for the *current* site is written before state moves on.
+  function flushSave() {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    saveNow();
+  }
+  function saveNow() {
     if (!state.site) return;
+    const key = LS_PREFIX + siteKey(state.site);
+    const payload = {
+      site: state.site, findings: state.findings, report: state.report, siteImages: state.siteImages,
+      date: $("#fld-date") ? $("#fld-date").value : state.date,
+      maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
+    };
     try {
-      localStorage.setItem(LS_PREFIX + siteKey(state.site), JSON.stringify({
-        site: state.site, findings: state.findings, report: state.report,
-        date: $("#fld-date") ? $("#fld-date").value : state.date,
-        maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
-      }));
-    } catch (_) { /* storage may be full/disabled — non-fatal */ }
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch (err) {
+      if (err && err.name !== "QuotaExceededError") { toast("Could not save locally"); return; }
+      // Photos are the most likely reason this exceeded the quota — retry without
+      // them so findings/notes (previously always small enough to save) still do.
+      try {
+        const findings = Object.fromEntries(Object.entries(state.findings).map(([id, f]) => [id, { ...f, images: [] }]));
+        localStorage.setItem(key, JSON.stringify({ ...payload, siteImages: [], findings }));
+        toast("Local storage is full — photos aren't saved locally (notes still are). Export your report soon.");
+      } catch (_) {
+        toast("Local storage is full — nothing could be saved locally. Export your report soon.");
+      }
+    }
   }
   function restore() {
     try {
@@ -571,6 +806,7 @@
       const d = JSON.parse(raw);
       state.findings = d.findings || {};
       state.report = d.report || {};
+      state.siteImages = d.siteImages || [];
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
     } catch (_) { /* ignore corrupt entry */ }
@@ -585,6 +821,7 @@
         id: s.id, name: s.name, category: s.category, jurisdiction: s.jurisdiction,
         url: buildUrl(s), status: f.status || "unset", note: f.note || "",
         result_text: f.result ? f.result.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "",
+        images: (f.images || []).map((im) => ({ caption: im.caption || "", data_url: im.dataUrl })),
       };
     });
   }
@@ -600,12 +837,14 @@
         name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
         delivery_group: s.delivery_group, facility_types: s.facility_types,
         lat: s.lat, lon: s.lon, assessment_date: $("#fld-date").value, site_maintenance: $("#fld-maintenance").value,
+        images: (state.siteImages || []).map((im) => ({ caption: im.caption || "", data_url: im.dataUrl })),
       },
       sections: REPORT_SECTIONS.map((sec) => ({
         id: sec.id, title: sec.title,
         choice: (state.report[sec.id] || {}).choice || "",
         note: (state.report[sec.id] || {}).note || "",
         detail: sec.bioDetail ? (DATA.dropdowns.biosecurity_detail || {})[(state.report[sec.id] || {}).choice] || "" : "",
+        images: photosForSection(sec).map(({ im, src }) => ({ caption: im.caption || src.name, data_url: im.dataUrl })),
       })),
       collection_log: buildFindings(),
     };
@@ -614,10 +853,13 @@
   function buildReportHtml(forPrint) {
     const r = reportObject();
     const s = r.site;
+    const siteShots = s.images && s.images.length
+      ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images)}</div>` : "";
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${esc(sec.detail)}</p>` : ""}
-      ${sec.note ? `<p>${esc(sec.note)}</p>` : ""}</div>`).join("");
+      ${sec.note ? `<p>${esc(sec.note)}</p>` : ""}
+      ${photosHtml(sec.images)}</div>`).join("");
     const logRows = r.collection_log.map((c) => `<tr>
       <td>${esc(c.name)}</td>
       <td class="st st-${c.status}">${esc(STATUS_LABEL[c.status] || c.status)}</td>
@@ -633,6 +875,7 @@
           <tr><td class="k">Facility</td><td>${esc((s.facility_types || []).join(", ") || "—")}</td><td class="k">Site maintenance</td><td>${esc(s.site_maintenance || "—")}</td></tr>
           <tr><td class="k">Latitude</td><td>${esc(s.lat)}</td><td class="k">Longitude</td><td>${esc(s.lon)}</td></tr>
         </table></div>
+      ${siteShots}
       ${secRows}
       <div class="pr-sec"><h2>Collection log — sources checked</h2>
         <table><thead><tr><th>Source</th><th>Result</th><th>Evidence / notes</th><th></th></tr></thead>
@@ -658,7 +901,10 @@
       h1{font-size:22px} .pr-sec{border:1px solid #ccc;border-radius:6px;padding:8px 12px;margin:10px 0}
       .pr-sec h2{font-size:14px;background:#12507b;color:#fff;margin:-8px -12px 8px;padding:6px 12px;border-radius:6px 6px 0 0}
       table{width:100%;border-collapse:collapse;font-size:12px} th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;vertical-align:top}
-      .k{color:#555} .st{font-weight:700} .st-found{color:#1f7a4d}.st-none{color:#8a6d1a}.st-failed{color:#b3261e}.st-manual{color:#3a5a99}</style>
+      .k{color:#555} .st{font-weight:700} .st-found{color:#1f7a4d}.st-none{color:#8a6d1a}.st-failed{color:#b3261e}.st-manual{color:#3a5a99}
+      .pr-photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px} .pr-photos figure{margin:0;width:150px}
+      .pr-photos img{width:100%;height:110px;object-fit:cover;border:1px solid #bbb;border-radius:4px}
+      .pr-photos figcaption{font-size:10px;color:#444;margin-top:2px}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.html`, "text/html", html);
   }
@@ -846,6 +1092,7 @@
 
     $("#load-coords").addEventListener("click", loadCoordSite);
     $("#import-load").addEventListener("click", doImport);
+    wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
     $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
     $("#btn-filter-attention").addEventListener("click", () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); });

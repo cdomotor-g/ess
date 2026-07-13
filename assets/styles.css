@@ -185,6 +185,30 @@ textarea { resize: vertical; min-height: 62px; }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
 
+/* ---------- photos ---------- */
+.photo-section { margin-top: 16px; }
+.dropzone { border: 1.5px dashed var(--line); border-radius: 10px; padding: 14px 16px; text-align: center;
+  font-size: 13px; color: var(--ink-soft); cursor: pointer; transition: border-color .15s, background .15s; }
+.dropzone:hover, .dropzone:focus { border-color: var(--brand); outline: none; background: var(--surface-2); }
+.dropzone.drag { border-color: var(--accent); background: var(--found-bg); color: var(--found); }
+.dropzone.small { padding: 8px 10px; font-size: 12px; }
+.dropzone .pick-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; font-weight: 600;
+  color: var(--brand); text-decoration: underline; cursor: pointer; }
+.photo-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.photo-grid:empty { margin-top: 0; }
+.photo-grid.small { gap: 8px; margin-top: 8px; }
+.photo-thumb { position: relative; width: 120px; margin: 0; background: var(--surface-2); border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.photo-grid.small .photo-thumb { width: 84px; }
+.photo-thumb img { display: block; width: 100%; height: 90px; object-fit: cover; cursor: zoom-in; }
+.photo-grid.small .photo-thumb img { height: 64px; }
+.photo-thumb .photo-remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; line-height: 18px;
+  padding: 0; border-radius: 50%; border: none; background: rgba(17,24,29,.65); color: #fff; font-size: 14px; cursor: pointer; }
+.photo-thumb .photo-cap { width: 100%; border: none; border-top: 1px solid var(--line); border-radius: 0; padding: 4px 6px; font-size: 11px; background: transparent; }
+.photo-thumb.view { cursor: default; }
+.photo-thumb.view img { cursor: zoom-in; }
+.photo-thumb.view figcaption { font-size: 11px; color: var(--ink-soft); padding: 4px 6px; }
+.src-photos { margin-top: 8px; }
+
 /* ---------- report ---------- */
 .rsection { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
 .rsection h3 { font-size: 14.5px; margin-bottom: 4px; }
@@ -250,3 +274,7 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 #print-root .pr .st-none { color: #8a6d1a; }
 #print-root .pr .st-failed { color: #b3261e; }
 #print-root .pr .st-manual { color: #3a5a99; }
+#print-root .pr .pr-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#print-root .pr .pr-photos figure { margin: 0; width: 150px; break-inside: avoid; }
+#print-root .pr .pr-photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #bbb; border-radius: 4px; }
+#print-root .pr .pr-photos figcaption { font-size: 10px; color: #444; margin-top: 2px; }

@@ -11,7 +11,7 @@ It has two halves that share the same data:
 
 | Component | What it is | Runs where |
 |-----------|-----------|-----------|
-| **Browser tool** (`index.html`) | A static, single-page app. Station autofill, deep-linked collection dashboard, live Atlas of Living Australia check, and an exportable ESS report. | Any browser · GitHub Pages · offline |
+| **Browser tool** (`index.html`) | A static, single-page app. Station autofill, deep-linked collection dashboard, live Atlas of Living Australia check, photo evidence (paste/drag/file-picker), and an exportable ESS report. | Any browser · GitHub Pages · offline |
 | **`ess-collect` skill** (`.claude/skills/`) | Instructs a Claude Code agent to run the same desktop assessment and write a findings report — handling sources the browser can't reach. | Claude Code |
 
 Both are driven by one extensible **sources registry** (`data/sources.json`) and
@@ -35,12 +35,18 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
 
 1. Type a station name/number, or switch to **By coordinates**.
 2. The site summary auto-populates (station #, WMO, state, delivery group,
-   facility, lat/long) — this replicates the workbook's VLOOKUP autofill.
+   facility, lat/long) — this replicates the workbook's VLOOKUP autofill. Add
+   **station photos** here — paste from the clipboard, drag a file, or use the
+   file picker.
 3. Work down the **collection dashboard**. Each source opens aimed at the site.
    Hit **Check live** on the Atlas of Living Australia card; set a result on the
-   rest: Found / Nothing found / Search failed / Manual.
-4. The **ESS report** section fills with the standardized proforma wording and
-   your collection evidence. Export to **Print/PDF**, **HTML**, or **JSON**.
+   rest: Found / Nothing found / Search failed / Manual. Sources for weeds,
+   pests, disease, threatened species and biosecurity get their own photo
+   dropzone — attach evidence when a check comes back **Found**.
+4. The **ESS report** section fills with the standardized proforma wording,
+   your collection evidence, and any attached photos. Export to **Print/PDF**,
+   **HTML**, or **JSON** — photos travel with the export (embedded, so the
+   HTML/JSON stay self-contained).
 
 Your work is saved in the browser (localStorage) per site, so you can come back
 to it.

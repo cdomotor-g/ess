@@ -112,6 +112,12 @@
             <input id="fld-maintenance" type="text" placeholder="e.g. quarterly; last visit 04/2026" />
           </div>
         </div>
+        <div class="photo-section">
+          <label class="field-label">Station photos <span class="opt">(carried through to the report)</span></label>
+          <div class="dropzone" id="site-dropzone" tabindex="0" aria-label="Add station photo — paste, drag and drop, or choose a file">📷 Drag &amp; drop or paste (Ctrl/Cmd+V) an image here, or <button type="button" class="pick-btn">choose a file</button></div>
+          <input id="site-photo-input" type="file" accept="image/*" multiple hidden />
+          <div class="photo-grid" id="site-photo-grid"></div>
+        </div>
       </section>
 
       <!-- Progress -->
