@@ -37,6 +37,7 @@
   const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null };
   const state = {
     site: null,        // { name, station_num, wmo, state, delivery_group, facility_types, lat, lon, refs, primary_facility, manual }
+    pendingStation: null, // a picked station with no lat/lon on file, awaiting manual coordinates
     findings: {},      // sourceId -> { status, note, result }
     report: {},        // sectionId -> { choice, note }
     date: "",
@@ -113,7 +114,7 @@
     matches.forEach((s, i) => {
       ul.append(el("li", { "data-i": i, onmousedown: (e) => { e.preventDefault(); selectStation(s); } },
         el("span", { class: "ac-name" }, s.name),
-        el("span", { class: "ac-meta" }, `${s.state || "?"} · ${(s.facility_types[0] || s.primary_facility || "site")}${s.station_num ? " · " + s.station_num : ""}`)));
+        el("span", { class: "ac-meta" }, `${s.state || "?"} · ${(s.facility_types[0] || s.primary_facility || "site")}${s.station_num ? " · " + s.station_num : ""}${s.lat == null || s.lon == null ? " · no coords on file" : ""}`)));
     });
     ul.hidden = false;
   }
@@ -121,6 +122,20 @@
   function selectStation(s) {
     $("#station-search").value = s.name;
     $("#station-results").hidden = true;
+    state.pendingStation = null;
+    if (s.lat == null || s.lon == null || isNaN(s.lat) || isNaN(s.lon)) {
+      // No coordinates on file for this station (e.g. a FReD-only entry) — the
+      // whole tool is coordinate-driven, so collect them by hand instead of
+      // loading a site whose deep-links would silently resolve to nowhere.
+      state.pendingStation = s;
+      switchTab("by-coords");
+      $("#in-name").value = s.name;
+      $("#in-state").value = s.state || "";
+      $("#in-lat").value = ""; $("#in-lon").value = "";
+      toast(`No coordinates on file for ${s.name} — enter lat/long to continue`);
+      $("#in-lat").focus();
+      return;
+    }
     loadSite({
       name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
       region: s.region, delivery_group: s.delivery_group, facility_types: s.facility_types,
@@ -129,10 +144,30 @@
     });
   }
 
+  function switchTab(tabId) {
+    $$(".tab").forEach((x) => x.classList.toggle("is-active", x.dataset.tab === tabId));
+    $$(".tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === tabId));
+  }
+
   function loadCoordSite() {
     const lat = parseFloat($("#in-lat").value), lon = parseFloat($("#in-lon").value);
     if (isNaN(lat) || isNaN(lon)) { alert("Enter a valid latitude and longitude."); return; }
     const st = $("#in-state").value || stateFromCoords(lat, lon);
+    const pending = state.pendingStation;
+    state.pendingStation = null;
+    if (pending) {
+      // Completing a picked station that had no coordinates on file — keep its
+      // metadata (station number, delivery group, facility types, …) and only
+      // fill in the coordinates the user just supplied.
+      loadSite({
+        name: $("#in-name").value.trim() || pending.name, station_num: pending.station_num, wmo: pending.wmo,
+        state: st, region: pending.region || st, delivery_group: pending.delivery_group,
+        facility_types: pending.facility_types, primary_facility: pending.primary_facility,
+        lat, lon, operating_authority: pending.operating_authority, ident: pending.ident,
+        refs: pending.refs || refsForState(st), manual: false,
+      });
+      return;
+    }
     loadSite({
       name: $("#in-name").value.trim() || `Site @ ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
       station_num: "", wmo: "", state: st, region: st, delivery_group: "", facility_types: [],
@@ -823,10 +858,7 @@
   // ---------------------------------------------------------------- wiring
   function wire() {
     // tabs
-    $$(".tab").forEach((t) => t.addEventListener("click", () => {
-      $$(".tab").forEach((x) => x.classList.toggle("is-active", x === t));
-      $$(".tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === t.dataset.tab));
-    }));
+    $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
     // autocomplete
     const search = $("#station-search");
     search.addEventListener("input", () => renderAcList(searchStations(search.value)));

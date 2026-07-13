@@ -63,3 +63,34 @@ If a future template moves these, update the ranges in `build_dropdowns()`.
 To publish a narrower station list (e.g. FWN only), filter inside
 `build_stations()` on `facility_types` / `region` before writing. See Phase 1 in
 [../docs/ROADMAP.md](../docs/ROADMAP.md).
+
+## Supplemental merge: FReD (`merge_fred_stations.py`)
+
+FReD is the Bureau's FWIN Register e-Database export — it lists partner/council
+sites under assessment that are frequently missing from the ESS Template
+workbook. `merge_fred_stations.py` unions a FReD export into the already-built
+`data/stations.json`, adding any station whose number (and name+state) isn't
+already present.
+
+FReD has no lat/lon column. Coordinates are backfilled, where unambiguous, from
+a second station list — a "MegaNet" radio-planning database whose station
+names are truncated to 20 characters (a Radio Mobile field limit). A FReD name
+truncated to 20 chars either matches a MegaNet name exactly or it doesn't;
+matches that resolve to more than one distinct coordinate pair are treated as
+ambiguous and left blank rather than guessed. Stations added without
+coordinates still show up in the tool's station search — picking one prompts
+for lat/lon via the "By coordinates" tab instead of silently producing broken
+deep-links.
+
+```bash
+# Drop the exports into build/source/ (git-ignored, same as the workbook):
+#   build/source/FReD.csv
+#   build/source/meganet_stations.json   (optional — enables coordinate backfill)
+python build/merge_fred_stations.py
+```
+
+Re-run whenever FReD is re-exported. It updates `data/stations.json` in place
+and appends a provenance entry (counts, source hash) to `data/meta.json`'s
+`supplemental_merges` list — run it *after* `build_data.py` if you're also
+refreshing from a new workbook, since `build_data.py` fully regenerates
+`stations.json` from scratch.

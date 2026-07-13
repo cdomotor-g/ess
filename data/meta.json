@@ -2,20 +2,21 @@
  "generated_utc": "2026-07-10T21:59:07Z",
  "source_file": "FWIN_ESS_Template.xlsx",
  "source_sha256": "366098e5b7b245b974e29e30093b3eb99aeee38b5d3f5ebfba5727b3f770acd8",
- "station_count": 6610,
+ "station_count": 7436,
  "rows_skipped_no_coords": 153,
  "stations_by_state": {
-  "ACT": 1,
-  "NSW": 1395,
+  "ACT": 3,
+  "NSW": 1590,
   "NT": 364,
-  "QLD": 1888,
+  "QLD": 2516,
   "SA": 755,
   "TAS": 390,
-  "VIC": 725,
+  "VIC": 726,
   "WA": 1092
  },
  "stations_by_facility_type": {
   "Automatic Weather Station": 647,
+  "Base Station": 1,
   "Building - Library": 1,
   "Building - Office": 1,
   "Building - Workshop": 1,
@@ -23,6 +24,7 @@
   "Flood Warning Network": 1899,
   "GNSS Scintillation TEC": 3,
   "GONG": 1,
+  "Gateway": 2,
   "Ionosonde": 6,
   "Ionosonde 6A": 2,
   "Magnetometer": 6,
@@ -32,6 +34,7 @@
   "Monitoring and Display Facility": 4,
   "OFFICE": 80,
   "RSTN - RISDN": 1,
+  "Rain Gauge": 665,
   "Rainfall": 5679,
   "Rainfall Auto": 3,
   "Rainfall Manual": 2,
@@ -40,11 +43,16 @@
   "Remote Balloon Launcher": 9,
   "Remote Meteorological Balloon Launching System": 2,
   "Remote Obscuration and Cloud": 6,
+  "Repeater": 94,
+  "Reservoir": 10,
   "SOON": 1,
   "Satellite Earth Station": 3,
   "Site building": 78,
   "Solar Radiation": 23,
   "Space Weather Station": 11,
+  "Tide": 3,
+  "Tide Gauge": 4,
+  "Water Level": 512,
   "Water Level Automatic": 333,
   "Water Level Facility - Unknown Type": 4,
   "Water Level Facility Unknown Type": 10,
@@ -54,5 +62,17 @@
   "Wind Profiler - BLP": 11,
   "Wind Profiler - STP": 4
  },
- "builder": "build/build_data.py"
+ "builder": "build/build_data.py",
+ "supplemental_merges": [
+  {
+   "merged_utc": "2026-07-13T01:12:30Z",
+   "source_file": "FReD.csv",
+   "source_sha256": "689757afd379bd426619e92c388a8779a7d21a6fe82c65ee7ab791d7c651fc50",
+   "coord_source_file": "meganet_stations.json",
+   "stations_added": 826,
+   "added_with_coords": 364,
+   "added_without_coords": 462,
+   "builder": "build/merge_fred_stations.py"
+  }
+ ]
 }

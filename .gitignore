@@ -1,8 +1,12 @@
 # Raw internal source workbook(s) — NOT published. Only the derived, reviewed
 # JSON in data/ is committed. Drop the BOM template here to regenerate.
+# Also covers build/source/FReD.csv and build/source/meganet_stations.json —
+# raw inputs to build/merge_fred_stations.py; only its output (the updated
+# data/stations.json + data/meta.json) is committed.
 build/source/
 *.xlsx
 *.xlsm
+FReD.csv
 
 # Node / test tooling (browser tests run outside the repo; nothing committed)
 node_modules/
