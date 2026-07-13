@@ -46,9 +46,11 @@
     date: "",
     maintenance: "",
     filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
+    filterStatus: null,     // dashboard: show only sources with this one status (found/none/failed/manual/unset)
     showAttention: false,   // show the attention banner (after import / agent run)
   };
   const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
+  const cardNumbers = {}; // sourceId -> position in the currently-rendered (filtered) dashboard list
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -329,6 +331,7 @@
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
     state.filterAttention = false;
+    state.filterStatus = null;
     state.showAttention = false;
     restore(); // pull any saved progress for this site
     renderWorkspace();
@@ -379,6 +382,7 @@
     state.date = si.assessment_date || new Date().toISOString().slice(0, 10);
     state.maintenance = si.site_maintenance || "";
     state.filterAttention = false;
+    state.filterStatus = null;
     state.showAttention = true; // surface what the agent left for the human
     renderWorkspace();
     save();
@@ -441,8 +445,12 @@
     wrap.innerHTML = "";
     const cats = DATA.sourcesMeta.categories;
     let list = sourcesForSite();
-    if (state.filterAttention)
+    if (state.filterStatus)
+      list = list.filter((s) => ((state.findings[s.id] || {}).status || "unset") === state.filterStatus);
+    else if (state.filterAttention)
       list = list.filter((s) => ATTENTION.includes((state.findings[s.id] || {}).status || "unset"));
+    for (const id of Object.keys(cardNumbers)) delete cardNumbers[id];
+    let n = 0;
     for (const cat of cats) {
       const inCat = list.filter((s) => s.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
       if (!inCat.length) continue;
@@ -451,18 +459,21 @@
         el("h3", {}, cat.label),
         el("span", { class: "g-count" }, `${inCat.length}`),
         el("span", { class: "g-line" })));
-      inCat.forEach((src) => group.append(renderSourceCard(src)));
+      inCat.forEach((src) => { cardNumbers[src.id] = ++n; group.append(renderSourceCard(src)); });
       wrap.append(group);
     }
     if (!wrap.children.length)
       wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" },
+        state.filterStatus ? `No sources marked "${STATUS_LABEL[state.filterStatus]}".` :
         state.filterAttention ? "✓ Nothing needs attention — every source has a result." : "No sources for this site."));
+    syncStatusFilterBar();
   }
 
   function renderSourceCard(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     if (!f.images) f.images = [];
     const card = el("div", { class: `src status-${f.status}`, id: `src-${src.id}` });
+    const num = cardNumbers[src.id];
 
     const tags = [];
     if (src.method === "api") tags.push(el("span", { class: "tag api" }, "API"));
@@ -511,7 +522,7 @@
     // a null argument to the literal text "null" instead of skipping it — filter first.
     card.append(...[
       el("div", { class: "src-top" },
-        el("div", { class: "src-name" }, src.name, ...tags),
+        el("div", { class: "src-name" }, el("span", { class: "src-num" }, num ? `${num}` : ""), src.name, ...tags),
         el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status])),
       el("div", { class: "src-desc" }, src.what_to_find || ""),
       actions,
@@ -656,7 +667,11 @@
     const actions = el("span", { style: "display:flex;gap:8px;flex-wrap:wrap" });
     if (need > 0) actions.append(el("button", {
       class: "btn tiny" + (state.filterAttention ? " on" : ""),
-      onclick: () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); },
+      onclick: () => {
+        state.filterAttention = !state.filterAttention;
+        if (state.filterAttention) state.filterStatus = null;
+        renderDashboard(); renderAttention(); syncFilterButton();
+      },
     }, state.filterAttention ? "Show all" : "Show only these"));
     actions.append(el("button", { class: "btn tiny", onclick: () => { state.showAttention = false; renderAttention(); } }, "Dismiss"));
     b.append(msg, actions);
@@ -665,6 +680,10 @@
   function syncFilterButton() {
     const btn = $("#btn-filter-attention");
     if (btn) btn.classList.toggle("on", state.filterAttention);
+  }
+
+  function syncStatusFilterBar() {
+    $$(".sfb-btn").forEach((btn) => btn.classList.toggle("on", btn.dataset.status === state.filterStatus));
   }
 
   // ---------------------------------------------------------------- report
@@ -1099,7 +1118,17 @@
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
     $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
-    $("#btn-filter-attention").addEventListener("click", () => { state.filterAttention = !state.filterAttention; renderDashboard(); renderAttention(); syncFilterButton(); });
+    $("#btn-filter-attention").addEventListener("click", () => {
+      state.filterAttention = !state.filterAttention;
+      if (state.filterAttention) state.filterStatus = null;
+      renderDashboard(); renderAttention(); syncFilterButton();
+    });
+    $$(".sfb-btn").forEach((btn) => btn.addEventListener("click", () => {
+      const s = btn.dataset.status;
+      state.filterStatus = state.filterStatus === s ? null : s;
+      if (state.filterStatus) state.filterAttention = false;
+      renderDashboard(); renderAttention(); syncFilterButton();
+    }));
     $("#btn-copy-prompt").addEventListener("click", copyFullPrompt);
     $("#btn-run-auto").addEventListener("click", runAllAuto);
     $("#fld-date").addEventListener("change", save);

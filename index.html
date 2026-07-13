@@ -151,6 +151,13 @@
           <span class="chip manual">Needs manual check</span>.
           Sources marked <b>API</b> can be checked live in your browser.
         </p>
+        <div class="status-filter-bar" id="status-filter-bar">
+          <span class="sfb-label">Show only:</span>
+          <button class="btn tiny sfb-btn" data-status="found" title="Show only sources marked Found">Found</button>
+          <button class="btn tiny sfb-btn" data-status="none" title="Show only sources marked Nothing found">Nothing</button>
+          <button class="btn tiny sfb-btn" data-status="failed" title="Show only sources marked Search failed">Failed</button>
+          <button class="btn tiny sfb-btn" data-status="manual" title="Show only sources marked Manual">Manual</button>
+        </div>
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
 
