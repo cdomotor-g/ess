@@ -469,7 +469,11 @@
     if (src.internal) tags.push(el("span", { class: "tag internal" }, "Internal"));
     tags.push(el("span", { class: "tag jur" }, src.jurisdiction === "national" ? "National" : (state.site.state || "State")));
 
-    const link = el("a", { href: buildUrl(src), target: "_blank", rel: "noopener", class: "btn tiny" }, "Open ↗");
+    const link = el("a", {
+      href: buildUrl(src), target: "_blank", rel: "noopener", class: "btn tiny",
+      title: buildUrl(src),
+      onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
+    }, "Open ↗");
 
     const statusSel = el("div", { class: "status-select" });
     [[STATUS.FOUND, "Found"], [STATUS.NONE, "None"], [STATUS.FAILED, "Failed"], [STATUS.MANUAL, "Manual"]].forEach(([s, lab]) => {
@@ -1055,8 +1059,8 @@
   }
 
   const slug = (s) => s.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").slice(0, 40);
-  function copy(text) {
-    navigator.clipboard ? navigator.clipboard.writeText(text).then(() => toast("Copied")) : toast("Copy not available");
+  function copy(text, msg) {
+    navigator.clipboard ? navigator.clipboard.writeText(text).then(() => toast(msg || "Copied")) : toast("Copy not available");
   }
   let toastTimer;
   function toast(msg) {
