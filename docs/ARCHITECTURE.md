@@ -68,6 +68,14 @@ Vanilla JS, no dependencies, no build. It:
   a file picker — both a general station gallery and per-source evidence
   photos on biosecurity-relevant sources (weeds, pests, disease, threatened
   species); photos are downscaled client-side and kept as JPEG data URLs;
+- auto-sources a **reference/identification photo from Wikipedia** for a named
+  subject (a weed, feral animal or pathogen) on the species cards: it searches
+  the MediaWiki API for the article, fetches the lead image, re-encodes it
+  through a canvas to a self-contained JPEG data URL (same shape as an uploaded
+  photo, plus a licensing `credit` + `source_url`), and attaches it to the card
+  — so a user doesn't have to go and find one. Runs entirely in the user's
+  browser (MediaWiki returns anonymous CORS; `upload.wikimedia.org` allows the
+  cross-origin canvas read); network/CORS failures are non-fatal;
 - persists per-site state (including photos) in `localStorage`;
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three.
@@ -103,8 +111,11 @@ paths fill the same state, and the browser's own live checks (ALA) do too:
 scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
 — so a file the skill writes and a file the tool exports are interchangeable.
 `site` and each `sections[]`/`collection_log[]` entry may carry an optional
-`images: [{ caption, data_url }]` — populated by the browser tool (agents don't
-attach photos); re-importing a previously exported file restores them.
+`images: [{ caption, data_url, credit?, source_url? }]` — populated by the
+browser tool (uploaded photos, or reference images auto-sourced from Wikipedia,
+which also set `credit`/`source_url`; agents don't attach photos); re-importing
+a previously exported file restores them (the `source_url` link is constrained
+to `http(s)` on import).
 
 **Integration seam.** `app.js` exposes a tiny `window.ESS` (`site()`,
 `sources()`, `setResult()`, `queryAla()`, `beginRun()`/`endRun()`). The optional
