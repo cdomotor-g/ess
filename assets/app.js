@@ -16,6 +16,16 @@
   // Source categories where a site photo is useful evidence (weeds, pests, disease,
   // listed species, biosecurity, heritage) — these get an "evidence photo" dropzone.
   const PHOTO_CATEGORIES = new Set(["invasive_plants", "invasive_animals", "disease", "threatened", "biosecurity", "indigenous_heritage"]);
+  // Categories that are about identifiable species/subjects, where auto-sourcing a
+  // reference photo from Wikipedia (weed, feral animal, pathogen) makes sense.
+  const WIKI_IMAGE_CATEGORIES = new Set(["invasive_plants", "invasive_animals", "disease", "threatened"]);
+  // Per-category placeholder / example subjects for the "reference image" field.
+  const WIKI_PLACEHOLDER = {
+    invasive_plants: "e.g. Gamba grass, Parthenium…",
+    invasive_animals: "e.g. Feral pig, Cane toad…",
+    disease: "e.g. Myrtle rust, Phytophthora cinnamomi…",
+    threatened: "e.g. Koala, Wollemi pine…",
+  };
 
   // Rough state bounding boxes (mirrors build/build_data.py). Heuristic only —
   // user can override with the State selector. Most-specific first.
@@ -37,7 +47,7 @@
   }
 
   // ---------------------------------------------------------------- app state
-  const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null };
+  const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null, weeds: [] };
   const state = {
     site: null,        // { name, station_num, wmo, state, delivery_group, facility_types, lat, lon, refs, primary_facility, manual }
     findings: {},      // sourceId -> { status, note, result, images: [{id,dataUrl,caption,ts}] }
@@ -173,7 +183,111 @@
     save(); refreshCard(sourceId); renderReport();
   }
 
+  // ---------------------------------------------------------------- Wikipedia images
+  // Auto-source a reference/identification photo for a named subject (a weed, a
+  // feral animal, a pathogen) from Wikipedia — so a user doesn't have to go and
+  // find one. The image is fetched, downscaled and embedded as a JPEG data URL
+  // (same pipeline as uploaded photos), so it stays self-contained and travels
+  // into the report + Print/HTML/JSON exports with its licensing attribution.
+  //
+  // This runs in the *user's* browser, which talks to Wikimedia directly:
+  //  - the MediaWiki API returns anonymous CORS (`origin=*`) so fetchJson() works;
+  //  - upload.wikimedia.org serves images with `Access-Control-Allow-Origin: *`,
+  //    so a `crossOrigin=anonymous` <img> can be drawn to a canvas and read back
+  //    with toDataURL() without tainting it.
+  // Network/CORS failures are reported like any other source check, never fatal.
+  const WM_API = "https://en.wikipedia.org/w/api.php";
+
+  // Resolve a free-text term (usually a common name) to the best Wikipedia article
+  // and its lead image via generator=search, so "Gamba grass" finds the right page
+  // even though the article is titled "Andropogon gayanus".
+  async function wmFindLeadImage(term) {
+    const url = `${WM_API}?action=query&format=json&origin=*&redirects=1` +
+      `&generator=search&gsrsearch=${encodeURIComponent(term)}&gsrlimit=1&gsrnamespace=0` +
+      `&prop=pageimages%7Cinfo&piprop=original%7Cthumbnail&pithumbsize=1000&inprop=url`;
+    const data = await fetchJson(url);
+    const pages = data && data.query && data.query.pages;
+    if (!pages) return null;
+    const page = Object.values(pages)[0];
+    if (!page) return null;
+    const imageUrl = (page.original && page.original.source) || (page.thumbnail && page.thumbnail.source);
+    if (!imageUrl) return null;
+    return {
+      title: page.title,
+      pageUrl: safeHttpUrl(page.fullurl) || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+      imageUrl, fileTitle: page.pageimage ? `File:${page.pageimage}` : null,
+    };
+  }
+
+  // Best-effort licensing attribution (artist + short licence name) for the lead
+  // image, read from its file page's extmetadata. Wikimedia images are freely
+  // licensed but require credit, so a government report should carry it.
+  async function wmImageCredit(fileTitle) {
+    if (!fileTitle) return "";
+    try {
+      const url = `${WM_API}?action=query&format=json&origin=*` +
+        `&titles=${encodeURIComponent(fileTitle)}&prop=imageinfo&iiprop=extmetadata` +
+        `&iiextmetadatafilter=Artist%7CLicenseShortName`;
+      const data = await fetchJson(url);
+      const pages = data && data.query && data.query.pages;
+      const page = pages && Object.values(pages)[0];
+      const meta = page && page.imageinfo && page.imageinfo[0] && page.imageinfo[0].extmetadata;
+      if (!meta) return "";
+      const strip = (m) => (m && m.value ? String(m.value).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "");
+      return [strip(meta.Artist), strip(meta.LicenseShortName)].filter(Boolean).join(" · ");
+    } catch (_) { return ""; }
+  }
+
+  // Load a cross-origin image and re-encode it through a canvas to a self-contained
+  // JPEG data URL, downscaled to the same bound as uploaded photos.
+  function wmImageToDataUrl(imageUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous"; // required so toDataURL() isn't blocked by the taint check
+      img.onerror = () => reject(new Error("could not load the image (network or cross-origin block)"));
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (!w || !h) { reject(new Error("image had no dimensions")); return; }
+          if (w > MAX_IMG_DIM || h > MAX_IMG_DIM) {
+            const scale = MAX_IMG_DIM / Math.max(w, h);
+            w = Math.round(w * scale); h = Math.round(h * scale);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", IMG_QUALITY));
+        } catch (_) { reject(new Error("the image server did not allow cross-origin reuse")); }
+      };
+      img.src = imageUrl;
+    });
+  }
+
+  // Full flow: search -> fetch -> attribute -> attach to the source card. Throws
+  // on a hard failure (nothing found, image blocked) so the caller can toast it.
+  async function addWikiImage(sourceId, term) {
+    term = term.trim();
+    if (!term) throw new Error("Type a name first");
+    const site = state.site; // guard against a site switch mid-fetch (see addSiteImages)
+    const found = await wmFindLeadImage(term);
+    if (!found) throw new Error(`No Wikipedia image found for “${term}”`);
+    const dataUrl = await wmImageToDataUrl(found.imageUrl);
+    const credit = await wmImageCredit(found.fileTitle);
+    if (state.site !== site) { toast("Site changed before the image loaded — discarded"); return; }
+    const f = state.findings[sourceId] || (state.findings[sourceId] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    if (!f.images) f.images = [];
+    f.images.push({
+      id: newImgId(), dataUrl, caption: found.title,
+      credit: credit ? `Wikipedia · ${credit}` : "Source: Wikipedia",
+      source_url: found.pageUrl, ts: Date.now(),
+    });
+    save(); refreshCard(sourceId); renderReport();
+    toast(`Added “${found.title}”`);
+  }
+
   // Editable thumbnail (remove button + caption field) — used in the picker galleries.
+  // Auto-sourced images (from Wikipedia) also carry a read-only `credit` line so
+  // the licensing attribution stays attached to the photo everywhere it appears.
   function renderPhotoThumb(im, onRemove, onCaption) {
     // oninput saves as-you-type; onchange (fires on blur) refreshes the report
     // preview's figcaption — re-rendering on every keystroke would rebuild the
@@ -184,13 +298,23 @@
     return el("figure", { class: "photo-thumb" },
       el("img", { src: im.dataUrl, alt: im.caption || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
       el("button", { type: "button", class: "photo-remove", title: "Remove photo", onclick: onRemove }, "×"),
-      cap);
+      cap,
+      im.credit ? creditNode(im) : null);
   }
   // Read-only thumbnail — used in the report preview.
   function photoFigure(im, altFallback) {
+    const cap = im.caption || altFallback || "";
     return el("figure", { class: "photo-thumb view" },
-      el("img", { src: im.dataUrl, alt: im.caption || altFallback || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
-      (im.caption || altFallback) ? el("figcaption", {}, im.caption || altFallback) : null);
+      el("img", { src: im.dataUrl, alt: cap || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
+      (cap || im.credit) ? el("figcaption", {}, cap, im.credit ? creditNode(im) : null) : null);
+  }
+  // Small attribution line ("Wikipedia · <artist> · <licence>"), linking to the
+  // source page where one is recorded. Shared by the picker + report thumbnails.
+  function creditNode(im) {
+    const href = safeHttpUrl(im.source_url);
+    return href
+      ? el("a", { class: "photo-credit", href, target: "_blank", rel: "noopener", title: im.credit }, im.credit)
+      : el("span", { class: "photo-credit", title: im.credit }, im.credit);
   }
   // Static HTML string version — used by the print view / HTML export / JSON export inputs.
   function photosHtml(images) {
@@ -199,9 +323,13 @@
     // innerHTML (print view) / a raw <script> template (HTML export), so an
     // unescaped value could break out of the src="" attribute (stored XSS) if it
     // ever originated from an imported findings file rather than our own canvas.
-    return `<div class="pr-photos">${images.map((im) =>
-      `<figure><img src="${esc(im.data_url)}" alt="${esc(im.caption || "")}">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ""}</figure>`
-    ).join("")}</div>`;
+    return `<div class="pr-photos">${images.map((im) => {
+      const credit = im.credit
+        ? `<span class="credit">${im.source_url ? `<a href="${esc(im.source_url)}">${esc(im.credit)}</a>` : esc(im.credit)}</span>` : "";
+      const cap = (im.caption || im.credit)
+        ? `<figcaption>${esc(im.caption || "")}${credit}</figcaption>` : "";
+      return `<figure><img src="${esc(im.data_url)}" alt="${esc(im.caption || "")}">${cap}</figure>`;
+    }).join("")}</div>`;
   }
 
   // A data: URL is the only form these images should ever take (our own canvas
@@ -209,13 +337,22 @@
   // the import boundary keeps a crafted findings JSON from smuggling in a URL
   // that could misbehave when later interpolated into exported HTML.
   const DATA_IMG_RE = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i;
+  // A photo's credit line can link back to its source page (Wikipedia). That link
+  // becomes an <a href> in the live UI and in exported HTML, so only allow plain
+  // http(s) — never javascript:/data: etc. — whether it came from our own fetch
+  // or an imported (untrusted) findings file.
+  const safeHttpUrl = (u) => (typeof u === "string" && /^https?:\/\//i.test(u) ? u : "");
 
-  // Rehydrate images from an exported ess-findings/1 file ({caption, data_url}) back
-  // into the tool's internal shape, so export -> import round-trips photos too.
+  // Rehydrate images from an exported ess-findings/1 file ({caption, data_url,
+  // credit, source_url}) back into the tool's internal shape, so export -> import
+  // round-trips photos and their attribution too.
   function importImages(list) {
     if (!Array.isArray(list)) return [];
-    return list.map((im) => ({ id: newImgId(), dataUrl: (im && (im.data_url || im.dataUrl)) || "", caption: (im && im.caption) || "", ts: Date.now() }))
-      .filter((im) => DATA_IMG_RE.test(im.dataUrl));
+    return list.map((im) => ({
+      id: newImgId(), dataUrl: (im && (im.data_url || im.dataUrl)) || "",
+      caption: (im && im.caption) || "", credit: (im && im.credit) || "",
+      source_url: safeHttpUrl(im && (im.source_url || im.sourceUrl)), ts: Date.now(),
+    })).filter((im) => DATA_IMG_RE.test(im.dataUrl));
   }
 
   function renderSiteImages() {
@@ -245,6 +382,19 @@
     DATA.dropdowns = out.dropdowns;
     DATA.meta = out.meta;
     REPORT_SECTIONS = out.sources.report_sections || [];
+  }
+
+  // Optional reference list of named weeds — powers autocomplete suggestions on the
+  // invasive-plant cards' "reference image" field. Best-effort: a missing file just
+  // means no suggestions (the field still accepts free text). The build ships an
+  // A–Z scaffold, so drop the single-letter section headers.
+  async function loadReference() {
+    try {
+      const res = await fetch("data/reference/weeds.json", { cache: "no-cache" });
+      if (!res.ok) return;
+      const j = await res.json();
+      DATA.weeds = (j.weeds || []).filter((w) => typeof w === "string" && w.trim().length > 1);
+    } catch (_) { /* suggestions are optional */ }
   }
 
   function showBanner(kind, html) {
@@ -515,7 +665,8 @@
       wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
       const grid = el("div", { class: "photo-grid small" });
       f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; save(); })));
-      photoBlock = el("div", { class: "src-photos" }, zone, input, grid);
+      const wikiRow = WIKI_IMAGE_CATEGORIES.has(src.category) ? renderWikiImageRow(src) : null;
+      photoBlock = el("div", { class: "src-photos" }, zone, wikiRow, input, grid);
     }
 
     // card.append() is the native DOM method (not the el() helper), which stringifies
@@ -531,6 +682,45 @@
       el("div", { class: "src-result" + (f.result ? " show" : ""), id: `res-${src.id}`, html: f.result ? f.result.html : "" }),
     ].filter(Boolean));
     return card;
+  }
+
+  // "Reference image" control for species/subject cards: a name field (with weed
+  // suggestions where we have them) + a Fetch button that pulls a labelled,
+  // attributed photo from Wikipedia straight onto the card.
+  function renderWikiImageRow(src) {
+    const listId = `weeds-${src.id}`;
+    const useList = src.category === "invasive_plants" && DATA.weeds.length;
+    const inp = el("input", {
+      type: "text", class: "wiki-term", autocomplete: "off", spellcheck: "false",
+      placeholder: WIKI_PLACEHOLDER[src.category] || "Species or subject name…",
+      list: useList ? listId : null,
+      "aria-label": "Fetch a reference image from Wikipedia by name",
+    });
+    const btn = el("button", { type: "button", class: "btn tiny", onclick: () => fetchWikiImage(src.id, inp, btn) }, "🔎 Fetch image");
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fetchWikiImage(src.id, inp, btn); } });
+    const row = el("div", { class: "wiki-row" },
+      el("span", { class: "wiki-lead" }, "🌐 Reference image from Wikipedia:"),
+      inp, btn);
+    if (useList) {
+      const dl = el("datalist", { id: listId });
+      DATA.weeds.forEach((w) => dl.append(el("option", { value: w })));
+      row.append(dl);
+    }
+    return row;
+  }
+
+  async function fetchWikiImage(sourceId, inp, btn) {
+    const term = inp.value.trim();
+    if (!term) { toast("Type a name first"); inp.focus(); return; }
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Fetching…`;
+    try {
+      await addWikiImage(sourceId, term); // rebuilds the card on success, detaching btn
+    } catch (err) {
+      toast(err.message || "Could not fetch an image");
+    } finally {
+      if (btn.isConnected) { btn.disabled = false; btn.innerHTML = orig; }
+    }
   }
 
   function fillTemplate(str) {
@@ -844,9 +1034,18 @@
         id: s.id, name: s.name, category: s.category, jurisdiction: s.jurisdiction,
         url: buildUrl(s), status: f.status || "unset", note: f.note || "",
         result_text: f.result ? f.result.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "",
-        images: (f.images || []).map((im) => ({ caption: im.caption || "", data_url: im.dataUrl })),
+        images: (f.images || []).map(exportImage),
       };
     });
+  }
+
+  // Shared image serialization for exports/JSON — keeps the attribution (credit +
+  // source page) with the photo so it round-trips through import and shows in HTML/PDF.
+  function exportImage(im) {
+    const o = { caption: im.caption || "", data_url: im.dataUrl };
+    if (im.credit) o.credit = im.credit;
+    if (im.source_url) o.source_url = im.source_url;
+    return o;
   }
 
   function reportObject() {
@@ -860,14 +1059,14 @@
         name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
         delivery_group: s.delivery_group, facility_types: s.facility_types,
         lat: s.lat, lon: s.lon, assessment_date: $("#fld-date").value, site_maintenance: $("#fld-maintenance").value,
-        images: (state.siteImages || []).map((im) => ({ caption: im.caption || "", data_url: im.dataUrl })),
+        images: (state.siteImages || []).map(exportImage),
       },
       sections: REPORT_SECTIONS.map((sec) => ({
         id: sec.id, title: sec.title,
         choice: (state.report[sec.id] || {}).choice || "",
         note: (state.report[sec.id] || {}).note || "",
         detail: sec.bioDetail ? (DATA.dropdowns.biosecurity_detail || {})[(state.report[sec.id] || {}).choice] || "" : "",
-        images: photosForSection(sec).map(({ im, src }) => ({ caption: im.caption || src.name, data_url: im.dataUrl })),
+        images: photosForSection(sec).map(({ im, src }) => exportImage({ ...im, caption: im.caption || src.name })),
       })),
       collection_log: buildFindings(),
     };
@@ -927,7 +1126,9 @@
       .k{color:#555} .st{font-weight:700} .st-found{color:#1f7a4d}.st-none{color:#8a6d1a}.st-failed{color:#b3261e}.st-manual{color:#3a5a99}
       .pr-photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px} .pr-photos figure{margin:0;width:150px}
       .pr-photos img{width:100%;height:110px;object-fit:cover;border:1px solid #bbb;border-radius:4px}
-      .pr-photos figcaption{font-size:10px;color:#444;margin-top:2px}</style>
+      .pr-photos figcaption{font-size:10px;color:#444;margin-top:2px}
+      .pr-photos figcaption .credit{display:block;font-size:9px;color:#777;margin-top:1px}
+      .pr-photos figcaption .credit a{color:#777}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.html`, "text/html", html);
   }
@@ -1144,6 +1345,7 @@
     wire();
     try {
       await loadData();
+      await loadReference();
     } catch (err) {
       const local = location.protocol === "file:";
       showBanner("error",
