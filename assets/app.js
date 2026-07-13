@@ -27,6 +27,26 @@
     threatened: "e.g. Koala, Wollemi pine…",
   };
 
+  // ---------------------------------------------------------------- site map
+  // A satellite locator map is auto-generated for every site: tiles are fetched
+  // from Esri World Imagery (keyless, CORS-enabled), stitched onto a canvas with
+  // a pin at the station coordinates, and kept as a self-contained JPEG data URL
+  // — so it persists in localStorage and travels through the report + every
+  // export exactly like the station photos do. The user picks how many km the
+  // map spans (default 100).
+  const MAP_DEFAULT_KM = 100;      // starting side length (km across)
+  const MAP_MIN_KM = 1, MAP_MAX_KM = 2000;
+  const MAP_KM_PRESETS = [10, 25, 50, 100, 250, 500];
+  const MAP_PX = 900;              // rendered square size (px) of the map image
+  const MAP_MIN_ZOOM = 3, MAP_MAX_ZOOM = 19;
+  const MAP_TILE_TIMEOUT = 9000;   // per-tile load timeout (ms)
+  const MERCATOR_M_PER_PX0 = 156543.03392; // ground metres/pixel at zoom 0, equator
+  const MAP_ATTRIB = "Imagery © Esri, Maxar, Earthstar Geographics";
+  // Esri World Imagery tiled basemap — URL order is /{z}/{y}/{x}. Sends
+  // Access-Control-Allow-Origin, so tiles fetched with crossOrigin stay
+  // canvas-exportable (toDataURL won't taint).
+  const mapTileUrl = (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+
   // Rough state bounding boxes (mirrors build/build_data.py). Heuristic only —
   // user can override with the State selector. Most-specific first.
   const STATE_BBOXES = [
@@ -53,12 +73,17 @@
     findings: {},      // sourceId -> { status, note, result, images: [{id,dataUrl,caption,ts}] }
     report: {},        // sectionId -> { choice, note }
     siteImages: [],    // [{id, dataUrl, caption, ts}] — general station photos
+    mapKm: MAP_DEFAULT_KM, // satellite map side length (km across)
+    mapImage: null,    // { dataUrl, km, zoom, lat, lon, ts } — generated locator map (persisted, exported)
+    mapStatus: "idle", // transient: idle | loading | ready | error (not persisted)
+    mapError: "",      // transient: last map-generation error message
     date: "",
     maintenance: "",
     filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
     filterStatus: null,     // dashboard: show only sources with this one status (found/none/failed/manual/unset)
     showAttention: false,   // show the attention banner (after import / agent run)
   };
+  let mapGenToken = 0; // guards against a stale async map render landing after a newer request
   const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
   const cardNumbers = {}; // sourceId -> position in the currently-rendered (filtered) dashboard list
 
@@ -478,6 +503,10 @@
     state.findings = {};
     state.report = {};
     state.siteImages = [];
+    state.mapKm = MAP_DEFAULT_KM;
+    state.mapImage = null;
+    state.mapStatus = "idle";
+    state.mapError = "";
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
     state.filterAttention = false;
@@ -491,6 +520,9 @@
     $("#workspace").hidden = false;
     renderSummary();
     renderSiteImages();
+    if ($("#map-km")) $("#map-km").value = state.mapKm;
+    renderMapPresets();
+    ensureSiteMap();
     renderDashboard();
     renderReport();
     renderProgress();
@@ -518,6 +550,15 @@
       lat, lon, operating_authority: "", ident: "", refs: refsForState(st), manual: !si.station_num,
     };
     state.siteImages = importImages(si.images);
+    // Rehydrate a carried-through map if the file has one; otherwise leave it to
+    // auto-generate for the imported coordinates.
+    const impMap = si.map && (si.map.data_url || si.map.dataUrl);
+    state.mapKm = (si.map && +si.map.km) || MAP_DEFAULT_KM;
+    state.mapImage = (impMap && DATA_IMG_RE.test(impMap))
+      ? { dataUrl: impMap, km: (+si.map.km) || MAP_DEFAULT_KM, zoom: si.map.zoom || 0, lat, lon, ts: Date.now() }
+      : null;
+    state.mapStatus = state.mapImage ? "ready" : "idle";
+    state.mapError = "";
     state.findings = {};
     json.collection_log.forEach((c) => {
       if (!c || !c.id) return;
@@ -564,6 +605,211 @@
     });
     if (s.manual) grid.append(el("div", { class: "summary-item", style: "grid-column:1/-1" },
       el("span", { class: "k" }, "Source"), el("span", { class: "v" }, "Manual coordinate entry")));
+  }
+
+  // ---------------------------------------------------------------- site map
+  // Web-Mercator / slippy-tile helpers.
+  function lonToWorldX(lon, worldPx) { return (lon + 180) / 360 * worldPx; }
+  function latToWorldY(lat, worldPx) {
+    const s = Math.sin(lat * Math.PI / 180);
+    return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * worldPx;
+  }
+  // Nearest integer zoom whose native resolution best fits `km` across MAP_PX px
+  // at this latitude. We fetch tiles at this zoom, then scale the stitch so the
+  // output spans exactly the requested km (keeps the user's number honest).
+  function pickZoom(lat, km) {
+    const zf = Math.log2(MERCATOR_M_PER_PX0 * Math.cos(lat * Math.PI / 180) * MAP_PX / (km * 1000));
+    return Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, Math.round(zf)));
+  }
+
+  // Load one tile as a CORS-clean image (so the canvas stays exportable). Resolves
+  // to the image, or null on error/timeout/out-of-range — a few missing tiles just
+  // leave the neutral backdrop rather than failing the whole map.
+  function loadTile(z, x, y, n) {
+    return new Promise((resolve) => {
+      if (y < 0 || y >= n) { resolve(null); return; }
+      const xx = ((x % n) + n) % n; // wrap longitude at the date line
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      let done = false;
+      const finish = (val) => { if (done) return; done = true; clearTimeout(timer); resolve(val); };
+      const timer = setTimeout(() => finish(null), MAP_TILE_TIMEOUT);
+      img.onload = () => finish(img);
+      img.onerror = () => finish(null);
+      img.src = mapTileUrl(z, xx, y);
+    });
+  }
+
+  // Draw a classic teardrop map pin (white-outlined, red) centred so its tip sits
+  // exactly on (x, y) — the station coordinates.
+  function drawPin(ctx, x, y) {
+    const r = 15, tipY = y, headY = y - 30;
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, tipY);
+    ctx.bezierCurveTo(x - r * 0.9, y - 18, x - r, headY - r * 0.2, x - r, headY - r);
+    ctx.arc(x, headY - r, r, Math.PI, 0, false);
+    ctx.bezierCurveTo(x + r, headY - r * 0.2, x + r * 0.9, y - 18, x, tipY);
+    ctx.closePath();
+    ctx.fillStyle = "#e23b2e"; ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.lineWidth = 2.5; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, headY - r, 5.5, 0, 2 * Math.PI);
+    ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.restore();
+  }
+
+  // Bottom-right imagery attribution + a bottom-left scale label, baked into the
+  // image so they survive every export.
+  function drawMapOverlay(ctx, w, h, km) {
+    ctx.save();
+    ctx.font = "600 12px -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    const pad = 6, th = 18;
+    const aw = ctx.measureText(MAP_ATTRIB).width + pad * 2;
+    ctx.fillStyle = "rgba(0,0,0,.55)";
+    ctx.fillRect(w - aw, h - th, aw, th);
+    ctx.fillStyle = "#fff"; ctx.textBaseline = "middle";
+    ctx.fillText(MAP_ATTRIB, w - aw + pad, h - th / 2 + 1);
+    const label = `${(+km).toLocaleString()} km across`;
+    const lw = ctx.measureText(label).width + pad * 2;
+    ctx.fillStyle = "rgba(0,0,0,.55)";
+    ctx.fillRect(0, h - th, lw, th);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, pad, h - th / 2 + 1);
+    ctx.restore();
+  }
+
+  // Fetch + stitch the satellite tiles for (lat, lon) spanning `km`, returning a
+  // self-contained JPEG data URL. Throws if no tiles load or the canvas can't be
+  // exported (tainted — a CORS regression at the tile host).
+  async function buildMapDataUrl(lat, lon, km) {
+    const z = pickZoom(lat, km);
+    const n = Math.pow(2, z);
+    const worldPx = 256 * n;
+    const res = MERCATOR_M_PER_PX0 * Math.cos(lat * Math.PI / 180) / n; // metres per source px
+    const srcPx = (km * 1000) / res;         // source-pixel window == exactly `km`
+    const scale = MAP_PX / srcPx;            // scale that window up/down to fill the output
+    const cx = lonToWorldX(lon, worldPx), cy = latToWorldY(lat, worldPx);
+    const left = cx - srcPx / 2, top = cy - srcPx / 2;
+    const txMin = Math.floor(left / 256), txMax = Math.floor((left + srcPx) / 256);
+    const tyMin = Math.floor(top / 256), tyMax = Math.floor((top + srcPx) / 256);
+
+    const jobs = [];
+    for (let tx = txMin; tx <= txMax; tx++)
+      for (let ty = tyMin; ty <= tyMax; ty++)
+        jobs.push(loadTile(z, tx, ty, n).then((img) => ({ img, tx, ty })));
+    const tiles = await Promise.all(jobs);
+    if (!tiles.some((t) => t.img)) throw new Error("no satellite tiles could be loaded");
+
+    const canvas = document.createElement("canvas");
+    canvas.width = MAP_PX; canvas.height = MAP_PX;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.fillStyle = "#243039"; ctx.fillRect(0, 0, MAP_PX, MAP_PX); // backdrop for any missing tile
+    const d = 256 * scale;
+    for (const t of tiles) if (t.img)
+      ctx.drawImage(t.img, Math.round((t.tx * 256 - left) * scale), Math.round((t.ty * 256 - top) * scale), Math.ceil(d), Math.ceil(d));
+    drawPin(ctx, MAP_PX / 2, MAP_PX / 2);
+    drawMapOverlay(ctx, MAP_PX, MAP_PX, km);
+    let dataUrl;
+    try { dataUrl = canvas.toDataURL("image/jpeg", 0.85); }
+    catch (err) { throw new Error("map could not be exported (imagery blocked cross-origin export)"); }
+    return { dataUrl, km, zoom: z, lat, lon, ts: Date.now() };
+  }
+
+  // Kick off (or re-use) the locator map for the current site. Regenerates when
+  // the stored map is missing or was built for a different location/size.
+  function ensureSiteMap(force) {
+    const s = state.site;
+    if (!s) return;
+    const m = state.mapImage;
+    const fresh = m && m.lat === s.lat && m.lon === s.lon && m.km === state.mapKm;
+    if (fresh && !force) { state.mapStatus = "ready"; renderSiteMap(); return; }
+    generateSiteMap();
+  }
+
+  async function generateSiteMap() {
+    const s = state.site;
+    if (!s) return;
+    const site = s, km = state.mapKm, token = ++mapGenToken;
+    state.mapStatus = "loading"; state.mapError = "";
+    renderSiteMap();
+    try {
+      const map = await buildMapDataUrl(s.lat, s.lon, km);
+      if (token !== mapGenToken || state.site !== site) return; // superseded (site/size changed)
+      state.mapImage = map; state.mapStatus = "ready"; state.mapError = "";
+      save(); renderSiteMap(); renderReport();
+    } catch (err) {
+      if (token !== mapGenToken || state.site !== site) return;
+      state.mapStatus = "error"; state.mapError = err.message || "could not load the map";
+      renderSiteMap();
+    }
+  }
+
+  function setMapKm(km) {
+    km = Math.round(Math.max(MAP_MIN_KM, Math.min(MAP_MAX_KM, km || 0)));
+    if (!km) return;
+    const input = $("#map-km");
+    if (input && +input.value !== km) input.value = km;
+    if (km === state.mapKm && state.mapStatus === "ready") { renderMapPresets(); return; }
+    state.mapKm = km;
+    save();
+    renderMapPresets();
+    generateSiteMap();
+  }
+
+  function renderMapPresets() {
+    const wrap = $("#map-presets");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    MAP_KM_PRESETS.forEach((km) => {
+      wrap.append(el("button", {
+        type: "button", class: "map-preset btn tiny" + (km === state.mapKm ? " on" : ""),
+        onclick: () => setMapKm(km),
+      }, `${km} km`));
+    });
+  }
+
+  // Render the map area for the current state (loading / ready / error). The
+  // <figure id="site-map"> lives in the summary card markup.
+  function renderSiteMap() {
+    const fig = $("#site-map");
+    if (!fig) return;
+    fig.innerHTML = "";
+    const s = state.site;
+    if (!s) return;
+    const frame = el("div", { class: "map-frame" });
+
+    if (state.mapStatus === "loading") {
+      frame.classList.add("is-loading");
+      frame.append(el("div", { class: "map-msg" }, el("span", { class: "spin" }), " Loading satellite imagery…"));
+      fig.append(frame);
+      return;
+    }
+    if (state.mapStatus === "error" || !state.mapImage) {
+      frame.classList.add("is-error");
+      const gmaps = `https://www.google.com/maps/@${s.lat},${s.lon},12z/data=!3m1!1e3`;
+      frame.append(el("div", { class: "map-msg" },
+        el("p", {}, "🛰 ", state.mapError ? `Map unavailable — ${state.mapError}.` : "Map not generated yet."),
+        el("p", { class: "map-sub" }, "Satellite tiles are fetched from Esri; this needs an internet connection."),
+        el("div", { class: "map-msg-actions" },
+          el("button", { type: "button", class: "btn tiny", onclick: () => generateSiteMap() }, "↻ Retry"),
+          el("a", { class: "btn tiny", href: gmaps, target: "_blank", rel: "noopener" }, "Open in Google Maps ↗"))));
+      fig.append(frame);
+      return;
+    }
+    // ready — scale + attribution are baked into the image itself (so they survive
+    // export); the caption below just confirms the size/centre for the operator.
+    const m = state.mapImage;
+    frame.append(el("img", {
+      class: "map-img", src: m.dataUrl, alt: `Satellite map centred on ${s.name} (${m.km} km across)`,
+      title: "Open the full-size map", onclick: () => window.open(m.dataUrl, "_blank"),
+    }));
+    fig.append(frame);
+    fig.append(el("figcaption", { class: "map-cap" },
+      `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${s.lat}, ${s.lon}`));
   }
 
   // ---------------------------------------------------------------- deep links
@@ -911,6 +1157,14 @@
   function renderReport() {
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
+    if (state.mapImage && state.mapImage.dataUrl && state.site) {
+      const m = state.mapImage;
+      const box = el("div", { class: "rsection" }, el("h3", {}, "Location map"));
+      box.append(el("figure", { class: "report-map" },
+        el("img", { src: m.dataUrl, alt: "Satellite locator map", onclick: () => window.open(m.dataUrl, "_blank") }),
+        el("figcaption", {}, `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}`)));
+      wrap.append(box);
+    }
     if ((state.siteImages || []).length) {
       const box = el("div", { class: "rsection" }, el("h3", {}, "Site photographs"));
       const grid = el("div", { class: "photo-grid" });
@@ -994,6 +1248,7 @@
     const key = LS_PREFIX + siteKey(state.site);
     const payload = {
       site: state.site, findings: state.findings, report: state.report, siteImages: state.siteImages,
+      mapKm: state.mapKm, mapImage: state.mapImage,
       date: $("#fld-date") ? $("#fld-date").value : state.date,
       maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
     };
@@ -1001,11 +1256,12 @@
       localStorage.setItem(key, JSON.stringify(payload));
     } catch (err) {
       if (err && err.name !== "QuotaExceededError") { toast("Could not save locally"); return; }
-      // Photos are the most likely reason this exceeded the quota — retry without
-      // them so findings/notes (previously always small enough to save) still do.
+      // Photos + the satellite map are the likeliest reason this exceeded the
+      // quota — retry without the embedded images so findings/notes (previously
+      // always small enough to save) still do. The map is regenerated on reload.
       try {
         const findings = Object.fromEntries(Object.entries(state.findings).map(([id, f]) => [id, { ...f, images: [] }]));
-        localStorage.setItem(key, JSON.stringify({ ...payload, siteImages: [], findings }));
+        localStorage.setItem(key, JSON.stringify({ ...payload, siteImages: [], mapImage: null, findings }));
         toast("Local storage is full — photos aren't saved locally (notes still are). Export your report soon.");
       } catch (_) {
         toast("Local storage is full — nothing could be saved locally. Export your report soon.");
@@ -1020,6 +1276,9 @@
       state.findings = d.findings || {};
       state.report = d.report || {};
       state.siteImages = d.siteImages || [];
+      state.mapKm = d.mapKm || MAP_DEFAULT_KM;
+      state.mapImage = (d.mapImage && DATA_IMG_RE.test(d.mapImage.dataUrl || "")) ? d.mapImage : null;
+      state.mapStatus = state.mapImage ? "ready" : "idle";
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
     } catch (_) { /* ignore corrupt entry */ }
@@ -1060,6 +1319,9 @@
         delivery_group: s.delivery_group, facility_types: s.facility_types,
         lat: s.lat, lon: s.lon, assessment_date: $("#fld-date").value, site_maintenance: $("#fld-maintenance").value,
         images: (state.siteImages || []).map(exportImage),
+        map: state.mapImage && state.mapImage.dataUrl
+          ? { km: state.mapImage.km, zoom: state.mapImage.zoom, source: MAP_ATTRIB, data_url: state.mapImage.dataUrl }
+          : null,
       },
       sections: REPORT_SECTIONS.map((sec) => ({
         id: sec.id, title: sec.title,
@@ -1075,6 +1337,14 @@
   function buildReportHtml(forPrint) {
     const r = reportObject();
     const s = r.site;
+    // esc() the data URL (not just captions) — this string is injected via innerHTML
+    // (print) / a raw <script>-free template (HTML export), so an unescaped value
+    // could otherwise break out of src="" if a crafted findings file supplied it.
+    const mapBlock = s.map && s.map.data_url
+      ? `<div class="pr-sec pr-map"><h2>Location map</h2>
+          <img class="pr-map-img" src="${esc(s.map.data_url)}" alt="Satellite locator map">
+          <p class="pr-map-cap">Satellite locator — ${esc(String(s.map.km))} km across · centred on ${esc(s.lat)}, ${esc(s.lon)} · ${esc(s.map.source || MAP_ATTRIB)}</p></div>`
+      : "";
     const siteShots = s.images && s.images.length
       ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images)}</div>` : "";
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
@@ -1097,6 +1367,7 @@
           <tr><td class="k">Facility</td><td>${esc((s.facility_types || []).join(", ") || "—")}</td><td class="k">Site maintenance</td><td>${esc(s.site_maintenance || "—")}</td></tr>
           <tr><td class="k">Latitude</td><td>${esc(s.lat)}</td><td class="k">Longitude</td><td>${esc(s.lon)}</td></tr>
         </table></div>
+      ${mapBlock}
       ${siteShots}
       ${secRows}
       <div class="pr-sec"><h2>Collection log — sources checked</h2>
@@ -1128,7 +1399,9 @@
       .pr-photos img{width:100%;height:110px;object-fit:cover;border:1px solid #bbb;border-radius:4px}
       .pr-photos figcaption{font-size:10px;color:#444;margin-top:2px}
       .pr-photos figcaption .credit{display:block;font-size:9px;color:#777;margin-top:1px}
-      .pr-photos figcaption .credit a{color:#777}</style>
+      .pr-photos figcaption .credit a{color:#777}
+      .pr-map-img{display:block;width:100%;max-width:520px;border:1px solid #bbb;border-radius:6px}
+      .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.html`, "text/html", html);
   }
@@ -1317,6 +1590,9 @@
     $("#load-coords").addEventListener("click", loadCoordSite);
     $("#import-load").addEventListener("click", doImport);
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
+    const mapKmInput = $("#map-km");
+    if (mapKmInput) mapKmInput.addEventListener("change", () => setMapKm(parseInt(mapKmInput.value, 10)));
+    $("#btn-map-refresh").addEventListener("click", () => generateSiteMap());
     $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
     $("#btn-filter-attention").addEventListener("click", () => {
