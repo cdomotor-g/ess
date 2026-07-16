@@ -55,8 +55,10 @@
    "method": "manual",
    "cors": false,
    "url": "https://pmst.environment.gov.au/",
+   "url_template": "https://pmst.environment.gov.au/#/map/(m:ex/group/edd5ea17-de62-4783-a492-4d954d28d24a)?lng={lon}&lat={lat}&zoom=18&baseLayers=Imagery,ImageryLabels",
+   "xlsx_import": "pmst_mnes",
    "what_to_find": "Matters of National Environmental Significance within a 50 km buffer of the site: protected areas (terrestrial & marine), Ramsar wetlands, World/National/Commonwealth heritage places, Great Barrier Reef Marine Park, Australian Marine Parks and listed critical habitat.",
-   "instructions": "1) Locate the site (lat/long is most specific). 2) LHS menu > Draw > draw a square around the location. 3) LHS menu > Report > select box 1. 4) Buffer = 50 km > Explore. 5) Generate report (bottom RHS) as Excel (easiest to sort by known/likely and IUCN status) or PDF. Record the matters returned against the categories in `epbc_matters`.",
+   "instructions": "1) The Open ↗ link drops you on the site (lat/long baked into the URL) with the export panel open. 2) Draw a square around the location. 3) Report > select box 1. 4) Buffer = 50 km > Explore. 5) Generate report (bottom RHS) as Excel. 6) Back in this tool, click 'Import PMST Excel' on this card — it extracts the Matters of National Environmental Significance (Known-only for species/communities) into the notes. Or record the matters manually against the categories in `epbc_matters`.",
    "qrg_section": "Threatened Habitat, Flora and Fauna",
    "priority": 1,
    "no_result_means": "No matters of national environmental significance were returned for the buffer."
