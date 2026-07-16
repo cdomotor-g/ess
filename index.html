@@ -156,6 +156,7 @@
             <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
             <label class="inline-check" title="When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings — from your note edits, imported findings, and agent runs"><input type="checkbox" id="toggle-auto-images" checked /> Auto-fetch reference images</label>
             <button class="btn ghost" id="btn-filter-attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
+            <button class="btn ghost" id="btn-filter-unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
             <button class="btn ghost" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant (ChatGPT, Gemini, Claude, Copilot…) to run this assessment and hand back JSON you can import here">📋 Copy prompt</button>
             <button class="btn ghost" id="btn-run-agent" hidden title="Run the whole desktop assessment with Claude (uses your API key)">🤖 Run agent</button>
             <button class="btn ghost" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
@@ -168,6 +169,7 @@
           <span class="chip failed">Search failed</span>
           <span class="chip manual">Needs manual check</span>.
           Sources marked <b>API</b> can be checked live in your browser.
+          Once you're satisfied with a card, tick <b>Reviewed</b> — the card turns green so you can track your own progress separately from the result itself (a <em>Found</em> result isn't always good news, e.g. a protected species that requires caution on site).
         </p>
         <div class="status-filter-bar" id="status-filter-bar">
           <span class="sfb-label">Show only:</span>

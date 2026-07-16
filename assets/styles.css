@@ -9,14 +9,19 @@
   --brand: #12507b;
   --brand-ink: #ffffff;
   --accent: #1f7a4d;
-  --found: #1f7a4d;
-  --found-bg: #e4f3ea;
+  /* "Found" is deliberately NOT green — a found result can mean caution is
+     needed on site (e.g. a protected species), not "all clear". Green is
+     reserved for the operator's own review-complete state (--reviewed). */
+  --found: #b5570f;
+  --found-bg: #fbe9d4;
   --none: #8a6d1a;
   --none-bg: #f6efd8;
   --failed: #b3261e;
   --failed-bg: #fbe6e4;
   --manual: #3a5a99;
   --manual-bg: #e7edf8;
+  --reviewed: #1f7a4d;
+  --reviewed-bg: #e4f3ea;
   --shadow: 0 1px 2px rgba(16,32,48,.06), 0 4px 16px rgba(16,32,48,.05);
   --radius: 12px;
 }
@@ -25,22 +30,25 @@
     --bg: #0e1519; --surface: #16212a;
     --surface-2: #1b2831; --ink: #e7eef3; --ink-soft: #9fb0bc; --line: #2a3a45;
     --brand: #2b7fb8; --accent: #46b17d;
-    --found: #6fd39b; --found-bg: #12321f; --none: #e0c25a; --none-bg: #332b10;
+    --found: #f0a860; --found-bg: #3a2410; --none: #e0c25a; --none-bg: #332b10;
     --failed: #f0938c; --failed-bg: #3a1512; --manual: #9db8ea; --manual-bg: #16233d;
+    --reviewed: #6fd39b; --reviewed-bg: #12321f;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.28);
   }
 }
 :root[data-theme="dark"] {
   --bg: #0e1519; --surface: #16212a; --surface-2: #1b2831; --ink: #e7eef3;
   --ink-soft: #9fb0bc; --line: #2a3a45; --brand: #2b7fb8; --accent: #46b17d;
-  --found: #6fd39b; --found-bg: #12321f; --none: #e0c25a; --none-bg: #332b10;
+  --found: #f0a860; --found-bg: #3a2410; --none: #e0c25a; --none-bg: #332b10;
   --failed: #f0938c; --failed-bg: #3a1512; --manual: #9db8ea; --manual-bg: #16233d;
+  --reviewed: #6fd39b; --reviewed-bg: #12321f;
 }
 :root[data-theme="light"] {
   --bg: #f4f6f8; --surface: #ffffff; --surface-2: #f0f3f6; --ink: #17242e;
   --ink-soft: #52616b; --line: #d9e0e6; --brand: #12507b; --accent: #1f7a4d;
-  --found: #1f7a4d; --found-bg: #e4f3ea; --none: #8a6d1a; --none-bg: #f6efd8;
+  --found: #b5570f; --found-bg: #fbe9d4; --none: #8a6d1a; --none-bg: #f6efd8;
   --failed: #b3261e; --failed-bg: #fbe6e4; --manual: #3a5a99; --manual-bg: #e7edf8;
+  --reviewed: #1f7a4d; --reviewed-bg: #e4f3ea;
 }
 
 * { box-sizing: border-box; }
@@ -161,13 +169,17 @@ textarea { resize: vertical; min-height: 62px; }
 .src.status-failed { border-left: 4px solid var(--failed); }
 .src.status-manual { border-left: 4px solid var(--manual); }
 .src.status-unset { border-left: 4px solid var(--line); }
+/* Reviewed tints the whole card so progress is visible at a glance; the
+   border-left above still tracks the Found/None/Failed/Manual category. */
+.src.is-reviewed { background: var(--reviewed-bg); }
 .src-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.src-top-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .src-name { font-weight: 650; }
 .src-num { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
   padding: 0 5px; margin-right: 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-soft);
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: middle; }
 .src-name .tag { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 5px; margin-left: 8px; vertical-align: middle; }
-.tag.api { background: var(--found-bg); color: var(--found); }
+.tag.api { background: var(--reviewed-bg); color: var(--reviewed); }
 .tag.internal { background: var(--manual-bg); color: var(--manual); }
 .tag.jur { background: var(--surface-2); color: var(--ink-soft); }
 .src-desc { font-size: 12.5px; color: var(--ink-soft); margin: 6px 0 10px; }
@@ -193,13 +205,24 @@ textarea { resize: vertical; min-height: 62px; }
 .chip.none { background: var(--none-bg); color: var(--none); }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
+.chip.reviewed { background: var(--reviewed-bg); color: var(--reviewed); }
+
+/* Prominent per-card "I've reviewed this" tickbox — separate axis from the
+   Found/None/Failed/Manual result, so review progress can be tracked on
+   top of (not instead of) the result status. */
+.review-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700;
+  padding: 5px 10px 5px 8px; border-radius: 999px; border: 1.5px solid var(--line); cursor: pointer;
+  user-select: none; color: var(--ink-soft); background: var(--surface); transition: background .15s, border-color .15s, color .15s; }
+.review-toggle:hover { border-color: var(--reviewed); }
+.review-toggle input { width: 15px; height: 15px; accent-color: var(--reviewed); cursor: pointer; margin: 0; }
+.review-toggle.on { border-color: var(--reviewed); color: var(--reviewed); background: var(--reviewed-bg); }
 
 /* ---------- photos ---------- */
 .photo-section { margin-top: 16px; }
 .dropzone { border: 1.5px dashed var(--line); border-radius: 10px; padding: 14px 16px; text-align: center;
   font-size: 13px; color: var(--ink-soft); cursor: pointer; transition: border-color .15s, background .15s; }
 .dropzone:hover, .dropzone:focus { border-color: var(--brand); outline: none; background: var(--surface-2); }
-.dropzone.drag { border-color: var(--accent); background: var(--found-bg); color: var(--found); }
+.dropzone.drag { border-color: var(--accent); background: var(--reviewed-bg); color: var(--reviewed); }
 .dropzone.small { padding: 8px 10px; font-size: 12px; }
 .dropzone .pick-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; font-weight: 600;
   color: var(--brand); text-decoration: underline; cursor: pointer; }
@@ -274,7 +297,7 @@ a.photo-credit:hover { text-decoration: underline; }
 
 /* ---------- attention banner (import / agent run) ---------- */
 .attention { border: 1px solid var(--manual); background: var(--manual-bg); color: var(--manual); border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 13.5px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.attention.clear { border-color: var(--found); background: var(--found-bg); color: var(--found); }
+.attention.clear { border-color: var(--reviewed); background: var(--reviewed-bg); color: var(--reviewed); }
 .attention b { font-variant-numeric: tabular-nums; }
 .attention .btn { background: transparent; color: inherit; border-color: currentColor; }
 input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
@@ -315,7 +338,7 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 #print-root .pr th, #print-root .pr td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
 #print-root .pr .k { color: #444; width: 32%; }
 #print-root .pr .st { font-weight: 700; }
-#print-root .pr .st-found { color: #1f7a4d; }
+#print-root .pr .st-found { color: #b5570f; }
 #print-root .pr .st-none { color: #8a6d1a; }
 #print-root .pr .st-failed { color: #b3261e; }
 #print-root .pr .st-manual { color: #3a5a99; }

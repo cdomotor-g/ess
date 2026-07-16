@@ -102,6 +102,7 @@
     maintenance: "",
     filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
     filterStatus: null,     // dashboard: show only sources with this one status (found/none/failed/manual/unset)
+    filterUnreviewed: false, // dashboard: show only sources not yet ticked "Reviewed"
     showAttention: false,   // show the attention banner (after import / agent run)
   };
   let mapGenToken = 0; // guards against a stale async map render landing after a newer request
@@ -703,6 +704,7 @@
     state.maintenance = "";
     state.filterAttention = false;
     state.filterStatus = null;
+    state.filterUnreviewed = false;
     state.showAttention = false;
     restore(); // pull any saved progress for this site
     renderWorkspace();
@@ -757,7 +759,7 @@
     json.collection_log.forEach((c) => {
       if (!c || !c.id) return;
       state.findings[c.id] = {
-        status: c.status || STATUS.UNSET, note: c.note || "",
+        status: c.status || STATUS.UNSET, note: c.note || "", reviewed: !!c.reviewed,
         result: c.result_text ? { html: esc(c.result_text).replace(/\n/g, "<br>"), ts: Date.now() } : null,
         images: importImages(c.images),
       };
@@ -768,6 +770,7 @@
     state.maintenance = si.site_maintenance || "";
     state.filterAttention = false;
     state.filterStatus = null;
+    state.filterUnreviewed = false;
     state.showAttention = true; // surface what the agent left for the human
     renderWorkspace();
     save();
@@ -1062,6 +1065,8 @@
       list = list.filter((s) => ((state.findings[s.id] || {}).status || "unset") === state.filterStatus);
     else if (state.filterAttention)
       list = list.filter((s) => ATTENTION.includes((state.findings[s.id] || {}).status || "unset"));
+    if (state.filterUnreviewed)
+      list = list.filter((s) => !(state.findings[s.id] || {}).reviewed);
     for (const id of Object.keys(cardNumbers)) delete cardNumbers[id];
     let n = 0;
     for (const cat of cats) {
@@ -1078,15 +1083,25 @@
     if (!wrap.children.length)
       wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" },
         state.filterStatus ? `No sources marked "${STATUS_LABEL[state.filterStatus]}".` :
-        state.filterAttention ? "✓ Nothing needs attention — every source has a result." : "No sources for this site."));
+        state.filterAttention ? "✓ Nothing needs attention — every source has a result." :
+        state.filterUnreviewed ? "✓ Everything has been reviewed." : "No sources for this site."));
     syncStatusFilterBar();
+    syncUnreviewedFilterButton();
   }
 
   function renderSourceCard(src) {
-    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
     if (!f.images) f.images = [];
-    const card = el("div", { class: `src status-${f.status}`, id: `src-${src.id}` });
+    const card = el("div", { class: `src status-${f.status}${f.reviewed ? " is-reviewed" : ""}`, id: `src-${src.id}` });
     const num = cardNumbers[src.id];
+
+    // "checked" is a boolean HTML attribute — setAttribute("checked", false) would
+    // still mark it checked, so set the property directly instead of via el(attrs).
+    const reviewCbInput = el("input", { type: "checkbox", onchange: (e) => setReviewed(src.id, e.target.checked) });
+    reviewCbInput.checked = !!f.reviewed;
+    const reviewToggle = el("label", { class: "review-toggle" + (f.reviewed ? " on" : ""), title: "Tick once you're satisfied with this source's result" },
+      reviewCbInput,
+      el("span", {}, f.reviewed ? "✓ Reviewed" : "Mark reviewed"));
 
     const tags = [];
     if (src.method === "api") tags.push(el("span", { class: "tag api" }, "API"));
@@ -1143,7 +1158,9 @@
     card.append(...[
       el("div", { class: "src-top" },
         el("div", { class: "src-name" }, el("span", { class: "src-num" }, num ? `${num}` : ""), src.name, ...tags),
-        el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status])),
+        el("div", { class: "src-top-right" },
+          reviewToggle,
+          el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status]))),
       el("div", { class: "src-desc" }, src.what_to_find || ""),
       actions,
       el("div", { class: "src-note" }, note),
@@ -1211,6 +1228,17 @@
     refreshCard(id);
     renderProgress();
     renderReport(); // evidence + suggested choices may change
+  }
+
+  // Tracks the operator's own "I've reviewed this card" progress — independent
+  // of the Found/None/Failed/Manual result, which is about the source, not the human.
+  function setReviewed(id, reviewed) {
+    const f = state.findings[id] || (state.findings[id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    f.reviewed = !!reviewed;
+    save();
+    if (state.filterUnreviewed && f.reviewed) renderDashboard(); // ticking removes it from this filter
+    else refreshCard(id);
+    renderProgress();
   }
 
   function refreshCard(id) {
@@ -1303,7 +1331,12 @@
   function renderProgress() {
     const list = sourcesForSite();
     const counts = { found: 0, none: 0, failed: 0, manual: 0, unset: 0 };
-    list.forEach((s) => { counts[(state.findings[s.id] || {}).status || "unset"]++; });
+    let reviewed = 0;
+    list.forEach((s) => {
+      const f = state.findings[s.id] || {};
+      counts[f.status || "unset"]++;
+      if (f.reviewed) reviewed++;
+    });
     const done = list.length - counts.unset;
     $("#progress-bar").style.width = list.length ? `${Math.round((done / list.length) * 100)}%` : "0";
     $("#progress-legend").innerHTML =
@@ -1311,7 +1344,8 @@
       `<span class="chip found">${counts.found} found</span>` +
       `<span class="chip none">${counts.none} none</span>` +
       `<span class="chip failed">${counts.failed} failed</span>` +
-      `<span class="chip manual">${counts.manual} manual</span>`;
+      `<span class="chip manual">${counts.manual} manual</span>` +
+      `<span class="chip reviewed">${reviewed}/${list.length} reviewed</span>`;
     renderAttention();
   }
 
@@ -1346,6 +1380,11 @@
   function syncFilterButton() {
     const btn = $("#btn-filter-attention");
     if (btn) btn.classList.toggle("on", state.filterAttention);
+  }
+
+  function syncUnreviewedFilterButton() {
+    const btn = $("#btn-filter-unreviewed");
+    if (btn) btn.classList.toggle("on", state.filterUnreviewed);
   }
 
   function syncStatusFilterBar() {
@@ -1522,7 +1561,7 @@
       const f = state.findings[s.id] || { status: "unset", note: "" };
       return {
         id: s.id, name: s.name, category: s.category, jurisdiction: s.jurisdiction,
-        url: buildUrl(s), status: f.status || "unset", note: f.note || "",
+        url: buildUrl(s), status: f.status || "unset", note: f.note || "", reviewed: !!f.reviewed,
         result_text: f.result ? f.result.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "",
         images: (f.images || []).map(exportImage),
       };
@@ -1862,6 +1901,10 @@
       state.filterAttention = !state.filterAttention;
       if (state.filterAttention) state.filterStatus = null;
       renderDashboard(); renderAttention(); syncFilterButton();
+    });
+    $("#btn-filter-unreviewed").addEventListener("click", () => {
+      state.filterUnreviewed = !state.filterUnreviewed;
+      renderDashboard();
     });
     $$(".sfb-btn").forEach((btn) => btn.addEventListener("click", () => {
       const s = btn.dataset.status;
