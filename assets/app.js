@@ -67,8 +67,20 @@
     (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`,
   ];
 
-  // Rough state bounding boxes (mirrors build/build_data.py). Heuristic only —
-  // user can override with the State selector. Most-specific first.
+  // State-specific tool lookups need the state a coordinate is actually in, not
+  // an administrative guess — so resolve it against real state boundary polygons
+  // (data/reference/au_states.geojson, loaded into DATA.stateBoundaries by
+  // loadReference()) with a point-in-polygon test, mirroring build/geostate.py.
+  // Natural Earth admin-1 feature names -> the state code sources are keyed on.
+  const STATE_NAME_TO_CODE = {
+    "Western Australia": "WA", "Northern Territory": "NT", "South Australia": "SA",
+    "Queensland": "QLD", "New South Wales": "NSW", "Victoria": "VIC", "Tasmania": "TAS",
+    "Australian Capital Territory": "ACT",
+    "Jervis Bay Territory": "NSW", "Lord Howe Island": "NSW",
+    "Macquarie Island": "TAS", "Ashmore and Cartier Islands": "WA",
+  };
+  // Last-resort fallback only, for when the boundary file hasn't loaded (or a
+  // point falls outside its coverage). Heuristic, boxes overlap near borders.
   const STATE_BBOXES = [
     ["ACT", -35.92, -35.12, 148.76, 149.40],
     ["TAS", -43.75, -39.10, 143.80, 148.55],
@@ -79,15 +91,46 @@
     ["NT", -26.01, -10.90, 128.99, 138.02],
     ["WA", -35.20, -13.68, 112.90, 129.02],
   ];
+  function pointInRing(x, y, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function pointInPolygon(x, y, poly) {
+    if (!pointInRing(x, y, poly[0])) return false;
+    return !poly.slice(1).some((hole) => pointInRing(x, y, hole));
+  }
+  // Cap on the nearest-vertex fallback, in degrees — see build/geostate.py.
+  const NEAREST_MAX_DEG = 3.0;
+  function nearestStateFromBoundaries(x, y) {
+    let bestCode = "", bestD2 = Infinity;
+    for (const { code, polys } of DATA.stateBoundaries) {
+      for (const poly of polys) for (const ring of poly) for (const pt of ring) {
+        const d2 = (pt[0] - x) ** 2 + (pt[1] - y) ** 2;
+        if (d2 < bestD2) { bestD2 = d2; bestCode = code; }
+      }
+    }
+    return bestD2 <= NEAREST_MAX_DEG * NEAREST_MAX_DEG ? bestCode : "";
+  }
   function stateFromCoords(lat, lon) {
     if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) return "";
+    if (DATA.stateBoundaries && DATA.stateBoundaries.length) {
+      for (const { code, polys } of DATA.stateBoundaries)
+        for (const poly of polys)
+          if (pointInPolygon(lon, lat, poly)) return code;
+      const nearest = nearestStateFromBoundaries(lon, lat);
+      if (nearest) return nearest;
+    }
     for (const [code, s, n, w, e] of STATE_BBOXES)
       if (lat >= s && lat <= n && lon >= w && lon <= e) return code;
     return "";
   }
 
   // ---------------------------------------------------------------- app state
-  const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null, weeds: [] };
+  const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null, weeds: [], stateBoundaries: [] };
   const state = {
     site: null,        // { name, station_num, wmo, state, delivery_group, facility_types, lat, lon, refs, primary_facility, manual }
     findings: {},      // sourceId -> { status, note, result, images: [{id,dataUrl,caption,ts}] }
@@ -599,6 +642,26 @@
       const j = await res.json();
       DATA.weeds = (j.weeds || []).filter((w) => typeof w === "string" && w.trim().length > 1);
     } catch (_) { /* suggestions are optional */ }
+  }
+
+  // State boundary polygons, for resolving a manually-entered/imported coordinate
+  // to its real state (see stateFromCoords). Best-effort: if this fails to load,
+  // stateFromCoords just falls back to the coarser bounding-box heuristic.
+  async function loadStateBoundaries() {
+    try {
+      const res = await fetch("data/reference/au_states.geojson", { cache: "no-cache" });
+      if (!res.ok) return;
+      const gj = await res.json();
+      DATA.stateBoundaries = (gj.features || [])
+        .map((f) => {
+          const code = STATE_NAME_TO_CODE[f.properties && f.properties.name];
+          if (!code) return null;
+          const geom = f.geometry;
+          const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+          return { code, polys };
+        })
+        .filter(Boolean);
+    } catch (_) { /* falls back to the bounding-box heuristic */ }
   }
 
   function showBanner(kind, html) {
@@ -1928,6 +1991,7 @@
     try {
       await loadData();
       await loadReference();
+      await loadStateBoundaries();
     } catch (err) {
       const local = location.protocol === "file:";
       showBanner("error",

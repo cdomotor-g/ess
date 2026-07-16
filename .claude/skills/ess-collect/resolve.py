@@ -23,12 +23,9 @@ REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DATA = os.path.join(REPO, "data")
 BBOX_DELTA = 0.03
 
-STATE_BBOXES = [
-    ("ACT", -35.92, -35.12, 148.76, 149.40), ("TAS", -43.75, -39.10, 143.80, 148.55),
-    ("VIC", -39.20, -33.98, 140.96, 150.05), ("NSW", -37.51, -28.16, 140.99, 153.64),
-    ("QLD", -29.18, -9.90, 137.99, 153.55), ("SA", -38.10, -25.99, 128.99, 141.02),
-    ("NT", -26.01, -10.90, 128.99, 138.02), ("WA", -35.20, -13.68, 112.90, 129.02),
-]
+sys.path.insert(0, os.path.join(REPO, "build"))
+from geostate import state_from_coords  # noqa: E402  — resolves state from real AU boundaries
+
 WEEDS = {
     "QLD": "https://www.business.qld.gov.au/industries/farms-fishing-forestry/agriculture/biosecurity/plants/invasive/restricted",
     "NSW": "https://weeds.org.au/regions/nsw/", "VIC": "https://agriculture.vic.gov.au/biosecurity/weeds/weeds-information",
@@ -41,13 +38,6 @@ WEEDS = {
 def load(name):
     with open(os.path.join(DATA, name), encoding="utf-8") as f:
         return json.load(f)
-
-
-def state_from_coords(lat, lon):
-    for code, s, n, w, e in STATE_BBOXES:
-        if s <= lat <= n and w <= lon <= e:
-            return code
-    return ""
 
 
 def find_station(stations, q):

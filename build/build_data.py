@@ -57,12 +57,16 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("openpyxl is required: pip install -r build/requirements.txt")
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from geostate import state_from_coords  # noqa: E402
+
 
 # --------------------------------------------------------------------------- #
 # State normalisation + state-based reference links
 # --------------------------------------------------------------------------- #
-# The workbook's "Region" field uses BOM delivery regions. Normalise to the
-# standard state/territory codes the state-based search tools are keyed on.
+# The workbook's "Region" field uses BOM delivery regions, which is what a
+# station's raw `region` attribute records. It's only used as a last-resort
+# state fallback (resolve_state, below) when coordinates don't resolve.
 REGION_TO_STATE = {
     "NSW": "NSW",
     "QLD": "QLD",
@@ -73,7 +77,7 @@ REGION_TO_STATE = {
     "ACT": "ACT",
     "TAS": "TAS",
     "TAS/ANT": "TAS",  # Tasmania / Antarctica delivery region
-    "HO": "",          # Head Office — resolve from coordinates instead
+    "HO": "",          # Head Office — not a state
 }
 
 # Canonical, public reference links per state. Seeded from the workbook's
@@ -94,43 +98,19 @@ STATE_WEEDS_LINK = {
 NATIONAL_INVASIVE_ANIMALS_LINK = "https://www.dcceew.gov.au/environment/invasive-species"
 NATIONAL_OUTBREAK_LINK = "https://www.outbreak.gov.au/"
 
-# Rough state bounding boxes to resolve "HO" / coordinate-only sites to a state.
-# Heuristic only (boxes overlap near borders); the browser tool lets the user
-# override. Ordered most-specific first so ACT wins over NSW.
-STATE_BBOXES = [
-    ("ACT", -35.92, -35.12, 148.76, 149.40),
-    ("TAS", -43.75, -39.10, 143.80, 148.55),
-    ("VIC", -39.20, -33.98, 140.96, 150.05),
-    ("NSW", -37.51, -28.16, 140.99, 153.64),
-    ("QLD", -29.18, -9.90, 137.99, 153.55),
-    ("SA", -38.10, -25.99, 128.99, 141.02),
-    ("NT", -26.01, -10.90, 128.99, 138.02),
-    ("WA", -35.20, -13.68, 112.90, 129.02),
-]
-
-
-def state_from_coords(lat, lon):
-    """Best-effort state code from a coordinate. Returns '' if unknown."""
-    if lat is None or lon is None:
-        return ""
-    try:
-        lat = float(lat)
-        lon = float(lon)
-    except (TypeError, ValueError):
-        return ""
-    for code, s, n, w, e in STATE_BBOXES:
-        if s <= lat <= n and w <= lon <= e:
-            return code
-    return ""
-
-
 def resolve_state(region, lat, lon):
-    """Normalise the region field to a state code, falling back to coordinates."""
-    code = REGION_TO_STATE.get(str(region).strip(), None)
+    """The state/territory a site is actually in, for state-specific lookups.
+
+    Geography wins: state-specific external tools (NSW BioNet vs QLD WildNet,
+    etc.) need to match where the site sits, not which BOM delivery region
+    services it — those disagree right along state borders (see geostate.py).
+    The workbook's Region field is only used when the coordinates don't
+    resolve to anything (missing/invalid lat-lon).
+    """
+    code = state_from_coords(lat, lon)
     if code:
         return code
-    # Region is blank, HO, or unrecognised — infer from position.
-    return state_from_coords(lat, lon)
+    return REGION_TO_STATE.get(str(region).strip(), "") or ""
 
 
 # --------------------------------------------------------------------------- #
