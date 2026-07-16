@@ -54,6 +54,15 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
    card's findings text and fetches a photo for each; with **Auto-fetch reference
    images** on (top of the dashboard, default on) this also happens as you finish
    editing a card, and automatically on **Import** and during agent runs.
+   * The **EPBC PMST** card's **Open ↗** link now bakes the site's lat/long into
+     the URL, so the Protected Matters Search Tool loads straight onto the
+     location with its export panel open. Draw the buffer, generate the **Excel**
+     report, then click **⬆ Import PMST Excel** on the card: the tool reads the
+     workbook entirely in your browser (no upload, no dependency) and renders the
+     **Matters of National Environmental Significance** down to a text summary in
+     the notes — heritage, Ramsar, GBRMP and marine areas in full; threatened
+     **communities and species filtered to those recorded as "Known"** (Likely/May
+     are counted but not listed).
 4. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Export to **Print/PDF**,
    **HTML**, or **JSON** — photos travel with the export (embedded, so the

@@ -1108,6 +1108,268 @@
     return tmpl.replace(/\{[a-z_]+\}/g, (m) => (m in repl ? repl[m] : m));
   }
 
+  // ------------------------------------------------- PMST Excel (.xlsx) import
+  // The EPBC Protected Matters Search Tool can export its result as an .xlsx.
+  // We read that workbook entirely in the browser — no library, no upload — and
+  // render the Matters of National Environmental Significance down to a text
+  // summary in the PMST card's notes (which then flows into the ESS report).
+  // An .xlsx is a ZIP of XML parts; we walk the central directory, inflate each
+  // part with the platform DecompressionStream, and read the cells with
+  // DOMParser (so XML entities/namespaces are handled for us).
+
+  async function inflateRaw(bytes) {
+    if (typeof DecompressionStream !== "function")
+      throw new Error("This browser can't open .xlsx files (needs DecompressionStream). Try a current Chrome, Edge, Firefox or Safari.");
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  // Parse a ZIP's central directory into { name: {method, start, size} } so we
+  // only inflate the parts we actually need.
+  function zipIndex(buf) {
+    const dv = new DataView(buf);
+    const u8 = new Uint8Array(buf);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= 0; i--) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+    if (eocd < 0) throw new Error("Not a valid .xlsx file (no ZIP end-of-directory record).");
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const index = {};
+    for (let n = 0; n < count && p + 46 <= u8.length; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true);
+      const csz = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true);
+      const extraLen = dv.getUint16(p + 30, true);
+      const commentLen = dv.getUint16(p + 32, true);
+      const lho = dv.getUint32(p + 42, true);
+      const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
+      // The local header repeats the name/extra with possibly different lengths.
+      const lNameLen = dv.getUint16(lho + 26, true);
+      const lExtraLen = dv.getUint16(lho + 28, true);
+      const start = lho + 30 + lNameLen + lExtraLen;
+      index[name] = { method, start, size: csz };
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return { dv, u8, index };
+  }
+
+  async function zipReadText(zip, name) {
+    const e = zip.index[name];
+    if (!e) return "";
+    const comp = zip.u8.subarray(e.start, e.start + e.size);
+    const bytes = e.method === 0 ? comp : await inflateRaw(comp);
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  const XLSX_COL = (ref) => {
+    const m = /^([A-Z]+)(\d+)$/.exec(ref);
+    if (!m) return 0;
+    let c = 0;
+    for (const ch of m[1]) c = c * 26 + (ch.charCodeAt(0) - 64);
+    return c - 1;
+  };
+
+  function xlsxSharedStrings(xml) {
+    if (!xml) return [];
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    return Array.from(doc.getElementsByTagName("si")).map((si) =>
+      Array.from(si.getElementsByTagName("t")).map((t) => t.textContent).join(""));
+  }
+
+  function xlsxSheetRows(xml, shared) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    const rows = [];
+    for (const rowEl of doc.getElementsByTagName("row")) {
+      const cells = [];
+      for (const c of rowEl.getElementsByTagName("c")) {
+        const ref = c.getAttribute("r");
+        const t = c.getAttribute("t");
+        let val = null;
+        if (t === "s") { const v = c.getElementsByTagName("v")[0]; val = v ? (shared[+v.textContent] ?? "") : ""; }
+        else if (t === "inlineStr") { const is = c.getElementsByTagName("t")[0]; val = is ? is.textContent : ""; }
+        else { const v = c.getElementsByTagName("v")[0]; val = v ? v.textContent : null; }
+        cells[ref ? XLSX_COL(ref) : cells.length] = val;
+      }
+      rows.push(cells);
+    }
+    return rows;
+  }
+
+  // Read an .xlsx ArrayBuffer into { sheetName: rows[][] }.
+  async function readXlsxSheets(buf) {
+    const zip = zipIndex(buf);
+    const shared = xlsxSharedStrings(await zipReadText(zip, "xl/sharedStrings.xml"));
+    const wb = new DOMParser().parseFromString(await zipReadText(zip, "xl/workbook.xml"), "application/xml");
+    const relsDoc = new DOMParser().parseFromString(await zipReadText(zip, "xl/_rels/workbook.xml.rels"), "application/xml");
+    const relTarget = {};
+    for (const r of relsDoc.getElementsByTagName("Relationship")) relTarget[r.getAttribute("Id")] = r.getAttribute("Target");
+    const sheets = {};
+    for (const s of wb.getElementsByTagName("sheet")) {
+      const name = s.getAttribute("name");
+      const rid = s.getAttribute("r:id") || s.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id");
+      let tgt = relTarget[rid];
+      if (!name || !tgt) continue;
+      tgt = tgt.replace(/^\//, "");
+      if (!/^xl\//.test(tgt)) tgt = "xl/" + tgt;
+      sheets[name] = xlsxSheetRows(await zipReadText(zip, tgt), shared);
+    }
+    return sheets;
+  }
+
+  // Reduce a parsed PMST workbook to the Matters of National Environmental
+  // Significance. Heritage/Ramsar/GBRMP/CMA are listed in full; communities and
+  // species are filtered to those recorded as "Known" (in the "Simple Presence"
+  // or "Rank" column) per the request — Likely/May are counted but not listed.
+  function parsePmstMnes(sheets) {
+    const norm = (v) => (v == null ? "" : String(v)).trim();
+    const lc = (v) => norm(v).toLowerCase();
+    const KNOWN = "known";
+
+    function table(name, tokens) {
+      const rows = sheets[name];
+      if (!rows) return null;
+      let hi = -1;
+      for (let i = 0; i < rows.length; i++) {
+        const cells = (rows[i] || []).map(lc);
+        if (tokens.some((t) => cells.includes(t))) { hi = i; break; }
+      }
+      if (hi < 0) return null;
+      const headers = (rows[hi] || []).map(norm);
+      const col = (...names) => {
+        for (const nm of names) { const idx = headers.findIndex((h) => lc(h) === lc(nm)); if (idx >= 0) return idx; }
+        return -1;
+      };
+      const data = [];
+      for (let i = hi + 1; i < rows.length; i++) {
+        const r = rows[i] || [];
+        if (r.slice(0, headers.length).every((c) => norm(c) === "")) continue;
+        data.push(r);
+      }
+      return { data, col };
+    }
+    const cell = (r, i) => (i >= 0 ? norm(r[i]) : "");
+    const cats = [];
+
+    let t = table("World Heritage", ["place name"]);
+    let items = [];
+    if (t) for (const r of t.data) {
+      const nm = cell(r, t.col("Place Name")); if (!nm) continue;
+      const st = cell(r, t.col("State")), legal = cell(r, t.col("Legal Status"));
+      items.push(nm + (st ? ` (${st})` : "") + (legal ? ` — ${legal}` : ""));
+    }
+    cats.push({ title: "World Heritage Properties", items });
+
+    t = table("National Heritage", ["place name"]); items = [];
+    if (t) for (const r of t.data) {
+      const nm = cell(r, t.col("Place Name")); if (!nm) continue;
+      const st = cell(r, t.col("State")), tail = [cell(r, t.col("Heritage Class")), cell(r, t.col("Legal Status"))].filter(Boolean).join("; ");
+      items.push(nm + (st ? ` (${st})` : "") + (tail ? ` — ${tail}` : ""));
+    }
+    cats.push({ title: "National Heritage Places", items });
+
+    t = table("Ramsar Wetlands", ["ramsar site name"]); items = [];
+    if (t) for (const r of t.data) {
+      const nm = cell(r, t.col("Ramsar Site Name")); if (!nm) continue;
+      const prox = cell(r, t.col("Proximity"));
+      items.push(nm + (prox ? ` — ${prox}` : ""));
+    }
+    cats.push({ title: "Wetlands of International Importance (Ramsar)", items });
+
+    t = table("GBRMP", ["zone type", "zone id"]); items = [];
+    if (t) for (const r of t.data) {
+      const zt = cell(r, t.col("Zone Type")), st = cell(r, t.col("State")); if (!zt && !st) continue;
+      items.push([zt, st && `(${st})`, cell(r, t.col("IUCN")) && `IUCN ${cell(r, t.col("IUCN"))}`].filter(Boolean).join(" "));
+    }
+    cats.push({ title: "Great Barrier Reef Marine Park", items });
+
+    t = table("CMA", ["feature name"]); items = [];
+    if (t) for (const r of t.data) { const nm = cell(r, t.col("Feature Name")); if (nm) items.push(nm); }
+    cats.push({ title: "Commonwealth Marine Area", items });
+
+    t = table("Communities", ["community name"]); items = []; let total = 0;
+    if (t) for (const r of t.data) {
+      const nm = cell(r, t.col("Community Name")); if (!nm) continue; total++;
+      if (lc(cell(r, t.col("Rank", "Simple Presence", "Presence"))) !== KNOWN) continue;
+      const catg = cell(r, t.col("Threatened Category")), txt = cell(r, t.col("Text", "Presence Text"));
+      items.push(nm + (catg ? ` — ${catg}` : "") + (txt ? ` [${txt}]` : ""));
+    }
+    cats.push({ title: "Listed Threatened Ecological Communities", items, total, knownOnly: true, unit: "communities" });
+
+    t = table("Threatened Sp", ["scientific name"]); items = []; total = 0;
+    if (t) for (const r of t.data) {
+      const sci = cell(r, t.col("Scientific Name")), common = cell(r, t.col("Common Name"));
+      if (!sci && !common) continue; total++;
+      if (lc(cell(r, t.col("Simple Presence", "Rank", "Presence"))) !== KNOWN) continue;
+      const name = common && lc(common) !== "null" ? `${common} (${sci})` : sci;
+      const tail = [cell(r, t.col("Class")), cell(r, t.col("Threatened Category"))].filter(Boolean).join(", ");
+      const txt = cell(r, t.col("Presence Text", "Text"));
+      items.push(name + (tail ? ` — ${tail}` : "") + (txt ? ` [${txt}]` : ""));
+    }
+    cats.push({ title: "Listed Threatened Species", items, total, knownOnly: true, unit: "species" });
+
+    t = table("Migratory Sp", ["scientific name"]); items = []; total = 0;
+    if (t) for (const r of t.data) {
+      const sci = cell(r, t.col("Scientific Name")), common = cell(r, t.col("Common Name"));
+      if (!sci && !common) continue; total++;
+      if (lc(cell(r, t.col("Rank", "Simple Presence", "Presence"))) !== KNOWN) continue;
+      const name = common && lc(common) !== "null" ? `${common} (${sci})` : sci;
+      const cls = cell(r, t.col("Class")), txt = cell(r, t.col("Text", "Presence Text"));
+      items.push(name + (cls ? ` — ${cls}` : "") + (txt ? ` [${txt}]` : ""));
+    }
+    cats.push({ title: "Listed Migratory Species", items, total, knownOnly: true, unit: "species" });
+
+    let generated = "";
+    for (const row of sheets.Summary || []) {
+      for (const c of row || []) {
+        const s = norm(c);
+        if (/report generated/i.test(s)) { generated = s.replace(/^.*generated\s*-?\s*/i, "").replace(/\s*-\s*/g, ", ").trim(); break; }
+      }
+      if (generated) break;
+    }
+
+    const L = ["EPBC Protected Matters Search Tool — Matters of National Environmental Significance"];
+    if (generated) L.push(`PMST report generated ${generated}.`);
+    L.push("");
+    let found = false;
+    for (const c of cats) {
+      if (c.knownOnly) {
+        if (c.items.length) { found = true; L.push(`${c.title} — "Known" only (${c.items.length} of ${c.total}):`); c.items.forEach((it) => L.push(`  • ${it}`)); }
+        else L.push(`${c.title} — "Known" only: none${c.total ? ` (${c.total} ${c.unit} returned at Likely/May — excluded)` : ""}`);
+      } else {
+        if (c.items.length) { found = true; L.push(`${c.title} (${c.items.length}):`); c.items.forEach((it) => L.push(`  • ${it}`)); }
+        else L.push(`${c.title}: none returned`);
+      }
+      L.push("");
+    }
+    while (L.length && L[L.length - 1] === "") L.pop();
+    return { text: L.join("\n"), found };
+  }
+
+  async function importPmstXlsx(sourceId, file, btn) {
+    const orig = btn ? btn.innerHTML : "";
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Reading…`; }
+    try {
+      const sheets = await readXlsxSheets(await file.arrayBuffer());
+      if (!sheets.Summary && !sheets["Threatened Sp"])
+        throw new Error("That doesn't look like a PMST export — expected the standard Protected Matters sheets.");
+      const res = parsePmstMnes(sheets);
+      const f = state.findings[sourceId] || (state.findings[sourceId] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
+      let note = res.text;
+      if (f.note && f.note.trim()) {
+        const replace = confirm("This card already has notes.\n\nOK = replace them with the imported PMST summary.\nCancel = keep your notes and add the summary above them.");
+        if (!replace) note = res.text + "\n\n——— Existing notes ———\n" + f.note;
+      }
+      f.note = note;
+      f.status = res.found ? STATUS.FOUND : STATUS.NONE;
+      save(); refreshCard(sourceId); renderProgress(); renderReport();
+      toast(res.found ? "PMST imported — MNES summary added to the notes." : "PMST imported — no MNES matters returned.");
+    } catch (err) {
+      if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = orig; }
+      toast(err.message || "Could not read that .xlsx file.");
+    }
+  }
+
   function sourcesForSite() {
     const st = state.site.state;
     const showInternal = $("#toggle-manual-internal").checked;
@@ -1188,6 +1450,19 @@
     const actions = el("div", { class: "src-actions" }, link, statusSel);
     if (src.method === "api" && src.api && src.api.kind === "ala_biocache") {
       actions.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runAla(src) }, "Check live"));
+    }
+    // PMST card: upload the tool's Excel export and extract the MNES summary in-browser.
+    if (src.xlsx_import === "pmst_mnes") {
+      const fileInput = el("input", {
+        type: "file", accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", hidden: true,
+        onchange: (e) => { const file = e.target.files && e.target.files[0]; if (file) importPmstXlsx(src.id, file, importBtn); e.target.value = ""; },
+      });
+      const importBtn = el("button", {
+        type: "button", class: "btn tiny primary",
+        title: "Upload the PMST Excel export — extracts the Matters of National Environmental Significance (Known-only for species & communities) into the notes below",
+        onclick: () => fileInput.click(),
+      }, "⬆ Import PMST Excel");
+      actions.append(importBtn, fileInput);
     }
     if (src.web_search) {
       const q = encodeURIComponent(fillTemplate(src.web_search));
