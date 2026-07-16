@@ -48,6 +48,15 @@ station number, unions facility types, and attaches per-state reference links.
 Output is deterministic (sorted) for clean diffs. Provenance (source hash,
 counts) goes in `data/meta.json`.
 
+Each station's `state` (what drives state-specific tool lookups) is resolved
+geographically from its own lat/lon via `build/geostate.py` — a point-in-polygon
+test against real state boundaries (`data/reference/au_states.geojson`, Natural
+Earth 1:10m admin-1, public domain) — rather than trusted from the workbook's
+`Region` column, which is a BOM delivery/administrative grouping that can
+disagree with geography right along state borders. `resolve.py` (the skill) and
+`assets/app.js` (manual coordinate entry / imports) use the same module/logic
+for sites resolved outside the workbook.
+
 ### Sources registry (`data/sources.json`)
 The heart of the system. A list of source objects, each describing one thing to
 check: which ESS category and state(s) it applies to, its URL (optionally a
@@ -154,8 +163,9 @@ See [AGENT-MODE.md](AGENT-MODE.md).
   "name": "WOODGATE ALERT",
   "station_num": "539251",
   "wmo": "",
-  "region": "QLD",           // raw BOM delivery region
-  "state": "QLD",            // normalised (TAS/ANT->TAS, HO->by coords)
+  "region": "QLD",           // raw BOM delivery region (administrative, not geographic)
+  "state": "QLD",            // resolved geographically from lat/lon (build/geostate.py);
+                              // region is only a fallback when coordinates don't resolve
   "delivery_group": "OOH-B",
   "facility_types": ["Flood Warning Network"],
   "primary_facility": "Flood Warning Network",
