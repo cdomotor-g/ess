@@ -301,7 +301,7 @@
    "states": ["QLD"],
    "method": "manual",
    "cors": false,
-   "url": "https://qldspatial.information.qld.gov.au/biomaps/index.html",
+   "url": "https://apps.information.qld.gov.au/Storymaps/Biomaps/",
    "what_to_find": "Biodiversity, essential habitat and wildlife records for the area.",
    "qrg_section": "State Based Searches",
    "priority": 11
@@ -340,10 +340,24 @@
    "states": ["QLD"],
    "method": "manual",
    "cors": false,
-   "url": "https://www.qld.gov.au/environment/plants-animals/species-information/wildnet",
-   "what_to_find": "Species records (including conservation-significant) for the locality.",
+   "url": "https://wildnet.science-data.qld.gov.au/species-search",
+   "url_template": "https://wildnet.science-data.qld.gov.au/species-search?central_point_latitude={lat}&central_point_longitude={lon}&distance=1&location_search_by=point&advanced=false&tab=0",
+   "api": {
+    "kind": "wildnet",
+    "base_url": "https://wildnet-pub.science-data.qld.gov.au",
+    "openapi": "https://wildnet-pub.science-data.qld.gov.au/openapi.json",
+    "dataset": "https://www.data.qld.gov.au/dataset/qld-wildlife-data-api",
+    "search_web_url": "https://wildnet.science-data.qld.gov.au/species-search?central_point_latitude={lat}&central_point_longitude={lon}&distance={distance_km}&location_search_by=point&advanced=false&tab=0",
+    "point_params": {"latitude": "central_point_latitude", "longitude": "central_point_longitude", "distance_km": "distance", "search_by": "location_search_by=point"},
+    "default_distance_km": 1,
+    "docs": "Queensland WildNet is the state's authoritative wildlife/species register. The public API (see openapi) returns species records (flora and fauna, including conservation-significant taxa) for a point + radius. When you query it, classify each taxon as flora (plant), fauna (animal) or ecological community and record it under the matching proforma section."
+   },
+   "what_to_find": "Queensland WildNet species records — the authoritative state register of flora & fauna (including conservation-significant / threatened taxa) recorded near the point. Classify each record as a plant (Threatened Flora), animal (Threatened Fauna) or community/habitat (Threatened Habitat).",
+   "instructions": "The Open ↗ link launches the WildNet species-search app pre-aimed at this site's coordinates (point search, 1 km). Queensland also publishes a public WildNet API (see the dataset link) — an assistant with web-fetch can query it directly for the point and radius. Always separate the returned taxa into plants vs animals vs communities and record each under the correct section.",
+   "web_search": "WildNet species records near {name} {lat} {lon} Queensland threatened",
    "qrg_section": "State Based Searches",
-   "priority": 12
+   "priority": 12,
+   "no_result_means": "No WildNet species records fall within the search radius (does not rule out unsurveyed taxa)."
   },
   {
    "id": "qld-heritage-register",

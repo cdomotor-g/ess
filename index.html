@@ -116,21 +116,10 @@
         </div>
         <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
-        <div class="site-map-section" id="site-map-section">
-          <div class="map-head">
-            <label class="field-label" id="map-label">Location map <span class="opt">(satellite — auto-populated, carried through to the report &amp; export)</span></label>
-            <div class="map-controls">
-              <span class="map-presets" id="map-presets"><!-- preset buttons filled by JS --></span>
-              <label class="map-km-field" for="map-km">Side
-                <input id="map-km" type="number" min="1" max="2000" step="5" value="100" inputmode="numeric" />
-                <span>km</span>
-              </label>
-              <label class="map-toggle" for="map-labels" title="Overlay roads and locality/place labels on the satellite imagery"><input type="checkbox" id="map-labels" checked /> Roads &amp; labels</label>
-              <button class="btn tiny" id="btn-map-refresh" title="Reload the satellite map for this location">↻ Refresh</button>
-            </div>
-          </div>
-          <figure class="site-map" id="site-map"><!-- filled by JS: map image / loading / error --></figure>
-        </div>
+        <!-- Two locator maps (hyper-local + greater-region), each with its own
+             controls + figure, built dynamically by assets/app.js. Both are
+             auto-populated and carried through to the report &amp; export. -->
+        <div class="site-maps" id="site-maps"><!-- filled by JS: renderMapsSections() --></div>
 
         <div class="summary-editable">
           <div>
@@ -167,7 +156,7 @@
           <h2><span class="step">3</span> Collect location metadata</h2>
           <div class="head-actions">
             <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
-            <label class="inline-check" title="When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings — from your note edits, imported findings, and agent runs"><input type="checkbox" id="toggle-auto-images" checked /> Auto-fetch reference images</label>
+            <label class="inline-check" title="Off by default (keeps the browser light). When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings on import / agent / API runs. Editing a card's notes never triggers a search — use the buttons on a species card to fetch reference images on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images</label>
             <button class="btn ghost" id="btn-filter-attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
             <button class="btn ghost" id="btn-filter-unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
             <button class="btn ghost" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant (ChatGPT, Gemini, Claude, Copilot…) to run this assessment and hand back JSON you can import here">📋 Copy prompt</button>

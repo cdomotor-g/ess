@@ -32,21 +32,58 @@
   // Persisted in localStorage; default on. Auto-fetch only ever *adds* images —
   // the user can delete any, and the manual "Fetch image" field always works.
   const LS_AUTO_IMAGES = "ess-workbench:v1:auto-images";
-  const autoImagesOn = () => { try { return localStorage.getItem(LS_AUTO_IMAGES) !== "0"; } catch (_) { return true; } };
+  // Default OFF: auto-fetching reference photos fires a burst of Wikipedia requests
+  // + canvas re-encoding, which was bogging the browser down. It now runs only when
+  // the operator opts in via the dashboard toggle (and even then only on import /
+  // agent / API runs — never as a side effect of editing a card's notes).
+  const autoImagesOn = () => { try { return localStorage.getItem(LS_AUTO_IMAGES) === "1"; } catch (_) { return false; } };
   const setAutoImagesPref = (on) => { try { localStorage.setItem(LS_AUTO_IMAGES, on ? "1" : "0"); } catch (_) {} };
   const MAX_AUTO_IMAGES_PER_CARD = 3; // cap per source so a wordy note can't spam fetches
 
+  // Default free-text seeded into a report section's note when a site is first
+  // loaded (only if the operator hasn't written anything there yet). The general
+  // biosecurity obligation (GBO) under Queensland's Biosecurity Act 2014 applies
+  // to every QLD site, so it's pre-filled into Additional Information for QLD —
+  // it flows straight into the exported report unless the operator edits it out.
+  const GBO_ADDITIONAL_TEXT =
+    "Under the Biosecurity Act 2014, everyone in Queensland has a general biosecurity obligation (GBO) to ensure that they do not spread a pest, disease or a contaminant. We are all responsible for managing biosecurity risks that are under our control.\n\n" +
+    "Under the GBO, individuals and corporations whose activities pose a biosecurity risk must:\n\n" +
+    "•  take all reasonable and practical steps to prevent or minimise each biosecurity risk\n" +
+    "•  minimise the likelihood of causing a biosecurity event, and limit the consequences if an event is caused\n" +
+    "• prevent or minimise the harmful effects a risk could have, and not do anything that might make any harmful effects worse.\n\n" +
+    "Even if you are permitted to access places under an Act, you still have a GBO to minimise biosecurity risks.";
+  // Section-note defaults, applied by newReportState() when a report section is
+  // first created for a site. State-aware where a default is jurisdiction-specific.
+  function defaultSectionNote(sectionId) {
+    if (sectionId === "additional" && state.site && state.site.state === "QLD") return GBO_ADDITIONAL_TEXT;
+    return "";
+  }
+  function newReportState(sectionId) { return { choice: null, note: defaultSectionNote(sectionId) }; }
+
   // ---------------------------------------------------------------- site map
-  // A satellite locator map is auto-generated for every site: tiles are fetched
-  // from Esri World Imagery (keyless, CORS-enabled), stitched onto a canvas with
-  // a pin at the station coordinates, and kept as a self-contained JPEG data URL
-  // — so it persists in localStorage and travels through the report + every
-  // export exactly like the station photos do. The user picks how many km the
-  // map spans (default 100).
-  const MAP_DEFAULT_KM = 100;      // starting side length (km across)
+  // TWO satellite locator maps are auto-generated for every site: a hyper-local
+  // one (default 10 km across) for the immediate surrounds and a greater-region
+  // one (default 250 km) for context. Tiles are fetched from Esri World Imagery
+  // (keyless, CORS-enabled), stitched onto a canvas with a pin at the station
+  // coordinates, and kept as self-contained JPEG data URLs — so they persist in
+  // localStorage and travel through the report + every export exactly like the
+  // station photos do. Both are carried into the report side by side.
   const MAP_MIN_KM = 1, MAP_MAX_KM = 2000;
-  const MAP_KM_PRESETS = [10, 25, 50, 100, 250, 500];
+  // Per-slot config: two independent maps, each with its own size + presets.
+  const MAP_SLOTS = [
+    { key: "local",  title: "Hyper-local map",   note: "close surrounds", defaultKm: 10,  presets: [1, 5, 10, 25, 50] },
+    { key: "region", title: "Greater-region map", note: "regional context", defaultKm: 250, presets: [50, 100, 250, 500, 1000] },
+  ];
+  const MAP_SLOT_BY_KEY = Object.fromEntries(MAP_SLOTS.map((s) => [s.key, s]));
+  const MAP_DEFAULT_KM = MAP_SLOTS[0].defaultKm; // legacy single-map fallback (import of old files)
   const MAP_PX = 900;              // rendered square size (px) of the map image
+  // Fresh per-slot map state for a new site. Declared (not arrow) so it's hoisted
+  // above the `state` initializer that calls it.
+  function freshMaps() {
+    const m = {};
+    for (const slot of MAP_SLOTS) m[slot.key] = { km: slot.defaultKm, labels: true, image: null, status: "idle", error: "" };
+    return m;
+  }
   const MAP_MIN_ZOOM = 3, MAP_MAX_ZOOM = 19;
   const MAP_TILE_TIMEOUT = 9000;   // per-tile load timeout (ms)
   const MERCATOR_M_PER_PX0 = 156543.03392; // ground metres/pixel at zoom 0, equator
@@ -136,11 +173,11 @@
     findings: {},      // sourceId -> { status, note, result, images: [{id,dataUrl,caption,ts}] }
     report: {},        // sectionId -> { choice, note }
     siteImages: [],    // [{id, dataUrl, caption, ts}] — general station photos
-    mapKm: MAP_DEFAULT_KM, // satellite map side length (km across)
-    mapLabels: true,   // overlay roads + locality/place labels on the imagery
-    mapImage: null,    // { dataUrl, km, zoom, labels, lat, lon, ts } — generated locator map (persisted, exported)
-    mapStatus: "idle", // transient: idle | loading | ready | error (not persisted)
-    mapError: "",      // transient: last map-generation error message
+    // Two independent locator maps keyed by slot (see MAP_SLOTS). Each slot:
+    //   { km, labels, image: {dataUrl,km,zoom,labels,lat,lon,ts}|null, status, error }
+    // km/labels are persisted (text key); image is persisted (image key); status/
+    // error are transient. freshMaps() seeds the defaults for a new site.
+    maps: freshMaps(),
     date: "",
     maintenance: "",
     filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
@@ -148,7 +185,7 @@
     filterUnreviewed: false, // dashboard: show only sources not yet ticked "Reviewed"
     showAttention: false,   // show the attention banner (after import / agent run)
   };
-  let mapGenToken = 0; // guards against a stale async map render landing after a newer request
+  const mapGenTokens = {}; // per-slot guard against a stale async render landing after a newer request
   const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
   const cardNumbers = {}; // sourceId -> position in the currently-rendered (filtered) dashboard list
 
@@ -763,11 +800,7 @@
     state.findings = {};
     state.report = {};
     state.siteImages = [];
-    state.mapKm = MAP_DEFAULT_KM;
-    state.mapLabels = true;
-    state.mapImage = null;
-    state.mapStatus = "idle";
-    state.mapError = "";
+    state.maps = freshMaps();
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
     state.filterAttention = false;
@@ -786,10 +819,8 @@
     measureTopbar();
     renderSummary();
     renderSiteImages();
-    if ($("#map-km")) $("#map-km").value = state.mapKm;
-    if ($("#map-labels")) $("#map-labels").checked = state.mapLabels;
-    renderMapPresets();
-    ensureSiteMap();
+    renderMapsSections();
+    ensureAllMaps();
     renderDashboard();
     renderReport();
     renderProgress();
@@ -819,14 +850,22 @@
     state.siteImages = importImages(si.images);
     // Rehydrate a carried-through map if the file has one; otherwise leave it to
     // auto-generate for the imported coordinates.
-    const impMap = si.map && (si.map.data_url || si.map.dataUrl);
-    state.mapKm = (si.map && +si.map.km) || MAP_DEFAULT_KM;
-    state.mapLabels = !si.map || si.map.labels !== false; // default on unless the file says otherwise
-    state.mapImage = (impMap && DATA_IMG_RE.test(impMap))
-      ? { dataUrl: impMap, km: (+si.map.km) || MAP_DEFAULT_KM, zoom: si.map.zoom || 0, labels: state.mapLabels, lat, lon, ts: Date.now() }
-      : null;
-    state.mapStatus = state.mapImage ? "ready" : "idle";
-    state.mapError = "";
+    // Rehydrate carried-through maps. New exports carry `site.maps` (one object per
+    // slot); older single-map files carry `site.map`, which seeds the local slot.
+    state.maps = freshMaps();
+    const impSlots = (si.maps && typeof si.maps === "object") ? si.maps : (si.map ? { local: si.map } : {});
+    for (const [key, mm] of Object.entries(impSlots)) {
+      const ms = mapState(key);
+      if (!mm) continue;
+      const url = mm.data_url || mm.dataUrl;
+      ms.km = (+mm.km) || ms.km;
+      ms.labels = mm.labels !== false; // default on unless the file says otherwise
+      ms.image = (url && DATA_IMG_RE.test(url))
+        ? { dataUrl: url, km: (+mm.km) || ms.km, zoom: mm.zoom || 0, labels: ms.labels, lat, lon, ts: Date.now() }
+        : null;
+      ms.status = ms.image ? "ready" : "idle";
+      ms.error = "";
+    }
     state.findings = {};
     json.collection_log.forEach((c) => {
       if (!c || !c.id) return;
@@ -838,6 +877,14 @@
     });
     state.report = {};
     (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
+    // Seed jurisdiction-specific section defaults (e.g. the QLD GBO text) where the
+    // imported file left the section blank, so they still appear in the report.
+    REPORT_SECTIONS.forEach((sec) => {
+      const def = defaultSectionNote(sec.id);
+      if (!def) return;
+      const rs = state.report[sec.id] || (state.report[sec.id] = { choice: null, note: "" });
+      if (!rs.note || !rs.note.trim()) rs.note = def;
+    });
     state.date = si.assessment_date || new Date().toISOString().slice(0, 10);
     state.maintenance = si.site_maintenance || "";
     state.filterAttention = false;
@@ -1001,101 +1048,146 @@
     return { dataUrl, km, zoom: z, labels: !!labels, lat, lon, ts: Date.now() };
   }
 
-  // Kick off (or re-use) the locator map for the current site. Regenerates when
-  // the stored map is missing or was built for a different location/size.
-  function ensureSiteMap(force) {
-    const s = state.site;
-    if (!s) return;
-    const m = state.mapImage;
-    const fresh = m && m.lat === s.lat && m.lon === s.lon && m.km === state.mapKm && m.labels === state.mapLabels;
-    if (fresh && !force) { state.mapStatus = "ready"; renderSiteMap(); return; }
-    generateSiteMap();
+  // Per-slot accessor + DOM lookups. Each slot's controls + figure live inside
+  // the dynamically-built section tagged with data-slot in #site-maps.
+  const mapState = (slot) => state.maps[slot] || (state.maps[slot] = { km: (MAP_SLOT_BY_KEY[slot] || {}).defaultKm || MAP_DEFAULT_KM, labels: true, image: null, status: "idle", error: "" });
+  const mapSectionEl = (slot) => document.querySelector(`#site-maps [data-slot="${slot}"]`);
+
+  // Build the two map sections (controls + figure) into #site-maps. Rebuilt whenever
+  // the workspace renders; renderSiteMap()/renderMapPresets() then fill each figure.
+  function renderMapsSections() {
+    const wrap = $("#site-maps");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    MAP_SLOTS.forEach((slot) => {
+      const ms = mapState(slot.key);
+      const presets = el("span", { class: "map-presets" });
+      const kmInput = el("input", { type: "number", min: MAP_MIN_KM, max: MAP_MAX_KM, step: 5, value: ms.km, inputmode: "numeric",
+        onchange: (e) => setMapKm(slot.key, parseInt(e.target.value, 10)) });
+      const labelsCb = el("input", { type: "checkbox", onchange: (e) => setMapLabels(slot.key, e.target.checked) });
+      labelsCb.checked = ms.labels;
+      const section = el("section", { class: "site-map-section", "data-slot": slot.key },
+        el("div", { class: "map-head" },
+          el("label", { class: "field-label" }, slot.title, " ", el("span", { class: "opt" }, `(satellite · ${slot.note} — carried through to the report & export)`)),
+          el("div", { class: "map-controls" },
+            presets,
+            el("label", { class: "map-km-field" }, "Side ", kmInput, el("span", {}, "km")),
+            el("label", { class: "map-toggle", title: "Overlay roads and locality/place labels on the satellite imagery" }, labelsCb, " Roads & labels"),
+            el("button", { type: "button", class: "btn tiny", title: "Reload the satellite map for this location", onclick: () => generateSiteMap(slot.key) }, "↻ Refresh"))),
+        el("figure", { class: "site-map" }));
+      wrap.append(section);
+      renderMapPresets(slot.key);
+      renderSiteMap(slot.key);
+    });
   }
 
-  async function generateSiteMap() {
+  // Kick off (or re-use) both locator maps for the current site. Regenerates a
+  // slot when its stored map is missing or was built for a different location/size.
+  function ensureAllMaps(force) {
+    MAP_SLOTS.forEach((slot) => ensureSiteMap(slot.key, force));
+  }
+  function ensureSiteMap(slot, force) {
     const s = state.site;
     if (!s) return;
-    const site = s, km = state.mapKm, labels = state.mapLabels, token = ++mapGenToken;
-    state.mapStatus = "loading"; state.mapError = "";
-    renderSiteMap();
+    const ms = mapState(slot);
+    const m = ms.image;
+    const fresh = m && m.lat === s.lat && m.lon === s.lon && m.km === ms.km && m.labels === ms.labels;
+    if (fresh && !force) { ms.status = "ready"; renderSiteMap(slot); return; }
+    generateSiteMap(slot);
+  }
+
+  async function generateSiteMap(slot) {
+    const s = state.site;
+    if (!s) return;
+    const ms = mapState(slot);
+    const site = s, km = ms.km, labels = ms.labels, token = (mapGenTokens[slot] = (mapGenTokens[slot] || 0) + 1);
+    ms.status = "loading"; ms.error = "";
+    renderSiteMap(slot);
     try {
       const map = await buildMapDataUrl(s.lat, s.lon, km, labels);
-      if (token !== mapGenToken || state.site !== site) return; // superseded (site/size changed)
-      state.mapImage = map; state.mapStatus = "ready"; state.mapError = "";
-      saveImages(); renderSiteMap(); renderReport();
+      if (token !== mapGenTokens[slot] || state.site !== site) return; // superseded (site/size changed)
+      ms.image = map; ms.status = "ready"; ms.error = "";
+      saveImages(); renderSiteMap(slot); renderReport();
     } catch (err) {
-      if (token !== mapGenToken || state.site !== site) return;
-      state.mapStatus = "error"; state.mapError = err.message || "could not load the map";
-      renderSiteMap();
+      if (token !== mapGenTokens[slot] || state.site !== site) return;
+      ms.status = "error"; ms.error = err.message || "could not load the map";
+      renderSiteMap(slot);
     }
   }
 
-  function setMapKm(km) {
+  function setMapKm(slot, km) {
     km = Math.round(Math.max(MAP_MIN_KM, Math.min(MAP_MAX_KM, km || 0)));
     if (!km) return;
-    const input = $("#map-km");
+    const ms = mapState(slot);
+    const sec = mapSectionEl(slot);
+    const input = sec && sec.querySelector(".map-km-field input");
     if (input && +input.value !== km) input.value = km;
-    if (km === state.mapKm && state.mapStatus === "ready") { renderMapPresets(); return; }
-    state.mapKm = km;
+    if (km === ms.km && ms.status === "ready") { renderMapPresets(slot); return; }
+    ms.km = km;
     save();
-    renderMapPresets();
-    generateSiteMap();
+    renderMapPresets(slot);
+    generateSiteMap(slot);
   }
 
-  // Toggle the road/place overlay on the locator map and re-render it.
-  function setMapLabels(on) {
+  // Toggle the road/place overlay on one locator map and re-render it.
+  function setMapLabels(slot, on) {
     on = !!on;
-    if (on === state.mapLabels) return;
-    state.mapLabels = on;
-    const cb = $("#map-labels");
+    const ms = mapState(slot);
+    if (on === ms.labels) return;
+    ms.labels = on;
+    const sec = mapSectionEl(slot);
+    const cb = sec && sec.querySelector(".map-toggle input");
     if (cb && cb.checked !== on) cb.checked = on;
     save();
-    generateSiteMap();
+    generateSiteMap(slot);
   }
 
-  function renderMapPresets() {
-    const wrap = $("#map-presets");
+  function renderMapPresets(slot) {
+    const sec = mapSectionEl(slot);
+    const wrap = sec && sec.querySelector(".map-presets");
     if (!wrap) return;
+    const ms = mapState(slot);
     wrap.innerHTML = "";
-    MAP_KM_PRESETS.forEach((km) => {
+    (MAP_SLOT_BY_KEY[slot].presets || []).forEach((km) => {
       wrap.append(el("button", {
-        type: "button", class: "map-preset btn tiny" + (km === state.mapKm ? " on" : ""),
-        onclick: () => setMapKm(km),
+        type: "button", class: "map-preset btn tiny" + (km === ms.km ? " on" : ""),
+        onclick: () => setMapKm(slot, km),
       }, `${km} km`));
     });
   }
 
-  // Render the map area for the current state (loading / ready / error). The
-  // <figure id="site-map"> lives in the summary card markup.
-  function renderSiteMap() {
-    const fig = $("#site-map");
+  // Render one slot's map area for its current state (loading / ready / error).
+  function renderSiteMap(slot) {
+    const sec = mapSectionEl(slot);
+    const fig = sec && sec.querySelector(".site-map");
     if (!fig) return;
     fig.innerHTML = "";
     const s = state.site;
     if (!s) return;
+    const ms = mapState(slot);
     const frame = el("div", { class: "map-frame" });
 
-    if (state.mapStatus === "loading") {
+    if (ms.status === "loading") {
       frame.classList.add("is-loading");
       frame.append(el("div", { class: "map-msg" }, el("span", { class: "spin" }), " Loading satellite imagery…"));
       fig.append(frame);
       return;
     }
-    if (state.mapStatus === "error" || !state.mapImage) {
+    if (ms.status === "error" || !ms.image) {
       frame.classList.add("is-error");
       const gmaps = `https://www.google.com/maps/@${s.lat},${s.lon},12z/data=!3m1!1e3`;
       frame.append(el("div", { class: "map-msg" },
-        el("p", {}, "🛰 ", state.mapError ? `Map unavailable — ${state.mapError}.` : "Map not generated yet."),
+        el("p", {}, "🛰 ", ms.error ? `Map unavailable — ${ms.error}.` : "Map not generated yet."),
         el("p", { class: "map-sub" }, "Satellite tiles are fetched from Esri; this needs an internet connection."),
         el("div", { class: "map-msg-actions" },
-          el("button", { type: "button", class: "btn tiny", onclick: () => generateSiteMap() }, "↻ Retry"),
+          el("button", { type: "button", class: "btn tiny", onclick: () => generateSiteMap(slot) }, "↻ Retry"),
           el("a", { class: "btn tiny", href: gmaps, target: "_blank", rel: "noopener" }, "Open in Google Maps ↗"))));
       fig.append(frame);
       return;
     }
     // ready — scale + attribution are baked into the image itself (so they survive
     // export); the caption below just confirms the size/centre for the operator.
-    const m = state.mapImage;
+    const m = ms.image;
     frame.append(el("img", {
       class: "map-img", src: m.dataUrl, alt: `Satellite map centred on ${s.name} (${m.km} km across)`,
       title: "Open the full-screen map — scroll to zoom, drag to pan",
@@ -1103,7 +1195,7 @@
     }));
     fig.append(frame);
     fig.append(el("figcaption", { class: "map-cap" },
-      `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${s.lat}, ${s.lon}`));
+      `${MAP_SLOT_BY_KEY[slot].title} — ${(+m.km).toLocaleString()} km across · centred on ${s.lat}, ${s.lon}`));
   }
 
   // ---------------------------------------------------------------- deep links
@@ -1482,15 +1574,15 @@
 
     // onchange fires on blur; re-render the report so the edited note lands in its
     // target section live (the report is a separate DOM tree, so rebuilding it never
-    // disturbs a click on this card). When auto-fetch is on and this is a species
-    // card, also scan the just-edited notes for subjects and pull reference photos.
+    // disturbs a click on this card). Editing the notes NO LONGER triggers any
+    // automatic Wikipedia image search in the background — that turned every note
+    // edit into a burst of network fetches + canvas work that bogged the browser
+    // down. Reference photos are now pulled only on explicit request (the "✨
+    // Reference image from notes" / "🔎 Search by name…" buttons on the card).
     const note = el("textarea", {
       placeholder: "Notes / evidence for the report…",
       oninput: (e) => { f.note = e.target.value; save(); },
-      onchange: () => {
-        renderReport();
-        if (autoImagesOn() && WIKI_IMAGE_CATEGORIES.has(src.category)) autoFetchFromNotes(src.id, null, true);
-      },
+      onchange: () => { renderReport(); },
     });
     note.value = f.note || "";
     // Wipe just the notes text (keeps photos/reference images) so an operator can
@@ -1794,8 +1886,13 @@
     if (src.category === "threatened") {
       if (/ecosystem|wetland|\bhabitat\b|regional[- ]?ecosystem|vegetation|community|communities/.test(hay)) return "threatened_habitat";
       if (/flora|plant|plantnet|weed/.test(hay)) return "threatened_flora";
-      if (/fauna|animal|wildlife|wildnet|bionet|\bbird\b|frog|fish/.test(hay)) return "threatened_fauna";
-      return "threatened_fauna"; // generic biodiversity portals (PMST, ALA, state atlases)
+      if (/\bfauna\b|\banimal\b|\bbird\b|frog|fish/.test(hay)) return "threatened_fauna";
+      // Broad biodiversity registers (PMST, Atlas of Living Australia, WildNet,
+      // BioNet, state atlases) return BOTH plants and animals — never pre-file them
+      // under Fauna, which is how a threatened plant used to land in the wrong
+      // section. Default them to the umbrella Threatened Habitat section; the agent /
+      // operator then classifies each taxon into Flora vs Fauna explicitly.
+      return "threatened_habitat";
     }
     if (src.category === "indigenous_heritage") {
       return /heritage|inherit|achis|historic|register/.test(hay) ? "heritage" : "indigenous_areas";
@@ -1818,7 +1915,12 @@
   function includedCardsForSection(sectionId) {
     return sourcesForSite()
       .map((src) => ({ src, f: state.findings[src.id] || {} }))
-      .filter(({ src, f }) => cardIncluded(f) && targetSectionOf(src, f) === sectionId);
+      // Internal / login-only sources (e.g. the Bureau permits register, POPE /
+      // leasing SharePoint) are operator working items: their notes are "how to
+      // check internal system X" instructions for staff, not ESS content. They stay
+      // visible on the collection dashboard but never flow into the report — on
+      // screen or in any export — so those instructions can't land in the final report.
+      .filter(({ src, f }) => !src.internal && cardIncluded(f) && targetSectionOf(src, f) === sectionId);
   }
   // Point a card at a report section (from its Include dropdown). Choosing a
   // target implies the user wants it in the report, so include it too.
@@ -1878,6 +1980,15 @@
   // section and stay in sync without any copy/paste going stale.
   function renderIncludeRow(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    // Internal / login-only sources are operator working items only — their notes
+    // are staff instructions ("check internal system X"), never ESS report content,
+    // so they can't be added to a report section and get an explainer instead of
+    // the Include controls.
+    if (src.internal) {
+      return el("div", { class: "include-row is-internal" },
+        el("span", { class: "inc-lead" }, "🔒 Internal check"),
+        el("span", { class: "inc-internal-note" }, "For the operator only — kept out of the ESS report. Record it here so it's actioned before the site visit."));
+    }
     const included = cardIncluded(f);
     const target = targetSectionOf(src, f);
     const sel = el("select", { class: "inc-target",
@@ -1927,14 +2038,22 @@
   function renderReport() {
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
-    if (state.mapImage && state.mapImage.dataUrl && state.site) {
-      const m = state.mapImage;
-      const box = el("div", { class: "rsection" }, el("h3", {}, "Location map"));
-      box.append(el("figure", { class: "report-map" },
-        el("img", { src: m.dataUrl, alt: "Satellite locator map", loading: "lazy", decoding: "async",
-          title: "Open the full-screen map — scroll to zoom, drag to pan",
-          onclick: () => openLightbox(m.dataUrl, `Satellite locator — ${(+m.km).toLocaleString()} km across · ${state.site.name}`) }),
-        el("figcaption", {}, `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
+    // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
+    const readyMaps = state.site ? MAP_SLOTS.filter((slot) => { const ms = state.maps[slot.key]; return ms && ms.image && ms.image.dataUrl; }) : [];
+    if (readyMaps.length) {
+      const box = el("div", { class: "rsection" }, el("h3", {}, readyMaps.length > 1 ? "Location maps" : "Location map"));
+      // Grid columns follow the number of ready maps, so a single (still-loading or
+      // failed) slot fills the width instead of leaving an empty half.
+      const row = el("div", { class: "report-maps", style: `grid-template-columns:repeat(${readyMaps.length},1fr)` });
+      readyMaps.forEach((slot) => {
+        const m = state.maps[slot.key].image;
+        row.append(el("figure", { class: "report-map" },
+          el("img", { src: m.dataUrl, alt: `${slot.title} — satellite locator`, loading: "lazy", decoding: "async",
+            title: "Open the full-screen map — scroll to zoom, drag to pan",
+            onclick: () => openLightbox(m.dataUrl, `${slot.title} — ${(+m.km).toLocaleString()} km across · ${state.site.name}`) }),
+          el("figcaption", {}, `${slot.title} — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
+      });
+      box.append(row);
       wrap.append(box);
     }
     if ((state.siteImages || []).length) {
@@ -1945,7 +2064,7 @@
       wrap.append(box);
     }
     REPORT_SECTIONS.forEach((section) => {
-      const rstate = state.report[section.id] || (state.report[section.id] = { choice: null, note: "" });
+      const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
       if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
 
       const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""), id: `rsec-${section.id}` });
@@ -1990,13 +2109,19 @@
         const seenImg = new Set();
         inc.forEach(({ src, f }) => {
           const st = f.status && f.status !== "unset" ? f.status : "unset";
+          // Same number this source carries on its collection card (left pane) so the
+          // two columns can be cross-referenced at a glance. On-screen aid only — the
+          // number is NOT part of reportObject()/buildReportHtml, so it never reaches
+          // the exported/printed report.
+          const num = cardNumbers[src.id];
           const head = el("div", { class: "r-inc-head" },
+            num ? el("span", { class: "src-num", title: "Collection card number (left pane)" }, `${num}`) : null,
             el("span", { class: "chip " + (st === "unset" ? "manual" : st), style: st === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[st]),
             el("span", { class: "r-inc-name" }, src.name),
             el("div", { class: "r-inc-actions" },
               el("button", { type: "button", class: "btn tiny r-inc-show", title: "Scroll the collection (left) to this source's card", onclick: () => showSourceCard(src.id) }, "⇠ Show"),
               el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
-          const item = el("div", { class: "r-inc-item" }, head);
+          const item = el("div", { class: "r-inc-item status-" + st }, head);
           if (f.note && f.note.trim()) item.append(el("div", { class: "r-inc-note" }, f.note.trim()));
           const imgs = (f.images || []).filter((im) => { const k = im.dataUrl || im.id; if (seenImg.has(k)) return false; seenImg.add(k); return true; });
           if (imgs.length) {
@@ -2025,7 +2150,7 @@
   // place (toggling the class + label on the existing nodes) so it never triggers a
   // full renderReport(), which on an image-heavy site would be needlessly expensive.
   function setSectionReviewed(sectionId, reviewed, box, label) {
-    const rstate = state.report[sectionId] || (state.report[sectionId] = { choice: null, note: "" });
+    const rstate = state.report[sectionId] || (state.report[sectionId] = newReportState(sectionId));
     rstate.reviewed = !!reviewed;
     save();
     if (box) box.classList.toggle("is-reviewed", rstate.reviewed);
@@ -2078,9 +2203,12 @@
       const { images, ...rest } = f; // `images` intentionally dropped from the text payload
       findingsText[id] = rest;
     }
+    // Per-slot map size/labels (small — the heavy image data lives in the img key).
+    const mapsMeta = {};
+    for (const [k, ms] of Object.entries(state.maps || {})) mapsMeta[k] = { km: ms.km, labels: ms.labels };
     const textPayload = {
       v: 2, site: state.site, findings: findingsText, report: state.report,
-      mapKm: state.mapKm, mapLabels: state.mapLabels,
+      maps: mapsMeta,
       date: $("#fld-date") ? $("#fld-date").value : state.date,
       maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
     };
@@ -2096,10 +2224,13 @@
       const findingImages = {};
       for (const [id, f] of Object.entries(state.findings))
         if (f.images && f.images.length) findingImages[id] = f.images;
-      const hasAny = state.siteImages.length || state.mapImage || Object.keys(findingImages).length;
+      // Per-slot generated map images (data URLs).
+      const mapImages = {};
+      for (const [k, ms] of Object.entries(state.maps || {})) if (ms.image) mapImages[k] = ms.image;
+      const hasAny = state.siteImages.length || Object.keys(mapImages).length || Object.keys(findingImages).length;
       try {
         if (hasAny)
-          localStorage.setItem(key + IMG_SUFFIX, JSON.stringify({ siteImages: state.siteImages, mapImage: state.mapImage, findingImages }));
+          localStorage.setItem(key + IMG_SUFFIX, JSON.stringify({ siteImages: state.siteImages, mapImages, findingImages }));
         else
           localStorage.removeItem(key + IMG_SUFFIX);
         imagesDirty = false;
@@ -2122,34 +2253,55 @@
       const d = JSON.parse(raw);
       state.findings = d.findings || {};
       state.report = d.report || {};
-      state.mapKm = d.mapKm || MAP_DEFAULT_KM;
-      state.mapLabels = d.mapLabels !== false; // default on for older saves
+      state.maps = freshMaps();
+      // Per-slot size/labels. New saves store `maps`; older single-map saves store
+      // mapKm/mapLabels (→ seed the local slot).
+      if (d.maps && typeof d.maps === "object") {
+        for (const [k, mm] of Object.entries(d.maps)) {
+          const ms = mapState(k);
+          if (mm && typeof mm.km === "number") ms.km = mm.km;
+          if (mm) ms.labels = mm.labels !== false;
+        }
+      } else if (d.mapKm) {
+        const ms = mapState("local");
+        ms.km = d.mapKm; ms.labels = d.mapLabels !== false;
+      }
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
       // (v1) for sites saved before the split, then mark dirty so the next save
       // migrates them out of the text key.
+      const applyMapImages = (mapImages, legacySingle) => {
+        if (mapImages && typeof mapImages === "object") {
+          for (const [k, im] of Object.entries(mapImages)) {
+            const ms = mapState(k);
+            ms.image = (im && DATA_IMG_RE.test(im.dataUrl || "")) ? im : null;
+          }
+        } else if (legacySingle && DATA_IMG_RE.test(legacySingle.dataUrl || "")) {
+          mapState("local").image = legacySingle; // migrate old single map into the local slot
+        }
+      };
       let imgRaw = null;
       try { imgRaw = localStorage.getItem(key + IMG_SUFFIX); } catch (_) {}
       if (imgRaw) {
         const di = JSON.parse(imgRaw) || {};
         state.siteImages = di.siteImages || [];
-        state.mapImage = (di.mapImage && DATA_IMG_RE.test(di.mapImage.dataUrl || "")) ? di.mapImage : null;
+        applyMapImages(di.mapImages, di.mapImage);
         const fi = di.findingImages || {};
         for (const [id, imgs] of Object.entries(fi)) {
           if (!state.findings[id]) state.findings[id] = { status: STATUS.UNSET, note: "", result: null };
           state.findings[id].images = Array.isArray(imgs) ? imgs : [];
         }
-        imagesDirty = false;
+        imagesDirty = !!di.mapImage; // a migrated legacy single map needs rewriting under the new layout
       } else {
         state.siteImages = d.siteImages || [];
-        state.mapImage = (d.mapImage && DATA_IMG_RE.test(d.mapImage.dataUrl || "")) ? d.mapImage : null;
-        imagesDirty = !!(state.siteImages.length || state.mapImage ||
+        applyMapImages(d.mapImages, d.mapImage);
+        imagesDirty = !!(state.siteImages.length || Object.values(state.maps).some((ms) => ms.image) ||
           Object.values(state.findings).some((f) => f.images && f.images.length));
       }
       // Every finding must have an images array (some were restored without one).
       for (const f of Object.values(state.findings)) if (!f.images) f.images = [];
-      state.mapStatus = state.mapImage ? "ready" : "idle";
+      for (const ms of Object.values(state.maps)) ms.status = ms.image ? "ready" : "idle";
     } catch (_) { /* ignore corrupt entry */ }
   }
 
@@ -2160,6 +2312,7 @@
       const f = state.findings[s.id] || { status: "unset", note: "" };
       return {
         id: s.id, name: s.name, category: s.category, jurisdiction: s.jurisdiction,
+        internal: !!s.internal,
         url: buildUrl(s), status: f.status || "unset", note: f.note || "", reviewed: !!f.reviewed,
         result_text: f.result ? f.result.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "",
         images: (f.images || []).map(exportImage),
@@ -2176,6 +2329,21 @@
     return o;
   }
 
+  // Serialize one map slot's generated image for export (or null if not ready).
+  function mapExportObj(slot) {
+    const ms = state.maps && state.maps[slot];
+    if (!ms || !ms.image || !ms.image.dataUrl) return null;
+    const m = ms.image;
+    return { slot, title: (MAP_SLOT_BY_KEY[slot] || {}).title || slot, km: m.km, zoom: m.zoom, labels: !!m.labels,
+      source: MAP_ATTRIB + (m.labels ? " · " + MAP_REF_ATTRIB : ""), data_url: m.dataUrl };
+  }
+  // All map slots as { slot: exportObj } (ready slots only).
+  function exportMaps() {
+    const out = {};
+    for (const slot of MAP_SLOTS) { const o = mapExportObj(slot.key); if (o) out[slot.key] = o; }
+    return out;
+  }
+
   function reportObject() {
     const s = state.site;
     return {
@@ -2188,10 +2356,10 @@
         delivery_group: s.delivery_group, facility_types: s.facility_types,
         lat: s.lat, lon: s.lon, assessment_date: $("#fld-date").value, site_maintenance: $("#fld-maintenance").value,
         images: (state.siteImages || []).map(exportImage),
-        map: state.mapImage && state.mapImage.dataUrl
-          ? { km: state.mapImage.km, zoom: state.mapImage.zoom, labels: !!state.mapImage.labels,
-              source: MAP_ATTRIB + (state.mapImage.labels ? " · " + MAP_REF_ATTRIB : ""), data_url: state.mapImage.dataUrl }
-          : null,
+        // Both locator maps, keyed by slot, so a re-import restores them. `map`
+        // stays populated (local slot) for backward-compatible consumers.
+        maps: exportMaps(),
+        map: mapExportObj("local"),
       },
       sections: REPORT_SECTIONS.map((sec) => ({
         id: sec.id, title: sec.title,
@@ -2215,10 +2383,18 @@
     // esc() the data URL (not just captions) — this string is injected via innerHTML
     // (print) / a raw <script>-free template (HTML export), so an unescaped value
     // could otherwise break out of src="" if a crafted findings file supplied it.
-    const mapBlock = s.map && s.map.data_url
-      ? `<div class="pr-sec pr-map"><h2>Location map</h2>
-          <img class="pr-map-img" src="${esc(s.map.data_url)}" alt="Satellite locator map">
-          <p class="pr-map-cap">Satellite locator — ${esc(String(s.map.km))} km across · centred on ${esc(s.lat)}, ${esc(s.lon)} · ${esc(s.map.source || MAP_ATTRIB)}</p></div>`
+    // Both locator maps, side by side, square + equally sized, filling the width
+    // (see .pr-maps CSS in the export/print styles). Falls back to the legacy single
+    // `map` if an imported file only carried one.
+    const mapSlots = (s.maps && Object.keys(s.maps).length)
+      ? MAP_SLOTS.map((slot) => s.maps[slot.key]).filter(Boolean)
+      : (s.map && s.map.data_url ? [s.map] : []);
+    const mapBlock = mapSlots.length
+      ? `<div class="pr-sec pr-map"><h2>Location map${mapSlots.length > 1 ? "s" : ""}</h2>
+          <div class="pr-maps">${mapSlots.map((m) => `<figure class="pr-map-fig">
+            <img class="pr-map-img" src="${esc(m.data_url)}" alt="${esc(m.title || "Satellite locator map")}">
+            <figcaption class="pr-map-cap">${esc(m.title || "Satellite locator")} — ${esc(String(m.km))} km across · centred on ${esc(s.lat)}, ${esc(s.lon)} · ${esc(m.source || MAP_ATTRIB)}</figcaption>
+          </figure>`).join("")}</div></div>`
       : "";
     const siteShots = s.images && s.images.length
       ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images, true)}</div>` : "";
@@ -2232,7 +2408,9 @@
       ${sec.note ? `<p>${esc(sec.note)}</p>` : ""}
       ${evNotesHtml(sec)}
       ${photosHtml(sec.images)}</div>`).join("");
-    const logRows = r.collection_log.map((c) => `<tr>
+    // Internal / login-only sources are operator working items — keep their
+    // "check internal system X" instructions out of the exported report entirely.
+    const logRows = r.collection_log.filter((c) => !c.internal).map((c) => `<tr>
       <td>${esc(c.name)}</td>
       <td class="st st-${c.status}">${esc(STATUS_LABEL[c.status] || c.status)}</td>
       <td>${esc(c.result_text || c.note || "")}</td>
@@ -2283,7 +2461,9 @@
       .pr-photos.pr-photos-large{gap:12px} .pr-photos.pr-photos-large figure{width:300px}
       .pr-photos.pr-photos-large img{height:auto;max-height:340px;object-fit:contain}
       .pr-ev{margin:6px 0 0} .pr-ev-item{font-size:11.5px;color:#333;margin:3px 0}
-      .pr-map-img{display:block;width:100%;max-width:520px;border:1px solid #bbb;border-radius:6px}
+      .pr-maps{display:flex;gap:12px;align-items:flex-start}
+      .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
+      .pr-map-img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid #bbb;border-radius:6px}
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.html`, "text/html", html);
@@ -2301,7 +2481,7 @@
       (sec.evidence_notes || []).forEach((e) => lines.push(`    – [${(STATUS_LABEL[e.status] || e.status)}] ${e.source}: ${e.note}`));
     });
     lines.push("", "Collection log:");
-    r.collection_log.forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
+    r.collection_log.filter((c) => !c.internal).forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
     copy(lines.join("\n"));
   }
   // Build a complete, self-contained, model-agnostic prompt for the current
@@ -2344,6 +2524,16 @@
     L.push(`- **manual** — the check needs a human: an interactive-only map/portal you cannot drive, an internal or login-only system, or a step like drawing a search box. Record the link and the exact steps so a person can finish it fast.`);
     L.push(`Prefer a real answer over "manual" whenever the information is reachable on the open web. Use latitude ${s.lat}, longitude ${s.lon} to place the site precisely, and treat "near" as roughly within 10 km unless a source says otherwise.`, ``);
 
+    L.push(`## Threatened species — classify plants vs animals vs communities`);
+    L.push(`Broad biodiversity registers (EPBC PMST, Atlas of Living Australia, Queensland WildNet, NSW BioNet, state atlases) return **both flora and fauna** in one result. Do NOT lump everything under one heading. For every threatened taxon you find, decide what it is and record it under the matching report section:`);
+    L.push(`- a **plant** → **Threatened Flora** (\`threatened_flora\`)`);
+    L.push(`- an **animal** (mammal, bird, reptile, amphibian, fish, invertebrate) → **Threatened Fauna** (\`threatened_fauna\`)`);
+    L.push(`- an **ecological community / regional ecosystem / habitat** → **Threatened Habitat** (\`threatened_habitat\`)`);
+    L.push(`Put each taxon's name in the note of the correct section (a threatened plant must never end up under Threatened Fauna). If unsure whether a name is a plant or an animal, look it up before filing it.`, ``);
+
+    L.push(`## Internal / login-only sources — operator action list, kept out of the report`);
+    L.push(`Some sources are internal Bureau of Meteorology systems (marked "internal / login-only" below — e.g. the permits register, POPE / leasing SharePoint). An external assistant cannot log in, so record these as \`manual\` with a short reminder of what a staff member must check. These are an **operator action list only** — the ESS Workbench keeps their notes OUT of the final exported report, so keep the note brief and staff-facing; do not treat them as report content.`, ``);
+
     L.push(`## Sources to check (${list.length})`);
     for (const cat of cats) {
       const inCat = list.filter((x) => x.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
@@ -2359,17 +2549,29 @@
         L.push(`- Open: ${buildUrl(src)}`);
         if (src.what_to_find) L.push(`- Find: ${src.what_to_find}`);
         if (src.instructions) L.push(`- Steps: ${src.instructions}`);
+        // Surface any public API so an assistant with web-fetch can query it directly
+        // (e.g. Queensland WildNet, Atlas of Living Australia) rather than treating
+        // the source as manual. Fetch runs server-side, so it bypasses browser CORS.
+        if (src.api && (src.api.openapi || src.api.base_url || src.api.endpoint || src.api.dataset)) {
+          const parts = [];
+          if (src.api.base_url) parts.push(`base ${src.api.base_url}`);
+          if (src.api.endpoint) parts.push(`endpoint ${src.api.endpoint}`);
+          if (src.api.openapi) parts.push(`OpenAPI ${src.api.openapi}`);
+          if (src.api.dataset) parts.push(`dataset ${src.api.dataset}`);
+          L.push(`- Public API: ${parts.join(" · ")}.${src.api.docs ? " " + src.api.docs : ""} Query it for the point (lat ${s.lat}, lon ${s.lon}) and radius, then classify each taxon (flora/fauna/community) into the correct section.`);
+        }
         if (src.id === "epbc-pmst" && DATA.sourcesMeta.epbc_matters)
           L.push(`- Record which of these matter types are returned: ${DATA.sourcesMeta.epbc_matters.join("; ")}.`);
         if (src.web_search) L.push(`- Web-search idea: "${fillTemplate(src.web_search)}"`);
         if (src.no_result_means) L.push(`- If nothing found → \`none\`: ${src.no_result_means}`);
-        if (src.internal) L.push(`- Note: internal Bureau of Meteorology system — an external assistant cannot log in, so this is normally \`manual\` (record the link + steps for staff).`);
+        if (src.internal) L.push(`- Note: internal Bureau of Meteorology system — an external assistant cannot log in, so this is normally \`manual\`. Keep the note brief and staff-facing: it is an operator action item and the tool keeps it OUT of the exported ESS report.`);
       });
     }
     L.push(``);
 
     L.push(`## Report wording — pick the exact standardized phrase`);
     L.push(`For each report section, choose one phrase verbatim from its list (this is the wording the ESS proforma requires). If you are unsure, leave it blank and the tool will suggest one from your source findings.`);
+    L.push(`Note the option "Known to occur in the region but not present within or immediately adjacent to the site." — pick it (for the threatened flora/fauna/habitat and invasive plant/animal sections) when a matter is recorded across the wider region/locality but the records do not fall within, or immediately next to, the site itself. Use the "at this site" option only when the records actually coincide with the site.`);
     REPORT_SECTIONS.forEach((sec) => {
       const opts = sec.dropdown ? (DATA.dropdowns[sec.dropdown] || []) : [];
       L.push(``, `**${sec.title}** (id: \`${sec.id}\`)`);
@@ -2613,11 +2815,8 @@
     });
     $("#import-load").addEventListener("click", doImport);
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
-    const mapKmInput = $("#map-km");
-    if (mapKmInput) mapKmInput.addEventListener("change", () => setMapKm(parseInt(mapKmInput.value, 10)));
-    const mapLabelsCb = $("#map-labels");
-    if (mapLabelsCb) mapLabelsCb.addEventListener("change", () => setMapLabels(mapLabelsCb.checked));
-    $("#btn-map-refresh").addEventListener("click", () => generateSiteMap());
+    // Map controls are built dynamically per slot in renderMapsSections() (each with
+    // its own wired inputs), so there are no static map handlers to attach here.
     $("#btn-clear-site").addEventListener("click", () => {
       $("#workspace").hidden = true;
       const wr = $("#workspace-right"); if (wr) wr.hidden = true;
@@ -2707,6 +2906,11 @@
       internal: !!s.internal, url: buildUrl(s), what_to_find: s.what_to_find || "",
       web_search: fillTemplate(s.web_search || ""), is_ala: !!(s.api && s.api.kind === "ala_biocache"),
       no_result_means: s.no_result_means || "",
+      // Public API a web-fetch-capable agent can query directly (e.g. QLD WildNet).
+      // ALA is excluded because it has its own dedicated query_ala tool.
+      api: (s.api && s.api.kind !== "ala_biocache" && (s.api.base_url || s.api.openapi || s.api.endpoint || s.api.dataset))
+        ? { base_url: s.api.base_url || "", openapi: s.api.openapi || "", endpoint: s.api.endpoint || "", dataset: s.api.dataset || "", docs: s.api.docs || "" }
+        : null,
     })),
     setResult: (id, status, note, resultText, imageSubjects) => {
       if (!DATA.sources.find((x) => x.id === id) || !VALID_STATUS.has(status)) return false;

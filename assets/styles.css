@@ -14,6 +14,9 @@
      reserved for the operator's own review-complete state (--reviewed). */
   --found: #b5570f;
   --found-bg: #fbe9d4;
+  /* Cherry edge used to make a "Found" result jump out — a found matter often
+     needs caution on site, so it's deliberately the loudest marking. */
+  --found-edge: #c1123c;
   --none: #8a6d1a;
   --none-bg: #f6efd8;
   --failed: #b3261e;
@@ -30,7 +33,7 @@
     --bg: #0e1519; --surface: #16212a;
     --surface-2: #1b2831; --ink: #e7eef3; --ink-soft: #9fb0bc; --line: #2a3a45;
     --brand: #2b7fb8; --accent: #46b17d;
-    --found: #f0a860; --found-bg: #3a2410; --none: #e0c25a; --none-bg: #332b10;
+    --found: #f0a860; --found-bg: #3a2410; --found-edge: #ff5d7e; --none: #e0c25a; --none-bg: #332b10;
     --failed: #f0938c; --failed-bg: #3a1512; --manual: #9db8ea; --manual-bg: #16233d;
     --reviewed: #6fd39b; --reviewed-bg: #12321f;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.28);
@@ -39,14 +42,14 @@
 :root[data-theme="dark"] {
   --bg: #0e1519; --surface: #16212a; --surface-2: #1b2831; --ink: #e7eef3;
   --ink-soft: #9fb0bc; --line: #2a3a45; --brand: #2b7fb8; --accent: #46b17d;
-  --found: #f0a860; --found-bg: #3a2410; --none: #e0c25a; --none-bg: #332b10;
+  --found: #f0a860; --found-bg: #3a2410; --found-edge: #ff5d7e; --none: #e0c25a; --none-bg: #332b10;
   --failed: #f0938c; --failed-bg: #3a1512; --manual: #9db8ea; --manual-bg: #16233d;
   --reviewed: #6fd39b; --reviewed-bg: #12321f;
 }
 :root[data-theme="light"] {
   --bg: #f4f6f8; --surface: #ffffff; --surface-2: #f0f3f6; --ink: #17242e;
   --ink-soft: #52616b; --line: #d9e0e6; --brand: #12507b; --accent: #1f7a4d;
-  --found: #b5570f; --found-bg: #fbe9d4; --none: #8a6d1a; --none-bg: #f6efd8;
+  --found: #b5570f; --found-bg: #fbe9d4; --found-edge: #c1123c; --none: #8a6d1a; --none-bg: #f6efd8;
   --failed: #b3261e; --failed-bg: #fbe6e4; --manual: #3a5a99; --manual-bg: #e7edf8;
   --reviewed: #1f7a4d; --reviewed-bg: #e4f3ea;
 }
@@ -195,7 +198,9 @@ textarea { resize: vertical; min-height: 62px; }
 .group-head .g-count { font-size: 12px; color: var(--ink-soft); }
 .group-head .g-line { flex: 1; height: 1px; background: var(--line); }
 .src { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; background: var(--surface); }
-.src.status-found { border-left: 4px solid var(--found); }
+/* "Found" is the loudest marking — a cherry left edge + a faint cherry ring so a
+   found matter (which may need caution on site) is impossible to miss. */
+.src.status-found { border-left: 5px solid var(--found-edge); border-color: var(--found-edge); box-shadow: inset 0 0 0 1px var(--found-edge); }
 .src.status-none { border-left: 4px solid var(--none); }
 .src.status-failed { border-left: 4px solid var(--failed); }
 .src.status-manual { border-left: 4px solid var(--manual); }
@@ -218,7 +223,7 @@ textarea { resize: vertical; min-height: 62px; }
 .status-select { display: inline-flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .status-select button { border: none; background: var(--surface); color: var(--ink-soft); padding: 6px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; border-right: 1px solid var(--line); }
 .status-select button:last-child { border-right: none; }
-.status-select button.on[data-s=found] { background: var(--found-bg); color: var(--found); }
+.status-select button.on[data-s=found] { background: var(--found-bg); color: var(--found); box-shadow: inset 0 0 0 1.5px var(--found-edge); }
 .status-select button.on[data-s=none] { background: var(--none-bg); color: var(--none); }
 .status-select button.on[data-s=failed] { background: var(--failed-bg); color: var(--failed); }
 .status-select button.on[data-s=manual] { background: var(--manual-bg); color: var(--manual); }
@@ -232,7 +237,7 @@ textarea { resize: vertical; min-height: 62px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .chip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
-.chip.found { background: var(--found-bg); color: var(--found); }
+.chip.found { background: var(--found-bg); color: var(--found); border: 1.5px solid var(--found-edge); }
 .chip.none { background: var(--none-bg); color: var(--none); }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
@@ -298,6 +303,8 @@ a.photo-credit:hover { text-decoration: underline; }
 .include-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
   padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
 .include-row.is-in { border-style: solid; border-color: var(--reviewed); background: var(--reviewed-bg); }
+.include-row.is-internal { border-style: solid; border-color: var(--manual); background: var(--manual-bg); }
+.include-row .inc-internal-note { font-size: 12px; color: var(--manual); }
 .include-row .inc-lead { font-size: 12px; font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
 .include-row .inc-target { flex: 1; min-width: 130px; width: auto; padding: 6px 9px; font-size: 12.5px; }
 .include-row .inc-btn { white-space: nowrap; }
@@ -306,7 +313,10 @@ a.photo-credit:hover { text-decoration: underline; }
 .include-row .inc-show { white-space: nowrap; }
 
 /* ---------- site map ---------- */
-.site-map-section { margin-top: 16px; }
+/* Two locator maps stacked in the (narrow) collection column; they render side by
+   side in the report + export. */
+.site-maps { margin-top: 16px; display: flex; flex-direction: column; gap: 18px; }
+.site-map-section { margin-top: 0; }
 .map-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 8px; }
 .map-head .field-label { margin: 0; }
 .map-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -343,12 +353,21 @@ a.photo-credit:hover { text-decoration: underline; }
 .report-map { margin: 0; }
 .report-map img { display: block; width: 100%; max-width: 420px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
 .report-map figcaption { font-size: 11px; color: var(--ink-soft); margin-top: 6px; }
+/* The two locator maps in the report: side by side, square, equally sized, each
+   filling its half of the available width. */
+.report-maps { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.report-maps .report-map { margin: 0; min-width: 0; }
+.report-maps .report-map img { width: 100%; max-width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+@media (max-width: 560px) { .report-maps { grid-template-columns: 1fr; } }
 
 /* Included-source evidence blocks inside a report section: each included card
    contributes a labelled block (its notes + its photos), so multiple sources can
    land in one section without their content being duplicated across siblings. */
 .r-included { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .r-inc-item { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); }
+/* Found evidence blocks in the report get the same loud cherry edge as the
+   collection cards, so a found matter stands out in the report column too. */
+.r-inc-item.status-found { border-left-color: var(--found-edge); border-left-width: 4px; }
 .r-inc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .r-inc-name { font-weight: 650; font-size: 12.5px; }
 .r-inc-head .chip { font-size: 10px; }
@@ -467,5 +486,8 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 #print-root .pr .pr-ev { margin: 6px 0 0; }
 #print-root .pr .pr-ev-item { font-size: 11px; color: #333; margin: 3px 0; }
 #print-root .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: 1px; }
-#print-root .pr .pr-map-img { display: block; width: 100%; max-width: 480px; border: 1px solid #bbb; border-radius: 6px; }
+/* Both locator maps in the printed report: side by side, square, equal, full width. */
+#print-root .pr .pr-maps { display: flex; gap: 12px; align-items: flex-start; break-inside: avoid; }
+#print-root .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
+#print-root .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
 #print-root .pr .pr-map-cap { font-size: 10px; color: #444; margin: 4px 0 0; }
