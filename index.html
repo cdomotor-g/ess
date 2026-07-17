@@ -7,6 +7,14 @@
   <meta name="description" content="Look up a Bureau site by name or coordinates and run the ESS desktop assessment: deep-links and live checks for every environmental & heritage source, with a report that flags what was found, what was empty and what failed." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
   <link rel="stylesheet" href="assets/styles.css" />
+  <script>
+    // Apply the saved light/dark theme before first paint so there's no flash of
+    // the wrong colour scheme. The full toggle lives in assets/app.js.
+    try {
+      var t = localStorage.getItem("ess-workbench:v1:theme");
+      if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -19,6 +27,7 @@
         </div>
       </div>
       <div class="topbar-meta" id="topbar-meta">
+        <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">🌙 Dark</button>
         <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">🧨 Clear cache</button>
         <button class="ghost-link" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">🔑 Agent</button>
         <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
@@ -27,6 +36,9 @@
   </header>
 
   <main id="app">
+   <div class="split">
+    <!-- LEFT column — site pick, summary, collection dashboard (independently scrolls) -->
+    <div class="col col-left" id="col-left">
     <!-- Load / error banner -->
     <div id="load-banner" class="banner" hidden></div>
 
@@ -182,22 +194,7 @@
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
 
-      <!-- STEP 4 — report -->
-      <section class="card" id="report">
-        <div class="card-head">
-          <h2><span class="step">4</span> ESS report</h2>
-          <div class="head-actions">
-            <button class="btn ghost" id="btn-print">🖨 Print / PDF</button>
-            <button class="btn ghost" id="btn-download-html">⬇ HTML</button>
-            <button class="btn ghost" id="btn-download-json">⬇ JSON</button>
-            <button class="btn primary" id="btn-copy-summary">Copy summary</button>
-          </div>
-        </div>
-        <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
-        <div id="report-sections"><!-- filled by JS --></div>
-      </section>
-
-    </div><!-- /workspace -->
+    </div><!-- /workspace (left) -->
 
     <footer class="foot">
       <p>Client-side only — nothing you enter leaves your browser. Work is saved locally per site. <span id="foot-meta"></span></p>
@@ -207,6 +204,37 @@
         <a href="mailto:enviro@bom.gov.au">enviro@bom.gov.au</a>
       </p>
     </footer>
+    </div><!-- /col-left -->
+
+    <!-- RIGHT column — the ESS report (independently scrolls) -->
+    <div class="col col-right" id="col-right">
+      <!-- shown until a site is loaded -->
+      <div id="report-placeholder" class="report-placeholder">
+        <div class="rp-inner">
+          <span class="rp-mark" aria-hidden="true">📄</span>
+          <p class="rp-title">The ESS report will build here</p>
+          <p class="rp-sub">Choose a site on the left. As you collect metadata and press <b>Include</b> on each card, its notes and photos land in the matching report section.</p>
+        </div>
+      </div>
+
+      <!-- STEP 4 — report -->
+      <div id="workspace-right" hidden>
+        <section class="card" id="report">
+          <div class="card-head">
+            <h2><span class="step">4</span> ESS report</h2>
+            <div class="head-actions">
+              <button class="btn primary" id="btn-download-html">⬇ Generate Report</button>
+              <button class="btn ghost" id="btn-print">🖨 Print Page</button>
+              <button class="btn ghost" id="btn-download-json">⬇ JSON</button>
+              <button class="btn ghost" id="btn-copy-summary">Copy summary</button>
+            </div>
+          </div>
+          <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
+          <div id="report-sections"><!-- filled by JS --></div>
+        </section>
+      </div>
+    </div><!-- /col-right -->
+   </div><!-- /split -->
   </main>
 
   <!-- report render target for export/print -->
