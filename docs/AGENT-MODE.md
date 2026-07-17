@@ -61,6 +61,10 @@ top bar.
     ordinary client-side fetches of government sites.
   - **query_ala** — a client-side tool the browser runs against the Atlas of
     Living Australia (which is CORS-friendly) for structured conservation data.
+  - **query_wildnet** — a client-side tool that queries the Queensland WildNet
+    species API for conservation-significant taxa near the site, already grouped
+    into flora (plants) vs fauna (animals) with their NCA/EPBC status (offered for
+    QLD sites). If the browser blocks it, the agent falls back to `web_fetch`.
   - **set_source_result** — the browser applies each result to the dashboard as
     the agent works, so cards fill live. For species/subject sources it marks
     `found`, the agent also passes `image_subjects` (the species/subjects it

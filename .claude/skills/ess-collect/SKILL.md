@@ -140,21 +140,35 @@ Read `totalRecords` and `facetResults`. Interpretation:
 
 ### Queensland WildNet — a public species API (QLD sites)
 
-Queensland's authoritative wildlife register, WildNet, publishes a **public
-API** (see the `api` block on the `qld-wildnet` source in `data/sources.json`):
+Queensland's authoritative wildlife register, WildNet, publishes a **public API**
+(no key required — see the `api` block on the `qld-wildnet` source in
+`data/sources.json`). The one call you need for an ESS:
 
-- Base: `https://wildnet-pub.science-data.qld.gov.au` · OpenAPI:
-  `https://wildnet-pub.science-data.qld.gov.au/openapi.json`
-- Dataset / docs: `https://www.data.qld.gov.au/dataset/qld-wildlife-data-api`
-- The human species-search app (the card's Open ↗ link) is aimed at the point:
-  `https://wildnet.science-data.qld.gov.au/species-search?central_point_latitude={lat}&central_point_longitude={lon}&distance=1&location_search_by=point&advanced=false&tab=0`
+```
+GET https://wildnet-pub.science-data.qld.gov.au/api/v1/species-list
+      ?central_point_latitude={lat}
+      &central_point_longitude={lon}
+      &distance={radius_km}         # circular point search, radius in km
+      &con_sig=1                    # conservation-significant taxa only
+      &page_size=5000
+```
 
-Fetch the OpenAPI document to discover the current endpoint + parameter names,
-then query WildNet for a point (the site's lat/long) and radius. Record the
-conservation-significant taxa it returns → **FOUND** (list them), or **NONE** if
-none fall in the radius, **FAILED** if the request errors. WildNet returns both
-plants and animals, so classify them (see below). If the API can't be reached
-from your environment, fall back to the aimed web link as a **MANUAL** check.
+Each row has `kingdom_name` (Plantae / Animalia / Fungi…), `scientific_name`,
+`accepted_common_name`, `nca_code` (QLD *Nature Conservation Act* status) and
+`epbc_code` (national status). Interpretation:
+
+- rows returned → **FOUND**; list them **grouped by kingdom** (plants vs animals)
+  with their NCA/EPBC codes.
+- empty array → **NONE** (no conservation-significant taxa in the radius).
+- request errors / blocked → **FAILED** (fall back to the aimed web link, which
+  the card's Open ↗ launches:
+  `https://wildnet.science-data.qld.gov.au/species-search?central_point_latitude={lat}&central_point_longitude={lon}&distance=1&location_search_by=point&advanced=false&tab=0`).
+
+`GET …/api/v1/species-list-row-count` with the same params returns just the count.
+Fetch `…/openapi.json` for the full endpoint list. WildNet returns both plants and
+animals, so **classify them** (next section) — file plants under Threatened Flora
+and animals under Threatened Fauna. (The browser tool's "Check live" button on the
+WildNet card runs exactly this query and groups the result for you.)
 
 ### Threatened species — classify flora vs fauna vs community
 
