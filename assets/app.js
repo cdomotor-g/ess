@@ -543,16 +543,20 @@
       oninput: (e) => onCaption(e.target.value), onchange: () => renderReport() });
     cap.value = im.caption || "";
     return el("figure", { class: "photo-thumb" },
-      el("img", { src: im.dataUrl, alt: im.caption || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
+      el("img", { src: im.dataUrl, alt: im.caption || "Photo",
+        title: im.source_url ? "Open the source page" : "Click to view — zoom & pan", onclick: () => activateImage(im) }),
       el("button", { type: "button", class: "photo-remove", title: "Remove photo", onclick: onRemove }, "×"),
       cap,
       im.credit ? creditNode(im) : null);
   }
-  // Read-only thumbnail — used in the report preview.
-  function photoFigure(im, altFallback) {
+  // Report-preview thumbnail. onRemove (optional) adds a × to delete the photo
+  // straight from the report; a Wikipedia photo opens its article, others zoom.
+  function photoFigure(im, altFallback, onRemove) {
     const cap = im.caption || altFallback || "";
     return el("figure", { class: "photo-thumb view" },
-      el("img", { src: im.dataUrl, alt: cap || "Photo", onclick: () => window.open(im.dataUrl, "_blank") }),
+      el("img", { src: im.dataUrl, alt: cap || "Photo",
+        title: im.source_url ? "Open the source page" : "Click to view — zoom & pan", onclick: () => activateImage(im) }),
+      onRemove ? el("button", { type: "button", class: "photo-remove", title: "Remove this photo from the report", onclick: onRemove }, "×") : null,
       (cap || im.credit) ? el("figcaption", {}, cap, im.credit ? creditNode(im) : null) : null);
   }
   // Small attribution line ("Wikipedia · <artist> · <licence>"), linking to the
@@ -564,13 +568,14 @@
       : el("span", { class: "photo-credit", title: im.credit }, im.credit);
   }
   // Static HTML string version — used by the print view / HTML export / JSON export inputs.
-  function photosHtml(images) {
+  // `large` renders the bigger, uncropped layout used for the site photographs.
+  function photosHtml(images, large) {
     if (!images || !images.length) return "";
     // esc() the data URL too, not just the caption — this string is injected via
     // innerHTML (print view) / a raw <script> template (HTML export), so an
     // unescaped value could break out of the src="" attribute (stored XSS) if it
     // ever originated from an imported findings file rather than our own canvas.
-    return `<div class="pr-photos">${images.map((im) => {
+    return `<div class="pr-photos${large ? " pr-photos-large" : ""}">${images.map((im) => {
       const credit = im.credit
         ? `<span class="credit">${im.source_url ? `<a href="${esc(im.source_url)}">${esc(im.credit)}</a>` : esc(im.credit)}</span>` : "";
       const cap = (im.caption || im.credit)
@@ -775,6 +780,9 @@
 
   function renderWorkspace() {
     $("#workspace").hidden = false;
+    const wr = $("#workspace-right"); if (wr) wr.hidden = false;
+    const ph = $("#report-placeholder"); if (ph) ph.hidden = true;
+    measureTopbar();
     renderSummary();
     renderSiteImages();
     if ($("#map-km")) $("#map-km").value = state.mapKm;
@@ -1088,7 +1096,8 @@
     const m = state.mapImage;
     frame.append(el("img", {
       class: "map-img", src: m.dataUrl, alt: `Satellite map centred on ${s.name} (${m.km} km across)`,
-      title: "Open the full-size map", onclick: () => window.open(m.dataUrl, "_blank"),
+      title: "Open the full-screen map — scroll to zoom, drag to pan",
+      onclick: () => openLightbox(m.dataUrl, `Satellite locator — ${(+m.km).toLocaleString()} km across · ${s.name}`),
     }));
     fig.append(frame);
     fig.append(el("figcaption", { class: "map-cap" },
@@ -1469,12 +1478,17 @@
       actions.append(el("a", { href: `https://www.google.com/search?q=${q}`, target: "_blank", rel: "noopener", class: "btn tiny" }, "Web search ↗"));
     }
 
-    // onchange fires on blur; when auto-fetch is on and this is a species card,
-    // scan the just-edited notes for subjects and pull reference photos (Task 2).
+    // onchange fires on blur; re-render the report so the edited note lands in its
+    // target section live (the report is a separate DOM tree, so rebuilding it never
+    // disturbs a click on this card). When auto-fetch is on and this is a species
+    // card, also scan the just-edited notes for subjects and pull reference photos.
     const note = el("textarea", {
       placeholder: "Notes / evidence for the report…",
       oninput: (e) => { f.note = e.target.value; save(); },
-      onchange: () => { if (autoImagesOn() && WIKI_IMAGE_CATEGORIES.has(src.category)) autoFetchFromNotes(src.id, null, true); },
+      onchange: () => {
+        renderReport();
+        if (autoImagesOn() && WIKI_IMAGE_CATEGORIES.has(src.category)) autoFetchFromNotes(src.id, null, true);
+      },
     });
     note.value = f.note || "";
 
@@ -1501,16 +1515,18 @@
           el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status]))),
       el("div", { class: "src-desc" }, src.what_to_find || ""),
       actions,
-      el("div", { class: "src-note" }, note),
+      el("div", { class: "src-note" }, el("label", { class: "note-label" }, "Notes & evidence"), note),
       photoBlock,
+      renderIncludeRow(src),
       el("div", { class: "src-result" + (f.result ? " show" : ""), id: `res-${src.id}`, html: f.result ? f.result.html : "" }),
     ].filter(Boolean));
     return card;
   }
 
-  // "Reference image" control for species/subject cards: a name field (with weed
-  // suggestions where we have them) + a Fetch button that pulls a labelled,
-  // attributed photo from Wikipedia straight onto the card.
+  // Reference-image tools for species/subject cards. To keep the card to a single
+  // text field at rest (the Notes textarea), the manual "type a name" search is
+  // collapsed behind a button — most of the time the "from notes" auto-fetch is
+  // all that's needed. Both attach a labelled, attributed Wikipedia photo.
   function renderWikiImageRow(src) {
     const listId = `weeds-${src.id}`;
     const useList = src.category === "invasive_plants" && DATA.weeds.length;
@@ -1520,23 +1536,26 @@
       list: useList ? listId : null,
       "aria-label": "Fetch a reference image from Wikipedia by name",
     });
-    const btn = el("button", { type: "button", class: "btn tiny", onclick: () => fetchWikiImage(src.id, inp, btn) }, "🔎 Fetch image");
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fetchWikiImage(src.id, inp, btn); } });
-    // Auto-fetch: scan this card's notes for species/subjects and fetch a photo
-    // for each — no need to type each name. (Runs automatically on note blur too
-    // when "Auto-fetch reference images" is on.)
-    const autoBtn = el("button", { type: "button", class: "btn tiny",
-      title: "Scan this card's notes and fetch a labelled Wikipedia photo for every species/subject detected",
-      onclick: () => autoFetchFromNotes(src.id, autoBtn) }, "✨ Auto from notes");
-    const row = el("div", { class: "wiki-row" },
-      el("span", { class: "wiki-lead" }, "🌐 Reference image from Wikipedia:"),
-      inp, btn, autoBtn);
+    const fetchBtn = el("button", { type: "button", class: "btn tiny", onclick: () => fetchWikiImage(src.id, inp, fetchBtn) }, "🔎 Fetch");
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fetchWikiImage(src.id, inp, fetchBtn); } });
+    const searchRow = el("div", { class: "wiki-row collapsed" },
+      el("span", { class: "wiki-lead" }, "🌐 From Wikipedia:"), inp, fetchBtn);
     if (useList) {
       const dl = el("datalist", { id: listId });
       DATA.weeds.forEach((w) => dl.append(el("option", { value: w })));
-      row.append(dl);
+      searchRow.append(dl);
     }
-    return row;
+    // Auto-fetch: scan this card's notes for species/subjects and fetch a photo for
+    // each (also runs on note blur when the global "Auto-fetch" preference is on).
+    const autoBtn = el("button", { type: "button", class: "btn tiny",
+      title: "Scan this card's notes and fetch a labelled Wikipedia photo for every species/subject detected",
+      onclick: () => autoFetchFromNotes(src.id, autoBtn) }, "✨ Reference image from notes");
+    // Reveal the manual search field on demand — keeps the resting card uncluttered.
+    const searchToggle = el("button", { type: "button", class: "btn tiny",
+      title: "Search Wikipedia for a reference image by typing a species/subject name",
+      onclick: () => { const collapsed = searchRow.classList.toggle("collapsed"); if (!collapsed) inp.focus(); } }, "🔎 Search by name…");
+    const tools = el("div", { class: "wiki-tools" }, autoBtn, searchToggle);
+    return el("div", {}, tools, searchRow);
   }
 
   async function fetchWikiImage(sourceId, inp, btn) {
@@ -1735,6 +1754,82 @@
   // tool and the ess-collect skill stay in lockstep; populated on load.
   let REPORT_SECTIONS = [];
 
+  // -------------------------------------------------- source → report-section link
+  // Each source's notes + photos flow into exactly ONE report section — its
+  // "target", with a smart default that the operator can override per card via the
+  // Include control. This replaces the old implicit rule ("every source in a
+  // category feeds every report section sharing that category"), which duplicated
+  // the same photo across sibling sections — e.g. an animal photo appearing under
+  // Threatened Habitat *and* Flora *and* Fauna at once.
+  function defaultSectionForSource(src) {
+    if (!src) return null;
+    if (src.report_section) return src.report_section; // explicit per-source hint wins
+    const secs = REPORT_SECTIONS.filter((s) => (s.cats || []).includes(src.category));
+    if (!secs.length) return null;
+    if (secs.length === 1) return secs[0].id;
+    // Category maps to several sections — pick the best fit from the source name.
+    const hay = `${src.id} ${src.name}`.toLowerCase();
+    if (src.category === "threatened") {
+      if (/ecosystem|wetland|\bhabitat\b|regional[- ]?ecosystem|vegetation|community|communities/.test(hay)) return "threatened_habitat";
+      if (/flora|plant|plantnet|weed/.test(hay)) return "threatened_flora";
+      if (/fauna|animal|wildlife|wildnet|bionet|\bbird\b|frog|fish/.test(hay)) return "threatened_fauna";
+      return "threatened_fauna"; // generic biodiversity portals (PMST, ALA, state atlases)
+    }
+    if (src.category === "indigenous_heritage") {
+      return /heritage|inherit|achis|historic|register/.test(hay) ? "heritage" : "indigenous_areas";
+    }
+    return secs[0].id;
+  }
+  function targetSectionOf(src, f) {
+    f = f || state.findings[src.id] || {};
+    const t = f.targetSection;
+    if (t && REPORT_SECTIONS.some((s) => s.id === t)) return t;
+    return defaultSectionForSource(src);
+  }
+  // A card's content appears in the report when it's "included". Default (no
+  // explicit choice yet): auto-include as soon as there's something to show (a
+  // note or a photo), so existing/imported work still flows straight through.
+  function cardIncluded(f) {
+    if (f && typeof f.included === "boolean") return f.included;
+    return !!(f && ((f.note && f.note.trim()) || (f.images && f.images.length)));
+  }
+  function includedCardsForSection(sectionId) {
+    return sourcesForSite()
+      .map((src) => ({ src, f: state.findings[src.id] || {} }))
+      .filter(({ src, f }) => cardIncluded(f) && targetSectionOf(src, f) === sectionId);
+  }
+  // Point a card at a report section (from its Include dropdown). Choosing a
+  // target implies the user wants it in the report, so include it too.
+  function setTargetSection(id, sectionId) {
+    const f = state.findings[id] || (state.findings[id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    f.targetSection = sectionId;
+    f.included = true;
+    save(); refreshCard(id); renderReport();
+  }
+  function toggleInclude(id) {
+    const f = state.findings[id] || (state.findings[id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    f.included = !cardIncluded(f);
+    save(); refreshCard(id); renderReport();
+  }
+  // The Include control shown on each source card: a target-section dropdown + a
+  // toggle button. Editing the card's notes/photos afterwards updates the report
+  // live (the report re-renders from state), so multiple sources can land in one
+  // section and stay in sync without any copy/paste going stale.
+  function renderIncludeRow(src) {
+    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    const included = cardIncluded(f);
+    const target = targetSectionOf(src, f);
+    const sel = el("select", { class: "inc-target",
+      title: "Which ESS report section this card's notes & photos appear in",
+      onchange: (e) => setTargetSection(src.id, e.target.value) });
+    REPORT_SECTIONS.forEach((s) => sel.append(el("option", { value: s.id, selected: s.id === target ? "selected" : null }, s.title)));
+    const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
+      title: included ? "Currently included — click to remove from the report" : "Add this card's notes & photos to the report section",
+      onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
+    return el("div", { class: "include-row" + (included ? " is-in" : "") },
+      el("span", { class: "inc-lead" }, "Add to report:"), sel, btn);
+  }
+
   // Suggest a dropdown option based on the findings in the relevant categories.
   function suggestChoice(section) {
     const opts = section.dropdown ? DATA.dropdowns[section.dropdown] : null;
@@ -1747,18 +1842,22 @@
     return opts[0];
   }
 
-  function evidenceFor(section) {
-    const rel = sourcesForSite().filter((s) => section.cats.includes(s.category));
-    return rel.map((s) => ({ src: s, f: state.findings[s.id] || { status: "unset" } }))
-      .filter((x) => x.f.status && x.f.status !== "unset");
-  }
-
-  // Photos for a section, independent of whether a status has been set yet — a
-  // photo is evidence on its own, and should still reach Print/PDF/HTML/JSON
-  // exports even if the user attached it before clicking a status chip.
+  // Photos for a section come from the cards the operator has *included* into it
+  // (see the Include control), de-duplicated so the same image never appears twice
+  // in one section. Because each card targets a single section, a photo can no
+  // longer bleed across sibling sections (habitat/flora/fauna) the way the old
+  // category-wide rule allowed.
   function photosForSection(section) {
-    const rel = sourcesForSite().filter((s) => section.cats.includes(s.category));
-    return rel.flatMap((s) => ((state.findings[s.id] || {}).images || []).map((im) => ({ im, src: s })));
+    const seen = new Set();
+    const out = [];
+    includedCardsForSection(section.id).forEach(({ src, f }) =>
+      (f.images || []).forEach((im) => {
+        const key = im.dataUrl || im.id;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ im, src });
+      }));
+    return out;
   }
 
   function renderReport() {
@@ -1768,14 +1867,16 @@
       const m = state.mapImage;
       const box = el("div", { class: "rsection" }, el("h3", {}, "Location map"));
       box.append(el("figure", { class: "report-map" },
-        el("img", { src: m.dataUrl, alt: "Satellite locator map", onclick: () => window.open(m.dataUrl, "_blank") }),
+        el("img", { src: m.dataUrl, alt: "Satellite locator map",
+          title: "Open the full-screen map — scroll to zoom, drag to pan",
+          onclick: () => openLightbox(m.dataUrl, `Satellite locator — ${(+m.km).toLocaleString()} km across · ${state.site.name}`) }),
         el("figcaption", {}, `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
       wrap.append(box);
     }
     if ((state.siteImages || []).length) {
       const box = el("div", { class: "rsection" }, el("h3", {}, "Site photographs"));
-      const grid = el("div", { class: "photo-grid" });
-      state.siteImages.forEach((im) => grid.append(photoFigure(im)));
+      const grid = el("div", { class: "photo-grid report-large" });
+      state.siteImages.forEach((im) => grid.append(photoFigure(im, "", () => removeSiteImage(im.id))));
       box.append(grid);
       wrap.append(box);
     }
@@ -1807,19 +1908,32 @@
       ta.value = rstate.note || "";
       box.append(el("div", { class: "r-field" }, ta));
 
-      // Evidence chips from collection
-      const ev = evidenceFor(section);
-      if (ev.length) {
-        const evWrap = el("div", { class: "evidence" }, "From collection: ");
-        ev.forEach(({ src, f }) => evWrap.append(el("span", { class: "chip " + f.status }, `${src.name}: ${STATUS_LABEL[f.status]}`), " "));
-        box.append(evWrap);
-      }
-      // Evidence photos attached to any source feeding this section
-      const evImages = photosForSection(section);
-      if (evImages.length) {
-        const grid = el("div", { class: "photo-grid small" });
-        evImages.forEach(({ im, src }) => grid.append(photoFigure(im, src.name)));
-        box.append(grid);
+      // Included sources: each card the operator added to THIS section contributes
+      // its status, notes and photos — grouped by source, de-duplicated, and every
+      // photo individually removable. Editing the card updates this live.
+      const inc = includedCardsForSection(section.id);
+      if (inc.length) {
+        const incWrap = el("div", { class: "r-included" });
+        const seenImg = new Set();
+        inc.forEach(({ src, f }) => {
+          const st = f.status && f.status !== "unset" ? f.status : "unset";
+          const head = el("div", { class: "r-inc-head" },
+            el("span", { class: "chip " + (st === "unset" ? "manual" : st), style: st === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[st]),
+            el("span", { class: "r-inc-name" }, src.name),
+            el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove"));
+          const item = el("div", { class: "r-inc-item" }, head);
+          if (f.note && f.note.trim()) item.append(el("div", { class: "r-inc-note" }, f.note.trim()));
+          const imgs = (f.images || []).filter((im) => { const k = im.dataUrl || im.id; if (seenImg.has(k)) return false; seenImg.add(k); return true; });
+          if (imgs.length) {
+            const grid = el("div", { class: "photo-grid small" });
+            imgs.forEach((im) => grid.append(photoFigure(im, src.name, () => removeFindingImage(src.id, im.id))));
+            item.append(grid);
+          }
+          if ((!f.note || !f.note.trim()) && !imgs.length)
+            item.append(el("div", { class: "r-inc-empty" }, "Included — add notes or photos on the source card."));
+          incWrap.append(item);
+        });
+        box.append(incWrap);
       }
       wrap.append(box);
     });
@@ -1937,6 +2051,10 @@
         choice: (state.report[sec.id] || {}).choice || "",
         note: (state.report[sec.id] || {}).note || "",
         detail: sec.bioDetail ? (DATA.dropdowns.biosecurity_detail || {})[(state.report[sec.id] || {}).choice] || "" : "",
+        // Notes from the sources the operator included into this section (Include control).
+        evidence_notes: includedCardsForSection(sec.id)
+          .filter(({ f }) => f.note && f.note.trim())
+          .map(({ src, f }) => ({ source: src.name, status: f.status || "unset", note: f.note.trim() })),
         images: photosForSection(sec).map(({ im, src }) => exportImage({ ...im, caption: im.caption || src.name })),
       })),
       collection_log: buildFindings(),
@@ -1955,11 +2073,16 @@
           <p class="pr-map-cap">Satellite locator — ${esc(String(s.map.km))} km across · centred on ${esc(s.lat)}, ${esc(s.lon)} · ${esc(s.map.source || MAP_ATTRIB)}</p></div>`
       : "";
     const siteShots = s.images && s.images.length
-      ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images)}</div>` : "";
+      ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images, true)}</div>` : "";
+    const evNotesHtml = (sec) => (sec.evidence_notes && sec.evidence_notes.length)
+      ? `<div class="pr-ev">${sec.evidence_notes.map((e) =>
+          `<p class="pr-ev-item"><span class="st st-${esc(e.status)}">${esc(STATUS_LABEL[e.status] || e.status)}</span> <b>${esc(e.source)}</b> — ${esc(e.note)}</p>`).join("")}</div>`
+      : "";
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${esc(sec.detail)}</p>` : ""}
       ${sec.note ? `<p>${esc(sec.note)}</p>` : ""}
+      ${evNotesHtml(sec)}
       ${photosHtml(sec.images)}</div>`).join("");
     const logRows = r.collection_log.map((c) => `<tr>
       <td>${esc(c.name)}</td>
@@ -2009,6 +2132,9 @@
       .pr-photos figcaption{font-size:10px;color:#444;margin-top:2px}
       .pr-photos figcaption .credit{display:block;font-size:9px;color:#777;margin-top:1px}
       .pr-photos figcaption .credit a{color:#777}
+      .pr-photos.pr-photos-large{gap:12px} .pr-photos.pr-photos-large figure{width:300px}
+      .pr-photos.pr-photos-large img{height:auto;max-height:340px;object-fit:contain}
+      .pr-ev{margin:6px 0 0} .pr-ev-item{font-size:11.5px;color:#333;margin:3px 0}
       .pr-map-img{display:block;width:100%;max-width:520px;border:1px solid #bbb;border-radius:6px}
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
@@ -2021,7 +2147,11 @@
     const r = reportObject();
     const lines = [`ESS — ${r.site.name} (${r.site.state}, ${r.site.station_num || "no station #"})`,
       `Lat/Long: ${r.site.lat}, ${r.site.lon}  ·  Date: ${r.site.assessment_date}`, ""];
-    r.sections.forEach((sec) => { if (sec.choice || sec.note) lines.push(`• ${sec.title}: ${sec.choice || ""}${sec.note ? " — " + sec.note : ""}`); });
+    r.sections.forEach((sec) => {
+      if (sec.choice || sec.note || (sec.evidence_notes && sec.evidence_notes.length))
+        lines.push(`• ${sec.title}: ${sec.choice || ""}${sec.note ? " — " + sec.note : ""}`);
+      (sec.evidence_notes || []).forEach((e) => lines.push(`    – [${(STATUS_LABEL[e.status] || e.status)}] ${e.source}: ${e.note}`));
+    });
     lines.push("", "Collection log:");
     r.collection_log.forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
     copy(lines.join("\n"));
@@ -2179,6 +2309,121 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.opacity = "0"; }, 1400);
   }
 
+  // ---------------------------------------------------------------- theme
+  // Light / dark switch. The saved choice is applied before first paint by the
+  // inline script in index.html (avoids a flash); this keeps the toggle button
+  // label in sync and lets the user flip it. With no explicit choice we follow
+  // the OS setting via prefers-color-scheme (handled in CSS).
+  const LS_THEME = "ess-workbench:v1:theme";
+  function themeIsDark() {
+    const attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark") return true;
+    if (attr === "light") return false;
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+  function syncThemeButton() {
+    const btn = $("#btn-theme");
+    if (!btn) return;
+    const dark = themeIsDark();
+    btn.textContent = dark ? "☀️ Light" : "🌙 Dark";
+    btn.title = dark ? "Switch to light theme" : "Switch to dark theme";
+  }
+  function toggleTheme() {
+    const next = themeIsDark() ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(LS_THEME, next); } catch (_) {}
+    syncThemeButton();
+  }
+
+  // ---------------------------------------------------------------- layout metrics
+  // The two independently-scrolling columns are sized to the viewport height minus
+  // the sticky top bar; measure that bar (and keep it current on resize) into a
+  // CSS variable the stylesheet reads.
+  function measureTopbar() {
+    const tb = $(".topbar");
+    if (tb) document.documentElement.style.setProperty("--topbar-h", tb.offsetHeight + "px");
+  }
+
+  // ---------------------------------------------------------------- lightbox
+  // One reusable full-screen overlay for viewing an image — a site/evidence photo
+  // or the satellite locator map — with wheel/box-button zoom and drag to pan.
+  // Replaces the old window.open(dataUrl) behaviour, which browsers render as a
+  // blank page. Wikipedia reference photos instead open their source article
+  // (decided in activateImage, since that's a real navigable page).
+  let LB = null;
+  function ensureLightbox() {
+    if (LB) return LB;
+    const img = el("img", { class: "lb-img", alt: "" });
+    const stage = el("div", { class: "lb-stage" }, img);
+    const cap = el("div", { class: "lb-cap" });
+    const closeBtn = el("button", { class: "lb-close", "aria-label": "Close", title: "Close (Esc)", onclick: () => hideLightbox() }, "×");
+    const zoomOut = el("button", { class: "lb-btn", title: "Zoom out", onclick: (e) => { e.stopPropagation(); zoomBy(1 / 1.3); } }, "−");
+    const zoomReset = el("button", { class: "lb-btn", title: "Reset view", onclick: (e) => { e.stopPropagation(); resetLightboxView(); } }, "Reset");
+    const zoomIn = el("button", { class: "lb-btn", title: "Zoom in", onclick: (e) => { e.stopPropagation(); zoomBy(1.3); } }, "+");
+    const controls = el("div", { class: "lb-controls" }, zoomOut, zoomReset, zoomIn);
+    const hint = el("div", { class: "lb-hint" }, "Scroll to zoom · drag to pan · double-click to toggle");
+    const overlay = el("div", { class: "lb-overlay", id: "img-modal" }, cap, closeBtn, controls, hint, stage);
+    document.body.append(overlay);
+    LB = { overlay, img, stage, cap, scale: 1, tx: 0, ty: 0, drag: null };
+    LB.apply = () => { img.style.transform = `translate(${LB.tx}px, ${LB.ty}px) scale(${LB.scale})`; };
+
+    stage.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
+    stage.addEventListener("pointerdown", (e) => {
+      LB.drag = { x: e.clientX, y: e.clientY, tx: LB.tx, ty: LB.ty };
+      stage.classList.add("grabbing");
+      try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    stage.addEventListener("pointermove", (e) => {
+      if (!LB.drag) return;
+      LB.tx = LB.drag.tx + (e.clientX - LB.drag.x);
+      LB.ty = LB.drag.ty + (e.clientY - LB.drag.y);
+      LB.apply();
+    });
+    const endDrag = () => { LB.drag = null; stage.classList.remove("grabbing"); };
+    stage.addEventListener("pointerup", endDrag);
+    stage.addEventListener("pointercancel", endDrag);
+    stage.addEventListener("dblclick", (e) => { e.preventDefault(); LB.scale > 1 ? resetLightboxView() : zoomBy(2.2); });
+    // A click on the backdrop (or the empty stage) closes; a click on the image does not.
+    overlay.addEventListener("click", (e) => { if (e.target === overlay || e.target === stage) hideLightbox(); });
+    return LB;
+  }
+  function zoomBy(f) {
+    const lb = ensureLightbox();
+    lb.scale = Math.max(1, Math.min(8, lb.scale * f));
+    if (lb.scale === 1) { lb.tx = 0; lb.ty = 0; }
+    lb.apply();
+  }
+  function resetLightboxView() { const lb = ensureLightbox(); lb.scale = 1; lb.tx = 0; lb.ty = 0; lb.apply(); }
+  function openLightbox(src, caption) {
+    if (!src) return;
+    const lb = ensureLightbox();
+    lb.img.src = src;
+    lb.cap.textContent = caption || "";
+    lb.scale = 1; lb.tx = 0; lb.ty = 0; lb.apply();
+    lb.overlay.classList.add("show");
+    document.addEventListener("keydown", lbKeydown);
+  }
+  function hideLightbox() {
+    if (!LB) return;
+    LB.overlay.classList.remove("show");
+    LB.img.src = "";
+    document.removeEventListener("keydown", lbKeydown);
+  }
+  function lbKeydown(e) {
+    if (e.key === "Escape") hideLightbox();
+    else if (e.key === "+" || e.key === "=") zoomBy(1.3);
+    else if (e.key === "-") zoomBy(1 / 1.3);
+    else if (e.key === "0") resetLightboxView();
+  }
+  // What happens when a photo is clicked: a Wikipedia reference photo opens its
+  // source article (a real page — the old blank-tab bug was opening a data: URL);
+  // any other photo opens in the pan/zoom lightbox.
+  function activateImage(im) {
+    const href = safeHttpUrl(im && im.source_url);
+    if (href) window.open(href, "_blank", "noopener");
+    else if (im && im.dataUrl) openLightbox(im.dataUrl, im.caption || "");
+  }
+
   // ---------------------------------------------------------------- wiring
   function wire() {
     // tabs
@@ -2225,7 +2470,13 @@
     const mapLabelsCb = $("#map-labels");
     if (mapLabelsCb) mapLabelsCb.addEventListener("change", () => setMapLabels(mapLabelsCb.checked));
     $("#btn-map-refresh").addEventListener("click", () => generateSiteMap());
-    $("#btn-clear-site").addEventListener("click", () => { $("#workspace").hidden = true; $("#site-picker").scrollIntoView({ behavior: "smooth" }); $("#station-search").focus(); });
+    $("#btn-clear-site").addEventListener("click", () => {
+      $("#workspace").hidden = true;
+      const wr = $("#workspace-right"); if (wr) wr.hidden = true;
+      const ph = $("#report-placeholder"); if (ph) ph.hidden = false;
+      $("#site-picker").scrollIntoView({ behavior: "smooth" });
+      $("#station-search").focus();
+    });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
     const autoImgCb = $("#toggle-auto-images");
     if (autoImgCb) {
@@ -2258,6 +2509,16 @@
     $("#btn-download-html").addEventListener("click", downloadHtml);
     $("#btn-download-json").addEventListener("click", downloadJson);
     $("#btn-copy-summary").addEventListener("click", copySummary);
+
+    // theme switch + split-column sizing
+    const themeBtn = $("#btn-theme");
+    if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+    syncThemeButton();
+    if (window.matchMedia) {
+      try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeButton); } catch (_) {}
+    }
+    measureTopbar();
+    window.addEventListener("resize", measureTopbar);
   }
 
   // ---------------------------------------------------------------- init

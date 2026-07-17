@@ -63,17 +63,45 @@ a { color: var(--brand); }
 
 /* ---------- top bar ---------- */
 .topbar { background: var(--brand); color: var(--brand-ink); box-shadow: var(--shadow); position: sticky; top: 0; z-index: 20; }
-.topbar-inner { max-width: 1080px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.topbar-inner { max-width: 1460px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { font-size: 28px; }
 .topbar h1 { font-size: 20px; line-height: 1.1; }
 .tagline { margin: 2px 0 0; font-size: 12.5px; opacity: .85; }
-.topbar-meta { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.topbar-meta { display: flex; align-items: center; gap: 10px 14px; font-size: 13px; flex-wrap: wrap; justify-content: flex-end; }
 .ghost-link { color: var(--brand-ink); opacity: .9; text-decoration: none; border: 1px solid rgba(255,255,255,.35); padding: 5px 12px; border-radius: 999px; }
 .ghost-link:hover { opacity: 1; background: rgba(255,255,255,.12); }
 
 /* ---------- layout ---------- */
-main { max-width: 1080px; margin: 0 auto; padding: 22px 20px 60px; }
+main { max-width: 1460px; margin: 0 auto; padding: 22px 20px 60px; }
+
+/* Split the workspace down the middle: collection on the left, ESS report on the
+   right, each side scrolling independently. Collapses to a single column (normal
+   page scroll) on narrow screens. --topbar-h is measured + set by app.js. */
+.split { display: flex; gap: 22px; align-items: flex-start; }
+.col { min-width: 0; }                 /* min-width:0 lets flex children shrink instead of overflowing */
+.col-left { flex: 1 1 56%; }
+.col-right { flex: 1 1 44%; }
+@media (min-width: 981px) {
+  main { padding: 0 20px; }
+  .split { height: calc(100vh - var(--topbar-h, 64px)); }
+  .col { height: 100%; overflow-y: auto; overflow-x: hidden; padding: 20px 6px 48px; scrollbar-gutter: stable; }
+}
+@media (max-width: 980px) {
+  .split { flex-direction: column; }
+  .col { width: 100%; }
+  .col-right { margin-top: 4px; }
+}
+
+/* Right-column placeholder shown until a site is loaded. The explicit display
+   here would otherwise beat the [hidden] user-agent rule, so re-assert it. */
+.report-placeholder { display: grid; place-items: center; min-height: 260px; height: 100%; }
+.report-placeholder[hidden] { display: none; }
+.rp-inner { text-align: center; color: var(--ink-soft); max-width: 340px; padding: 30px 24px; }
+.rp-mark { font-size: 42px; display: block; margin-bottom: 12px; opacity: .65; }
+.rp-title { font-weight: 650; font-size: 16px; color: var(--ink); margin: 0 0 8px; }
+.rp-sub { font-size: 13px; margin: 0; line-height: 1.55; }
+
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 22px; margin-bottom: 20px; }
 .card.compact { padding: 14px 22px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -248,9 +276,24 @@ a.photo-credit:hover { text-decoration: underline; }
 .photo-thumb.view figcaption .photo-credit { padding: 2px 0 0; }
 
 /* ---------- reference-image (Wikipedia) row on species cards ---------- */
+/* Collapsed by default (progressive disclosure) so the card shows a single text
+   field — the Notes textarea — at rest; the reference-image search reveals on demand. */
 .wiki-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.wiki-row.collapsed { display: none; }
 .wiki-row .wiki-lead { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .wiki-row .wiki-term { flex: 1; width: auto; min-width: 150px; padding: 6px 9px; font-size: 12.5px; }
+.wiki-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.wiki-tools .wiki-lead { font-size: 12px; color: var(--ink-soft); }
+
+/* ---------- notes label + Include-in-report control on a source card ---------- */
+.note-label { display: block; font-size: 12px; font-weight: 600; color: var(--ink-soft); margin: 10px 0 4px; }
+.include-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+  padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
+.include-row.is-in { border-style: solid; border-color: var(--reviewed); background: var(--reviewed-bg); }
+.include-row .inc-lead { font-size: 12px; font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
+.include-row .inc-target { flex: 1; min-width: 160px; width: auto; padding: 6px 9px; font-size: 12.5px; }
+.include-row .inc-btn { white-space: nowrap; }
+.include-row .inc-btn.on { background: var(--reviewed); border-color: var(--reviewed); color: #fff; }
 
 /* ---------- site map ---------- */
 .site-map-section { margin-top: 16px; }
@@ -284,6 +327,48 @@ a.photo-credit:hover { text-decoration: underline; }
 .report-map { margin: 0; }
 .report-map img { display: block; width: 100%; max-width: 420px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
 .report-map figcaption { font-size: 11px; color: var(--ink-soft); margin-top: 6px; }
+
+/* Included-source evidence blocks inside a report section: each included card
+   contributes a labelled block (its notes + its photos), so multiple sources can
+   land in one section without their content being duplicated across siblings. */
+.r-included { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.r-inc-item { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); }
+.r-inc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.r-inc-name { font-weight: 650; font-size: 12.5px; }
+.r-inc-head .chip { font-size: 10px; }
+.r-inc-remove { margin-left: auto; font-size: 11.5px; padding: 3px 9px; }
+.r-inc-note { font-size: 12.5px; color: var(--ink); margin: 6px 0 0; white-space: pre-wrap; }
+.r-inc-empty { font-size: 12px; color: var(--ink-soft); font-style: italic; }
+
+/* Bigger, uncropped site photographs in the report preview (≥3× the card
+   thumbnails, showing the whole frame rather than a cover-cropped square). */
+.photo-grid.report-large { gap: 14px; }
+.photo-grid.report-large .photo-thumb { width: 300px; max-width: 100%; background: var(--surface-2); }
+.photo-grid.report-large .photo-thumb img { height: auto; max-height: 340px; object-fit: contain; cursor: zoom-in; }
+
+/* ---------- lightbox / map modal (pan + zoom) ---------- */
+.lb-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(8,14,18,.86);
+  display: none; align-items: center; justify-content: center; overscroll-behavior: contain; }
+.lb-overlay.show { display: flex; }
+.lb-stage { position: relative; width: 100%; height: 100%; overflow: hidden; display: flex;
+  align-items: center; justify-content: center; touch-action: none; cursor: grab; }
+.lb-stage.grabbing { cursor: grabbing; }
+.lb-img { max-width: 94vw; max-height: 92vh; user-select: none; -webkit-user-drag: none;
+  transform-origin: center center; transition: transform .06s linear; will-change: transform;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5); border-radius: 4px; }
+.lb-close { position: absolute; top: 14px; right: 16px; z-index: 2; width: 40px; height: 40px;
+  border-radius: 50%; border: none; background: rgba(255,255,255,.14); color: #fff; font-size: 24px;
+  line-height: 1; cursor: pointer; }
+.lb-close:hover { background: rgba(255,255,255,.26); }
+.lb-controls { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 2;
+  display: flex; gap: 6px; background: rgba(20,28,34,.82); padding: 6px; border-radius: 999px; }
+.lb-btn { border: none; background: rgba(255,255,255,.12); color: #fff; font: inherit; font-weight: 600;
+  font-size: 13px; min-width: 38px; height: 34px; padding: 0 12px; border-radius: 999px; cursor: pointer; }
+.lb-btn:hover { background: rgba(255,255,255,.24); }
+.lb-cap { position: absolute; top: 16px; left: 16px; right: 70px; z-index: 2; color: #fff; font-size: 13px;
+  opacity: .9; text-shadow: 0 1px 3px rgba(0,0,0,.6); pointer-events: none; }
+.lb-hint { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); z-index: 2;
+  color: #fff; opacity: .6; font-size: 11.5px; pointer-events: none; }
 
 /* ---------- BYOK agent panel ---------- */
 .agent-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 22px; margin-bottom: 20px; }
@@ -319,6 +404,8 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
   .coord-grid { grid-template-columns: repeat(2, 1fr); }
   .summary-grid { grid-template-columns: 1fr; }
   .topbar h1 { font-size: 18px; }
+  .topbar-meta { gap: 8px; font-size: 12px; }
+  .ghost-link { padding: 5px 10px; }
 }
 
 /* ---------- print ---------- */
@@ -346,6 +433,12 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 #print-root .pr .pr-photos figure { margin: 0; width: 150px; break-inside: avoid; }
 #print-root .pr .pr-photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #bbb; border-radius: 4px; }
 #print-root .pr .pr-photos figcaption { font-size: 10px; color: #444; margin-top: 2px; }
+/* Site photographs print larger and uncropped (whole frame, ~3× the evidence thumbs) */
+#print-root .pr .pr-photos.pr-photos-large { gap: 12px; }
+#print-root .pr .pr-photos.pr-photos-large figure { width: 300px; }
+#print-root .pr .pr-photos.pr-photos-large img { height: auto; max-height: 340px; object-fit: contain; }
+#print-root .pr .pr-ev { margin: 6px 0 0; }
+#print-root .pr .pr-ev-item { font-size: 11px; color: #333; margin: 3px 0; }
 #print-root .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: 1px; }
 #print-root .pr .pr-map-img { display: block; width: 100%; max-width: 480px; border: 1px solid #bbb; border-radius: 6px; }
 #print-root .pr .pr-map-cap { font-size: 10px; color: #444; margin: 4px 0 0; }
