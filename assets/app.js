@@ -1551,8 +1551,9 @@
     });
 
     const actions = el("div", { class: "src-actions" }, link, statusSel);
-    if (src.method === "api" && src.api && src.api.kind === "ala_biocache") {
-      actions.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runAla(src) }, "Check live"));
+    const runner = apiRunnerFor(src);
+    if (runner) {
+      actions.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
     }
     // PMST card: upload the tool's Excel export and extract the MNES summary in-browser.
     if (src.xlsx_import === "pmst_mnes") {
@@ -1787,15 +1788,94 @@
     }
   }
 
+  // ---------------------------------------------------------------- WildNet check
+  // Query the Queensland WildNet Data API (public, no key) for the conservation-
+  // significant taxa near the point, and GROUP them by kingdom so a threatened
+  // plant is presented as flora, never as fauna. Mirrors alaQuery's shape (status
+  // + HTML + text). Endpoint/paths come from the source's api block.
+  //   GET {base}/api/v1/species-list?central_point_latitude=..&central_point_longitude=..&distance=..&con_sig=1&page_size=5000
+  // Each row: kingdom_name (Plantae/Animalia), scientific_name, accepted_common_name,
+  // nca_code (QLD Nature Conservation Act status), epbc_code (national status).
+  async function wildnetQuery(lat, lon, radius, api) {
+    const base = (api && api.base_url) || "https://wildnet-pub.science-data.qld.gov.au";
+    const listPath = (api && api.species_list_path) || "/api/v1/species-list";
+    const geo = `central_point_latitude=${lat}&central_point_longitude=${lon}&distance=${radius}`;
+    const rows = await fetchJson(`${base}${listPath}?${geo}&con_sig=1&page_size=5000`);
+    const list = Array.isArray(rows) ? rows : [];
+    const groups = { flora: [], fauna: [], other: [] };
+    list.forEach((r) => {
+      const kn = (r[(api && api.kingdom_field) || "kingdom_name"] || "").toLowerCase();
+      groups[kn === "plantae" ? "flora" : kn === "animalia" ? "fauna" : "other"].push(r);
+    });
+    const total = list.length;
+    if (!total) {
+      return { status: STATUS.NONE,
+        html: `<b>No conservation-significant species</b> in Queensland WildNet within ${radius} km. Source: Queensland WildNet species register.`,
+        text: `No conservation-significant WildNet species within ${radius} km.` };
+    }
+    const statusOf = (r) => [r.nca_code && `NCA ${r.nca_code}`, r.epbc_code && `EPBC ${r.epbc_code}`].filter(Boolean).join(", ");
+    const name = (r) => {
+      const sci = r.scientific_name || "", com = r.accepted_common_name || "";
+      const base = sci || com || "unnamed taxon";
+      const label = sci && com ? `${sci} (${com})` : base;
+      const st = statusOf(r);
+      return st ? `${label} — ${st}` : label;
+    };
+    const CAP = 40;
+    const secHtml = (label, arr) => arr.length
+      ? `<div style="margin-top:6px"><b>${label} (${arr.length})</b><ul class="r-species">${arr.slice(0, CAP).map((r) => `<li>${esc(name(r))}</li>`).join("")}${arr.length > CAP ? `<li>…and ${arr.length - CAP} more</li>` : ""}</ul></div>`
+      : "";
+    const secText = (label, arr) => arr.length ? ` ${label} (${arr.length}): ${arr.slice(0, CAP).map(name).join("; ")}.` : "";
+    const html = `<b>${total} conservation-significant taxa</b> in Queensland WildNet within ${radius} km.` +
+      secHtml("Flora — plants", groups.flora) + secHtml("Fauna — animals", groups.fauna) + secHtml("Other (fungi, etc.)", groups.other) +
+      `<div style="margin-top:6px;opacity:.7">Source: Queensland WildNet species register. File each taxon under the matching section (plants → Threatened Flora, animals → Threatened Fauna).</div>`;
+    const text = `${total} conservation-significant WildNet taxa within ${radius} km.` +
+      secText("Flora", groups.flora) + secText("Fauna", groups.fauna) + secText("Other", groups.other);
+    return { status: STATUS.FOUND, html, text };
+  }
+
+  async function runWildnet(src) {
+    const btn = $(`#run-${src.id}`);
+    const res = $(`#res-${src.id}`);
+    const s = state.site;
+    const radius = (src.api && src.api.radius_km) || 10;
+    btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`;
+    res.className = "src-result show"; res.innerHTML = "Querying Queensland WildNet…";
+    try {
+      const r = await wildnetQuery(s.lat, s.lon, radius, src.api);
+      const f = state.findings[src.id] || (state.findings[src.id] = {});
+      f.status = r.status; f.result = { html: r.html, ts: Date.now() };
+      save(); refreshCard(src.id); renderProgress(); renderReport();
+      maybeAutoFetchForSource(src.id);
+    } catch (err) {
+      const f = state.findings[src.id] || (state.findings[src.id] = {});
+      f.status = STATUS.FAILED;
+      f.result = { html: `Could not reach the Queensland WildNet API (${esc(err.message)}). This is usually a network or browser CORS restriction. Use the <b>Open ↗</b> link to run the search in the WildNet app, then set the result.`, err: true, ts: Date.now() };
+      save(); refreshCard(src.id);
+      const rr = $(`#res-${src.id}`); if (rr) rr.classList.add("err");
+      renderProgress(); renderReport();
+    }
+  }
+
   async function fetchJson(url) {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
 
+  // Which live-check runner (if any) handles a source's API kind.
+  function apiRunnerFor(src) {
+    if (src.method !== "api" || !src.api) return null;
+    if (src.api.kind === "ala_biocache") return runAla;
+    if (src.api.kind === "wildnet") return runWildnet;
+    return null;
+  }
+
   async function runAllAuto() {
-    for (const src of sourcesForSite())
-      if (src.method === "api" && src.api && src.api.kind === "ala_biocache") await runAla(src);
+    for (const src of sourcesForSite()) {
+      const runner = apiRunnerFor(src);
+      if (runner) await runner(src);
+    }
   }
 
   // ---------------------------------------------------------------- progress
@@ -2904,11 +2984,13 @@
     sources: () => sourcesForSite().map((s) => ({
       id: s.id, name: s.name, category: s.category, jurisdiction: s.jurisdiction, method: s.method,
       internal: !!s.internal, url: buildUrl(s), what_to_find: s.what_to_find || "",
-      web_search: fillTemplate(s.web_search || ""), is_ala: !!(s.api && s.api.kind === "ala_biocache"),
+      web_search: fillTemplate(s.web_search || ""),
+      is_ala: !!(s.api && s.api.kind === "ala_biocache"),
+      is_wildnet: !!(s.api && s.api.kind === "wildnet"),
       no_result_means: s.no_result_means || "",
-      // Public API a web-fetch-capable agent can query directly (e.g. QLD WildNet).
-      // ALA is excluded because it has its own dedicated query_ala tool.
-      api: (s.api && s.api.kind !== "ala_biocache" && (s.api.base_url || s.api.openapi || s.api.endpoint || s.api.dataset))
+      // Public API a web-fetch-capable agent can query directly. ALA and WildNet are
+      // excluded here because they each have their own dedicated client tool.
+      api: (s.api && s.api.kind !== "ala_biocache" && s.api.kind !== "wildnet" && (s.api.base_url || s.api.openapi || s.api.endpoint || s.api.dataset))
         ? { base_url: s.api.base_url || "", openapi: s.api.openapi || "", endpoint: s.api.endpoint || "", dataset: s.api.dataset || "", docs: s.api.docs || "" }
         : null,
     })),
@@ -2923,6 +3005,10 @@
       return true;
     },
     queryAla: (radius) => alaQuery(state.site.lat, state.site.lon, radius || 10),
+    queryWildnet: (radius) => {
+      const src = DATA.sources.find((x) => x.api && x.api.kind === "wildnet");
+      return wildnetQuery(state.site.lat, state.site.lon, radius || (src && src.api && src.api.radius_km) || 10, src && src.api);
+    },
     beginRun: () => { state.showAttention = false; renderAttention(); },
     endRun: () => { state.showAttention = true; renderProgress(); },
   };

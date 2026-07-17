@@ -181,6 +181,12 @@
         return toolResult(id, r.text || "No ALA summary.");
       } catch (e) { return toolResult(id, "ALA query failed (network/CORS): " + e.message, true); }
     }
+    if (name === "query_wildnet") {
+      try {
+        const r = await window.ESS.queryWildnet(Number(input.radius) || 10);
+        return toolResult(id, r.text || "No WildNet summary.");
+      } catch (e) { return toolResult(id, "WildNet query failed (network/CORS) — fall back to web_fetch of the WildNet API or the aimed link: " + e.message, true); }
+    }
     if (name === "set_source_result") {
       const ok = window.ESS.setResult(input.id, input.status, input.note, input.result_text, input.image_subjects);
       return toolResult(id, ok ? "recorded" : `error: unknown source id or invalid status (${input.id} / ${input.status})`, !ok);
@@ -216,7 +222,7 @@
   // ---------------------------------------------------------------- prompt/tools
   function systemPrompt(site, sources, cfg) {
     const lines = sources.map((s, i) => {
-      const tags = [s.is_ala ? "USE query_ala" : null, s.internal ? "INTERNAL (needs Bureau login → manual)" : null].filter(Boolean);
+      const tags = [s.is_ala ? "USE query_ala" : null, s.is_wildnet ? "USE query_wildnet" : null, s.internal ? "INTERNAL (needs Bureau login → manual)" : null].filter(Boolean);
       let block = `${i + 1}. [${s.id}] ${s.name} (${s.category}, ${s.jurisdiction})${tags.length ? " — " + tags.join("; ") : ""}\n   what to find: ${s.what_to_find}\n   url: ${s.url}`;
       if (s.api) {
         const parts = [s.api.base_url && ("base " + s.api.base_url), s.api.openapi && ("OpenAPI " + s.api.openapi), s.api.endpoint && ("endpoint " + s.api.endpoint), s.api.dataset && ("dataset " + s.api.dataset)].filter(Boolean);
@@ -229,7 +235,7 @@
       "You are completing the desktop-research stage of a Bureau of Meteorology Environmental Site Summary (ESS).",
       `SITE: ${site.name} — station ${site.station_num || "—"}, WMO ${site.wmo || "—"}, ${site.state || "?"}, lat ${site.lat}, lon ${site.lon}.`,
       "",
-      `For EVERY source in the list below, decide a result and record it by calling set_source_result exactly once for that source id. Use ${fetchLine} to research each source's URL and "what to find". For the Atlas of Living Australia source, call query_ala instead of searching (it returns structured conservation data for this site). Where a source lists a "public API" (e.g. Queensland WildNet), prefer querying that API with web_fetch over treating it as manual.`,
+      `For EVERY source in the list below, decide a result and record it by calling set_source_result exactly once for that source id. Use ${fetchLine} to research each source's URL and "what to find". For the Atlas of Living Australia source, call query_ala; for the Queensland WildNet source, call query_wildnet — each returns structured conservation data for this site (WildNet is already grouped into flora vs fauna). If query_wildnet is blocked by the browser, fall back to web_fetch of the WildNet API.`,
       "",
       "Assign exactly one status per source:",
       "- found: the source has something relevant. Put specifics (species, listing names/IDs, outbreak names, lease conditions) in note, and the raw detail in result_text.",
@@ -259,6 +265,11 @@
     tools.push({
       name: "query_ala",
       description: "Query the Atlas of Living Australia for conservation-listed flora & fauna near this site. Use for the Atlas of Living Australia source.",
+      input_schema: { type: "object", properties: { radius: { type: "number", description: "search radius in km (default 10)" } } },
+    });
+    if (sources.some((s) => s.is_wildnet)) tools.push({
+      name: "query_wildnet",
+      description: "Query the Queensland WildNet species register for conservation-significant taxa near this site. Returns them already grouped into flora (plants) vs fauna (animals) with their NCA/EPBC status. Use for the Queensland WildNet source.",
       input_schema: { type: "object", properties: { radius: { type: "number", description: "search radius in km (default 10)" } } },
     });
     tools.push({
