@@ -217,14 +217,19 @@
   function systemPrompt(site, sources, cfg) {
     const lines = sources.map((s, i) => {
       const tags = [s.is_ala ? "USE query_ala" : null, s.internal ? "INTERNAL (needs Bureau login → manual)" : null].filter(Boolean);
-      return `${i + 1}. [${s.id}] ${s.name} (${s.category}, ${s.jurisdiction})${tags.length ? " — " + tags.join("; ") : ""}\n   what to find: ${s.what_to_find}\n   url: ${s.url}`;
+      let block = `${i + 1}. [${s.id}] ${s.name} (${s.category}, ${s.jurisdiction})${tags.length ? " — " + tags.join("; ") : ""}\n   what to find: ${s.what_to_find}\n   url: ${s.url}`;
+      if (s.api) {
+        const parts = [s.api.base_url && ("base " + s.api.base_url), s.api.openapi && ("OpenAPI " + s.api.openapi), s.api.endpoint && ("endpoint " + s.api.endpoint), s.api.dataset && ("dataset " + s.api.dataset)].filter(Boolean);
+        block += `\n   public API (query it with web_fetch for this point + radius, then classify each taxon): ${parts.join("; ")}${s.api.docs ? ". " + s.api.docs : ""}`;
+      }
+      return block;
     }).join("\n");
     const fetchLine = cfg.fetch ? "web_search and web_fetch" : "web_search";
     return [
       "You are completing the desktop-research stage of a Bureau of Meteorology Environmental Site Summary (ESS).",
       `SITE: ${site.name} — station ${site.station_num || "—"}, WMO ${site.wmo || "—"}, ${site.state || "?"}, lat ${site.lat}, lon ${site.lon}.`,
       "",
-      `For EVERY source in the list below, decide a result and record it by calling set_source_result exactly once for that source id. Use ${fetchLine} to research each source's URL and "what to find". For the Atlas of Living Australia source, call query_ala instead of searching (it returns structured conservation data for this site).`,
+      `For EVERY source in the list below, decide a result and record it by calling set_source_result exactly once for that source id. Use ${fetchLine} to research each source's URL and "what to find". For the Atlas of Living Australia source, call query_ala instead of searching (it returns structured conservation data for this site). Where a source lists a "public API" (e.g. Queensland WildNet), prefer querying that API with web_fetch over treating it as manual.`,
       "",
       "Assign exactly one status per source:",
       "- found: the source has something relevant. Put specifics (species, listing names/IDs, outbreak names, lease conditions) in note, and the raw detail in result_text.",
@@ -232,7 +237,13 @@
       "- failed: you tried but could not get an answer (blocked, error, unreachable, no data at the URL).",
       "- manual: the source needs a human — an interactive/draw-a-polygon map (e.g. EPBC Protected Matters), an INTERNAL SharePoint page, or a portal with no readable data at the URL. Put the aimed link + the steps in note; do NOT invent a result.",
       "",
+      "THREATENED SPECIES — label plants vs animals vs communities. Broad biodiversity registers (EPBC PMST, Atlas of Living Australia, QLD WildNet, NSW BioNet, state atlases) return BOTH flora and fauna. In your note/result_text for such a source, group and clearly label each taxon as a PLANT (flora), an ANIMAL (fauna: mammal/bird/reptile/amphibian/fish/invertebrate), or an ecological COMMUNITY/habitat — a threatened plant must never be described as fauna. If unsure whether a name is a plant or an animal, look it up before recording it. This lets the reviewer file each under the correct proforma section (Threatened Flora / Fauna / Habitat).",
+      "",
+      "INTERNAL sources (marked INTERNAL — e.g. the permits register, POPE / leasing SharePoint) are an operator action list only: record them as manual with a SHORT, staff-facing note of what to check. The tool keeps their notes OUT of the exported ESS report, so do not write report-style prose there.",
+      "",
       "For species/subject sources (categories invasive_plants, invasive_animals, disease, threatened) that you mark FOUND, also fill image_subjects with the identifiable species/subject names you found (common or scientific, e.g. \"Gamba grass\", \"Phytophthora cinnamomi\") — the tool auto-fetches a labelled reference photo for each. Leave it empty for non-species sources and for none/failed/manual.",
+      "",
+      "In your evidence note, state whether records fall within/immediately adjacent to the site, or only across the wider region/locality — this distinction drives which standardized proforma phrase the reviewer picks (there is a \"Known to occur in the region but not present within or immediately adjacent to the site.\" option for the latter).",
       "",
       "Rules: never leave a source unrecorded. Be honest — 'none' (checked, absent) and 'failed' (unknown) are different and both matter. Record specifics, not just yes/no. Don't fabricate. The EPBC Protected Matters Search Tool has no API — record it as manual with the 50 km-buffer steps. When every source has been recorded, briefly summarise and stop.",
       "",

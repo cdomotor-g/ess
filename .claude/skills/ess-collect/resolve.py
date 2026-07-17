@@ -102,6 +102,18 @@ def build(site, sources):
 # `image_subjects` hint for the agent to fill (see assets/app.js).
 WIKI_IMAGE_CATEGORIES = {"invasive_plants", "invasive_animals", "disease", "threatened"}
 
+# General biosecurity obligation (GBO) under Queensland's Biosecurity Act 2014 —
+# pre-seeded into the Additional Information section for QLD sites, matching the
+# browser tool (assets/app.js GBO_ADDITIONAL_TEXT).
+GBO_ADDITIONAL_TEXT = (
+    "Under the Biosecurity Act 2014, everyone in Queensland has a general biosecurity obligation (GBO) to ensure that they do not spread a pest, disease or a contaminant. We are all responsible for managing biosecurity risks that are under our control.\n\n"
+    "Under the GBO, individuals and corporations whose activities pose a biosecurity risk must:\n\n"
+    "•  take all reasonable and practical steps to prevent or minimise each biosecurity risk\n"
+    "•  minimise the likelihood of causing a biosecurity event, and limit the consequences if an event is caused\n"
+    "• prevent or minimise the harmful effects a risk could have, and not do anything that might make any harmful effects worse.\n\n"
+    "Even if you are permitted to access places under an Act, you still have a GBO to minimise biosecurity risks."
+)
+
 
 def findings_template(site, sources, srcs):
     """Emit the canonical ess-findings/1 skeleton for the agent to fill in.
@@ -114,8 +126,10 @@ def findings_template(site, sources, srcs):
     reference photo for each on import.
     """
     today = datetime.date.today().isoformat()
+    gbo = GBO_ADDITIONAL_TEXT if site.get("state") == "QLD" else ""
     sections = [
-        {"id": r["id"], "title": r["title"], "choice": "", "note": "",
+        {"id": r["id"], "title": r["title"], "choice": "",
+         "note": gbo if r["id"] == "additional" else "",
          "detail": ""}
         for r in sources.get("report_sections", [])
     ]

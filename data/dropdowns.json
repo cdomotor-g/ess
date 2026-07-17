@@ -13,17 +13,20 @@
  "threatened_habitat": [
   "There are no known threatened habitat communities at this site",
   "There are known threatened habitat communities at this site",
-  "Threatened Habitat communities are found in the local area"
+  "Threatened Habitat communities are found in the local area",
+  "Known to occur in the region but not present within or immediately adjacent to the site."
  ],
  "threatened_flora": [
   "There are no known threatened plants at this site",
   "There are known threatened plants at this site",
-  "Threatened plants are found in the local area"
+  "Threatened plants are found in the local area",
+  "Known to occur in the region but not present within or immediately adjacent to the site."
  ],
  "threatened_fauna": [
   "There are no known threatened animals at this site",
   "There are known threatened animals at this site",
-  "Threatened animals are found in the local area"
+  "Threatened animals are found in the local area",
+  "Known to occur in the region but not present within or immediately adjacent to the site."
  ],
  "diseases": [
   "There are no known disease and pathogen concerns at this site",
@@ -40,12 +43,14 @@
  "invasive_plants": [
   "There are no known invasive plants at this site",
   "There are known invasive plants at this site",
-  "Invasive plants are found in the local area"
+  "Invasive plants are found in the local area",
+  "Known to occur in the region but not present within or immediately adjacent to the site."
  ],
  "invasive_animals": [
   "There are no known invasive animals at this site",
   "There are known invasive animals  at this site",
-  "Invasive animals are found in the local area"
+  "Invasive animals are found in the local area",
+  "Known to occur in the region but not present within or immediately adjacent to the site."
  ],
  "biosecurity_detail": {
   "General clean": "Prior to a trip vehicles and toolboxes undergo general cleaning.  As standard practice all cars, tools and personal items(ie; boots) should be kept clean and free of organic materials.",
