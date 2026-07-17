@@ -97,7 +97,11 @@ Vanilla JS, no dependencies, no build. It:
   host/CORS as the imagery, so the result stays a self-contained, exportable
   JPEG. The chosen span (km) and the labels toggle persist per site and travel
   into the report + exports;
-- persists per-site state (including photos) in `localStorage`;
+- persists per-site state in `localStorage`, split across two keys per site: a
+  small **text** key (findings text, report, prefs — rewritten on every keystroke)
+  and a larger `…:img` key holding the photos + satellite map data URLs (rewritten
+  only when images change). This keeps note editing fast on image-heavy sites;
+  legacy single-key saves are migrated to the split layout on first edit;
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three.
 

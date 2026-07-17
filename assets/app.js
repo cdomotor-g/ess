@@ -251,11 +251,11 @@
     const site = state.site;
     await addImagesTo(state.siteImages, files);
     if (state.site !== site) { toast("Site changed before the photo finished processing — discarded"); return; }
-    save(); renderSiteImages(); renderReport();
+    saveImages(); renderSiteImages(); renderReport();
   }
   function removeSiteImage(id) {
     state.siteImages = state.siteImages.filter((im) => im.id !== id);
-    save(); renderSiteImages(); renderReport();
+    saveImages(); renderSiteImages(); renderReport();
   }
 
   async function addFindingImages(sourceId, files) {
@@ -264,13 +264,13 @@
     if (!f.images) f.images = [];
     await addImagesTo(f.images, files);
     if (state.site !== site) { toast("Site changed before the photo finished processing — discarded"); return; }
-    save(); refreshCard(sourceId); renderReport();
+    saveImages(); refreshCard(sourceId); renderReport();
   }
   function removeFindingImage(sourceId, imgId) {
     const f = state.findings[sourceId];
     if (!f || !f.images) return;
     f.images = f.images.filter((im) => im.id !== imgId);
-    save(); refreshCard(sourceId); renderReport();
+    saveImages(); refreshCard(sourceId); renderReport();
   }
 
   // ---------------------------------------------------------------- Wikipedia images
@@ -371,7 +371,7 @@
       credit: credit ? `Wikipedia · ${credit}` : "Source: Wikipedia",
       source_url: found.pageUrl, ts: Date.now(),
     });
-    save(); refreshCard(sourceId); renderReport();
+    saveImages(); refreshCard(sourceId); renderReport();
     toast(`Added “${found.title}”`);
   }
 
@@ -476,7 +476,7 @@
     } finally {
       autoFetchInFlight.delete(sourceId);
     }
-    if (added && state.site === site) { save(); refreshCard(sourceId); renderReport(); }
+    if (added && state.site === site) { saveImages(); refreshCard(sourceId); renderReport(); }
     return added;
   }
 
@@ -543,7 +543,7 @@
       oninput: (e) => onCaption(e.target.value), onchange: () => renderReport() });
     cap.value = im.caption || "";
     return el("figure", { class: "photo-thumb" },
-      el("img", { src: im.dataUrl, alt: im.caption || "Photo",
+      el("img", { src: im.dataUrl, alt: im.caption || "Photo", loading: "lazy", decoding: "async",
         title: im.source_url ? "Open the source page" : "Click to view — zoom & pan", onclick: () => activateImage(im) }),
       el("button", { type: "button", class: "photo-remove", title: "Remove photo", onclick: onRemove }, "×"),
       cap,
@@ -554,7 +554,7 @@
   function photoFigure(im, altFallback, onRemove) {
     const cap = im.caption || altFallback || "";
     return el("figure", { class: "photo-thumb view" },
-      el("img", { src: im.dataUrl, alt: cap || "Photo",
+      el("img", { src: im.dataUrl, alt: cap || "Photo", loading: "lazy", decoding: "async",
         title: im.source_url ? "Open the source page" : "Click to view — zoom & pan", onclick: () => activateImage(im) }),
       onRemove ? el("button", { type: "button", class: "photo-remove", title: "Remove this photo from the report", onclick: onRemove }, "×") : null,
       (cap || im.credit) ? el("figcaption", {}, cap, im.credit ? creditNode(im) : null) : null);
@@ -611,7 +611,7 @@
     const grid = $("#site-photo-grid");
     if (!grid) return;
     grid.innerHTML = "";
-    (state.siteImages || []).forEach((im) => grid.append(renderPhotoThumb(im, () => removeSiteImage(im.id), (v) => { im.caption = v; save(); })));
+    (state.siteImages || []).forEach((im) => grid.append(renderPhotoThumb(im, () => removeSiteImage(im.id), (v) => { im.caption = v; saveImages(); })));
   }
 
   // ---------------------------------------------------------------- data load
@@ -774,6 +774,7 @@
     state.filterStatus = null;
     state.filterUnreviewed = false;
     state.showAttention = false;
+    imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
     renderWorkspace();
   }
@@ -836,7 +837,7 @@
       };
     });
     state.report = {};
-    (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "" }; });
+    (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
     state.date = si.assessment_date || new Date().toISOString().slice(0, 10);
     state.maintenance = si.site_maintenance || "";
     state.filterAttention = false;
@@ -844,6 +845,7 @@
     state.filterUnreviewed = false;
     state.showAttention = true; // surface what the agent left for the human
     renderWorkspace();
+    imagesDirty = true; // imported photos + map must be written to the image key
     save();
     autoFetchAfterImport(json.collection_log); // async, best-effort (Task 3)
   }
@@ -1020,7 +1022,7 @@
       const map = await buildMapDataUrl(s.lat, s.lon, km, labels);
       if (token !== mapGenToken || state.site !== site) return; // superseded (site/size changed)
       state.mapImage = map; state.mapStatus = "ready"; state.mapError = "";
-      save(); renderSiteMap(); renderReport();
+      saveImages(); renderSiteMap(); renderReport();
     } catch (err) {
       if (token !== mapGenToken || state.site !== site) return;
       state.mapStatus = "error"; state.mapError = err.message || "could not load the map";
@@ -1491,6 +1493,11 @@
       },
     });
     note.value = f.note || "";
+    // Wipe just the notes text (keeps photos/reference images) so an operator can
+    // clear agentic entries and redo a card's notes from scratch.
+    const clearNoteBtn = el("button", { type: "button", class: "btn tiny note-clear",
+      title: "Clear the notes text for this card (photos are kept)",
+      onclick: () => clearNote(src.id, note) }, "Clear");
 
     let photoBlock = null;
     if (PHOTO_CATEGORIES.has(src.category)) {
@@ -1500,7 +1507,7 @@
         "📷 Evidence photo — drag & drop, paste, or ", pickBtn);
       wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
       const grid = el("div", { class: "photo-grid small" });
-      f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; save(); })));
+      f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; saveImages(); })));
       const wikiRow = WIKI_IMAGE_CATEGORIES.has(src.category) ? renderWikiImageRow(src) : null;
       photoBlock = el("div", { class: "src-photos" }, zone, wikiRow, input, grid);
     }
@@ -1515,7 +1522,9 @@
           el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status]))),
       el("div", { class: "src-desc" }, src.what_to_find || ""),
       actions,
-      el("div", { class: "src-note" }, el("label", { class: "note-label" }, "Notes & evidence"), note),
+      el("div", { class: "src-note" },
+        el("div", { class: "note-head" }, el("label", { class: "note-label" }, "Notes & evidence"), clearNoteBtn),
+        note),
       photoBlock,
       renderIncludeRow(src),
       el("div", { class: "src-result" + (f.result ? " show" : ""), id: `res-${src.id}`, html: f.result ? f.result.html : "" }),
@@ -1602,6 +1611,19 @@
     const src = DATA.sources.find((s) => s.id === id);
     const old = $(`#src-${id}`);
     if (old && src) old.replaceWith(renderSourceCard(src));
+  }
+
+  // Clear the notes text for a card (photos + reference images are kept). Handy for
+  // wiping agentic entries and redoing a card's notes from scratch. Confirmed
+  // because there's no undo and the text may be substantial.
+  function clearNote(id, textarea) {
+    const f = state.findings[id];
+    if (!f || !(f.note && f.note.trim())) { toast("No notes to clear on this card."); return; }
+    if (!confirm("Clear the Notes & Evidence text for this card?\n\nPhotos and reference images are kept. This can't be undone.")) return;
+    f.note = "";
+    if (textarea) textarea.value = "";
+    save();
+    renderReport(); // the cleared note drops out of its report section live
   }
 
   // ---------------------------------------------------------------- ALA check
@@ -1811,6 +1833,45 @@
     f.included = !cardIncluded(f);
     save(); refreshCard(id); renderReport();
   }
+
+  // -------------------------------------------------- cross-column "Show" jumps
+  // The two columns scroll independently (desktop) or the page scrolls (narrow),
+  // so scrollIntoView() targets the right scroll container automatically. A brief
+  // highlight helps the eye land on whatever was jumped to.
+  function flashTarget(node) {
+    if (!node) return;
+    node.classList.remove("flash-target");
+    void node.offsetWidth; // restart the animation if it's still running
+    node.classList.add("flash-target");
+    setTimeout(() => node.classList.remove("flash-target"), 1500);
+  }
+  // Left card's "Show" → scroll the report (right) to this card's target section.
+  function showReportSection(sectionId) {
+    const node = document.getElementById(`rsec-${sectionId}`);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+    flashTarget(node);
+  }
+  // Report block's "Show" → scroll the collection (left) to the source card. The
+  // card may be hidden by an active dashboard filter, so clear filters and
+  // re-render first if it isn't currently on screen.
+  function showSourceCard(sourceId) {
+    let node = document.getElementById(`src-${sourceId}`);
+    if (!node) {
+      state.filterStatus = null;
+      state.filterAttention = false;
+      state.filterUnreviewed = false;
+      const internalToggle = $("#toggle-manual-internal");
+      if (internalToggle && !internalToggle.checked) internalToggle.checked = true;
+      renderDashboard();
+      syncFilterButton();
+      node = document.getElementById(`src-${sourceId}`);
+    }
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+    flashTarget(node);
+  }
+
   // The Include control shown on each source card: a target-section dropdown + a
   // toggle button. Editing the card's notes/photos afterwards updates the report
   // live (the report re-renders from state), so multiple sources can land in one
@@ -1826,8 +1887,11 @@
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
       title: included ? "Currently included — click to remove from the report" : "Add this card's notes & photos to the report section",
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
+    const showBtn = el("button", { type: "button", class: "btn tiny inc-show",
+      title: "Scroll the report (right) to this card's target section",
+      onclick: () => showReportSection(targetSectionOf(src)) }, "Show ⇢");
     return el("div", { class: "include-row" + (included ? " is-in" : "") },
-      el("span", { class: "inc-lead" }, "Add to report:"), sel, btn);
+      el("span", { class: "inc-lead" }, "Add to report:"), sel, btn, showBtn);
   }
 
   // Suggest a dropdown option based on the findings in the relevant categories.
@@ -1867,7 +1931,7 @@
       const m = state.mapImage;
       const box = el("div", { class: "rsection" }, el("h3", {}, "Location map"));
       box.append(el("figure", { class: "report-map" },
-        el("img", { src: m.dataUrl, alt: "Satellite locator map",
+        el("img", { src: m.dataUrl, alt: "Satellite locator map", loading: "lazy", decoding: "async",
           title: "Open the full-screen map — scroll to zoom, drag to pan",
           onclick: () => openLightbox(m.dataUrl, `Satellite locator — ${(+m.km).toLocaleString()} km across · ${state.site.name}`) }),
         el("figcaption", {}, `Satellite locator — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
@@ -1884,8 +1948,17 @@
       const rstate = state.report[section.id] || (state.report[section.id] = { choice: null, note: "" });
       if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
 
-      const box = el("div", { class: "rsection" });
-      box.append(el("h3", {}, section.title));
+      const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""), id: `rsec-${section.id}` });
+      // Per-section "Reviewed" tickbox — lets the operator track progress through the
+      // report the same way the collection cards do. Updated in place (no full report
+      // re-render) so ticking stays cheap on image-heavy sites.
+      const revInput = el("input", { type: "checkbox" });
+      revInput.checked = !!rstate.reviewed;
+      const revToggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""),
+        title: "Tick once you've reviewed this report section" },
+        revInput, el("span", {}, rstate.reviewed ? "✓ Reviewed" : "Mark reviewed"));
+      revInput.addEventListener("change", (e) => setSectionReviewed(section.id, e.target.checked, box, revToggle));
+      box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title), revToggle));
 
       if (section.dropdown) {
         const opts = DATA.dropdowns[section.dropdown] || [];
@@ -1920,7 +1993,9 @@
           const head = el("div", { class: "r-inc-head" },
             el("span", { class: "chip " + (st === "unset" ? "manual" : st), style: st === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[st]),
             el("span", { class: "r-inc-name" }, src.name),
-            el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove"));
+            el("div", { class: "r-inc-actions" },
+              el("button", { type: "button", class: "btn tiny r-inc-show", title: "Scroll the collection (left) to this source's card", onclick: () => showSourceCard(src.id) }, "⇠ Show"),
+              el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
           const item = el("div", { class: "r-inc-item" }, head);
           if (f.note && f.note.trim()) item.append(el("div", { class: "r-inc-note" }, f.note.trim()));
           const imgs = (f.images || []).filter((im) => { const k = im.dataUrl || im.id; if (seenImg.has(k)) return false; seenImg.add(k); return true; });
@@ -1946,14 +2021,43 @@
     if (detail) detail.textContent = map[rstate.choice] || "";
   }
 
+  // Tracks the operator's "I've reviewed this report section" progress — updated in
+  // place (toggling the class + label on the existing nodes) so it never triggers a
+  // full renderReport(), which on an image-heavy site would be needlessly expensive.
+  function setSectionReviewed(sectionId, reviewed, box, label) {
+    const rstate = state.report[sectionId] || (state.report[sectionId] = { choice: null, note: "" });
+    rstate.reviewed = !!reviewed;
+    save();
+    if (box) box.classList.toggle("is-reviewed", rstate.reviewed);
+    if (label) {
+      label.classList.toggle("on", rstate.reviewed);
+      const span = label.querySelector("span");
+      if (span) span.textContent = rstate.reviewed ? "✓ Reviewed" : "Mark reviewed";
+    }
+  }
+
   // ---------------------------------------------------------------- persistence
-  // Debounced: photos can make the per-site state multi-MB, and save() now fires
-  // on every keystroke (captions, notes) — writing that synchronously per key
-  // would jank typing. In-memory state (what renders/exports) is unaffected.
+  // Per-site state is split across TWO localStorage keys:
+  //   • the main key   — site + findings *text*, report, prefs (small; kilobytes)
+  //   • <key>:img       — the photos + satellite map data URLs (large; can be MB)
+  // save() fires on every keystroke (notes, captions). Photos can push the state
+  // to several MB, and JSON.stringify-ing all of that base64 on every save was the
+  // cause of the typing lag: as a site accumulates images, each note edit re-wrote
+  // megabytes and froze the tab. Now the hot path (text) is always cheap, and the
+  // heavy image blob is only re-serialised when images actually change — tracked by
+  // `imagesDirty`. In-memory state (what renders/exports) is unaffected.
+  const IMG_SUFFIX = ":img";
   let saveTimer = null;
+  let imagesDirty = false;
   function save() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 400);
+  }
+  // Use after any change that adds/removes/edits a photo, reference image or the
+  // satellite map, so the (separately-stored) image blob is rewritten on next save.
+  function saveImages() {
+    imagesDirty = true;
+    save();
   }
   // Persist immediately, bypassing the debounce — used right before anything that
   // reassigns state.site (switching site, importing) or unloads the page, so a
@@ -1967,42 +2071,85 @@
   function saveNow() {
     if (!state.site) return;
     const key = LS_PREFIX + siteKey(state.site);
-    const payload = {
-      site: state.site, findings: state.findings, report: state.report, siteImages: state.siteImages,
-      mapKm: state.mapKm, mapLabels: state.mapLabels, mapImage: state.mapImage,
+    // Text payload — strip images out of each finding so this stays small and cheap
+    // to serialise on every keystroke. state.findings itself is never mutated here.
+    const findingsText = {};
+    for (const [id, f] of Object.entries(state.findings)) {
+      const { images, ...rest } = f; // `images` intentionally dropped from the text payload
+      findingsText[id] = rest;
+    }
+    const textPayload = {
+      v: 2, site: state.site, findings: findingsText, report: state.report,
+      mapKm: state.mapKm, mapLabels: state.mapLabels,
       date: $("#fld-date") ? $("#fld-date").value : state.date,
       maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
     };
     try {
-      localStorage.setItem(key, JSON.stringify(payload));
+      localStorage.setItem(key, JSON.stringify(textPayload));
     } catch (err) {
       if (err && err.name !== "QuotaExceededError") { toast("Could not save locally"); return; }
-      // Photos + the satellite map are the likeliest reason this exceeded the
-      // quota — retry without the embedded images so findings/notes (previously
-      // always small enough to save) still do. The map is regenerated on reload.
+      toast("Local storage is full — export your report soon.");
+      return; // if even the small text payload won't fit, the image blob certainly won't
+    }
+    // Image payload — potentially megabytes; only rewritten when images changed.
+    if (imagesDirty) {
+      const findingImages = {};
+      for (const [id, f] of Object.entries(state.findings))
+        if (f.images && f.images.length) findingImages[id] = f.images;
+      const hasAny = state.siteImages.length || state.mapImage || Object.keys(findingImages).length;
       try {
-        const findings = Object.fromEntries(Object.entries(state.findings).map(([id, f]) => [id, { ...f, images: [] }]));
-        localStorage.setItem(key, JSON.stringify({ ...payload, siteImages: [], mapImage: null, findings }));
+        if (hasAny)
+          localStorage.setItem(key + IMG_SUFFIX, JSON.stringify({ siteImages: state.siteImages, mapImage: state.mapImage, findingImages }));
+        else
+          localStorage.removeItem(key + IMG_SUFFIX);
+        imagesDirty = false;
+      } catch (err) {
+        if (err && err.name !== "QuotaExceededError") { imagesDirty = false; return; }
+        // Photos + the satellite map are the likeliest reason for exceeding quota.
+        // Drop them from local storage (they still live in memory + every export)
+        // rather than retrying the same failing multi-MB write on every future save.
+        imagesDirty = false;
+        try { localStorage.removeItem(key + IMG_SUFFIX); } catch (_) {}
         toast("Local storage is full — photos aren't saved locally (notes still are). Export your report soon.");
-      } catch (_) {
-        toast("Local storage is full — nothing could be saved locally. Export your report soon.");
       }
     }
   }
   function restore() {
     try {
-      const raw = localStorage.getItem(LS_PREFIX + siteKey(state.site));
+      const key = LS_PREFIX + siteKey(state.site);
+      const raw = localStorage.getItem(key);
       if (!raw) return;
       const d = JSON.parse(raw);
       state.findings = d.findings || {};
       state.report = d.report || {};
-      state.siteImages = d.siteImages || [];
       state.mapKm = d.mapKm || MAP_DEFAULT_KM;
       state.mapLabels = d.mapLabels !== false; // default on for older saves
-      state.mapImage = (d.mapImage && DATA_IMG_RE.test(d.mapImage.dataUrl || "")) ? d.mapImage : null;
-      state.mapStatus = state.mapImage ? "ready" : "idle";
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
+      // Images live in a separate key (v2). Fall back to the legacy embedded layout
+      // (v1) for sites saved before the split, then mark dirty so the next save
+      // migrates them out of the text key.
+      let imgRaw = null;
+      try { imgRaw = localStorage.getItem(key + IMG_SUFFIX); } catch (_) {}
+      if (imgRaw) {
+        const di = JSON.parse(imgRaw) || {};
+        state.siteImages = di.siteImages || [];
+        state.mapImage = (di.mapImage && DATA_IMG_RE.test(di.mapImage.dataUrl || "")) ? di.mapImage : null;
+        const fi = di.findingImages || {};
+        for (const [id, imgs] of Object.entries(fi)) {
+          if (!state.findings[id]) state.findings[id] = { status: STATUS.UNSET, note: "", result: null };
+          state.findings[id].images = Array.isArray(imgs) ? imgs : [];
+        }
+        imagesDirty = false;
+      } else {
+        state.siteImages = d.siteImages || [];
+        state.mapImage = (d.mapImage && DATA_IMG_RE.test(d.mapImage.dataUrl || "")) ? d.mapImage : null;
+        imagesDirty = !!(state.siteImages.length || state.mapImage ||
+          Object.values(state.findings).some((f) => f.images && f.images.length));
+      }
+      // Every finding must have an images array (some were restored without one).
+      for (const f of Object.values(state.findings)) if (!f.images) f.images = [];
+      state.mapStatus = state.mapImage ? "ready" : "idle";
     } catch (_) { /* ignore corrupt entry */ }
   }
 
@@ -2050,6 +2197,7 @@
         id: sec.id, title: sec.title,
         choice: (state.report[sec.id] || {}).choice || "",
         note: (state.report[sec.id] || {}).note || "",
+        reviewed: !!(state.report[sec.id] || {}).reviewed,
         detail: sec.bioDetail ? (DATA.dropdowns.biosecurity_detail || {})[(state.report[sec.id] || {}).choice] || "" : "",
         // Notes from the sources the operator included into this section (Include control).
         evidence_notes: includedCardsForSection(sec.id)
