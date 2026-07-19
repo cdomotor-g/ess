@@ -130,7 +130,7 @@
   }
 
   // ---------------------------------------------------------------- app state
-  const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null, weeds: [], stateBoundaries: [] };
+  const DATA = { stations: [], sources: [], sourcesMeta: null, dropdowns: null, meta: null, weeds: [], stateBoundaries: [], statements: {} };
   const state = {
     site: null,        // { name, station_num, wmo, state, delivery_group, facility_types, lat, lon, refs, primary_facility, manual }
     findings: {},      // sourceId -> { status, note, result, images: [{id,dataUrl,caption,ts}] }
@@ -647,6 +647,18 @@
   // State boundary polygons, for resolving a manually-entered/imported coordinate
   // to its real state (see stateFromCoords). Best-effort: if this fails to load,
   // stateFromCoords just falls back to the coarser bounding-box heuristic.
+  // Hand-authored standardized narrative templates (GBO text, koala district,
+  // duty-of-care, impact boilerplate…) used to seed report-section detail. Durable
+  // and separate from the build-generated dropdowns.json. Best-effort: a missing
+  // file just means the "Insert suggested detail" helper falls back to evidence.
+  async function loadStatements() {
+    try {
+      const res = await fetch("data/statements.json", { cache: "no-cache" });
+      if (!res.ok) return;
+      DATA.statements = (await res.json()) || {};
+    } catch (_) { /* narrative templates are optional */ }
+  }
+
   async function loadStateBoundaries() {
     try {
       const res = await fetch("data/reference/au_states.geojson", { cache: "no-cache" });
@@ -1287,11 +1299,16 @@
     if (t) for (const r of t.data) { const nm = cell(r, t.col("Feature Name")); if (nm) items.push(nm); }
     cats.push({ title: "Commonwealth Marine Area", items });
 
+    // Structured "Known" captures, kept alongside the display strings so the
+    // importer can seed the Threatened Habitat/Flora/Fauna section narratives.
+    const rawCommunities = [], rawSpecies = [], rawMigratory = [];
+
     t = table("Communities", ["community name"]); items = []; let total = 0;
     if (t) for (const r of t.data) {
       const nm = cell(r, t.col("Community Name")); if (!nm) continue; total++;
       if (lc(cell(r, t.col("Rank", "Simple Presence", "Presence"))) !== KNOWN) continue;
       const catg = cell(r, t.col("Threatened Category")), txt = cell(r, t.col("Text", "Presence Text"));
+      rawCommunities.push({ name: nm, cat: catg });
       items.push(nm + (catg ? ` — ${catg}` : "") + (txt ? ` [${txt}]` : ""));
     }
     cats.push({ title: "Listed Threatened Ecological Communities", items, total, knownOnly: true, unit: "communities" });
@@ -1302,8 +1319,10 @@
       if (!sci && !common) continue; total++;
       if (lc(cell(r, t.col("Simple Presence", "Rank", "Presence"))) !== KNOWN) continue;
       const name = common && lc(common) !== "null" ? `${common} (${sci})` : sci;
-      const tail = [cell(r, t.col("Class")), cell(r, t.col("Threatened Category"))].filter(Boolean).join(", ");
+      const cls = cell(r, t.col("Class")), catg = cell(r, t.col("Threatened Category"));
+      const tail = [cls, catg].filter(Boolean).join(", ");
       const txt = cell(r, t.col("Presence Text", "Text"));
+      rawSpecies.push({ name, cls, cat: catg });
       items.push(name + (tail ? ` — ${tail}` : "") + (txt ? ` [${txt}]` : ""));
     }
     cats.push({ title: "Listed Threatened Species", items, total, knownOnly: true, unit: "species" });
@@ -1315,6 +1334,7 @@
       if (lc(cell(r, t.col("Rank", "Simple Presence", "Presence"))) !== KNOWN) continue;
       const name = common && lc(common) !== "null" ? `${common} (${sci})` : sci;
       const cls = cell(r, t.col("Class")), txt = cell(r, t.col("Text", "Presence Text"));
+      rawMigratory.push({ name, cls });
       items.push(name + (cls ? ` — ${cls}` : "") + (txt ? ` [${txt}]` : ""));
     }
     cats.push({ title: "Listed Migratory Species", items, total, knownOnly: true, unit: "species" });
@@ -1343,7 +1363,8 @@
       L.push("");
     }
     while (L.length && L[L.length - 1] === "") L.pop();
-    return { text: L.join("\n"), found };
+    const seeds = buildPmstSeeds({ communities: rawCommunities, species: rawSpecies, migratory: rawMigratory }, state.site);
+    return { text: L.join("\n"), found, seeds };
   }
 
   async function importPmstXlsx(sourceId, file, btn) {
@@ -1362,8 +1383,24 @@
       }
       f.note = note;
       f.status = res.found ? STATUS.FOUND : STATUS.NONE;
+      // Seed the Threatened Habitat / Flora / Fauna section narratives from the
+      // split PMST result, mirroring what a human writes by hand into those
+      // sections — but only where the reviewer hasn't already written that
+      // section (never clobber their text). Choice defaults to the "…local area"
+      // wording, since a 50 km buffer speaks to the wider region, not the footprint.
+      let seeded = 0;
+      if (res.seeds) {
+        for (const [secId, seed] of Object.entries(res.seeds)) {
+          if (!seed) continue;
+          const rs = state.report[secId] || (state.report[secId] = { choice: null, note: "" });
+          if (rs.note && rs.note.trim()) continue;
+          rs.note = seed.note; rs.choice = seed.choice; seeded++;
+        }
+      }
       save(); refreshCard(sourceId); renderProgress(); renderReport();
-      toast(res.found ? "PMST imported — MNES summary added to the notes." : "PMST imported — no MNES matters returned.");
+      toast(res.found
+        ? `PMST imported — MNES summary added${seeded ? `, and ${seeded} section narrative${seeded > 1 ? "s" : ""} drafted` : ""}.`
+        : "PMST imported — no MNES matters returned.");
     } catch (err) {
       if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = orig; }
       toast(err.message || "Could not read that .xlsx file.");
@@ -1761,6 +1798,173 @@
     return rel.flatMap((s) => ((state.findings[s.id] || {}).images || []).map((im) => ({ im, src: s })));
   }
 
+  // ------------------------------------------------- narrative + QA helpers
+  // Standardized narrative templates (data/statements.json); {} if not loaded.
+  const STMT = () => DATA.statements || {};
+
+  // Classify a PMST threatened-species row as flora vs fauna, so a Protected
+  // Matters result can be split into the Flora and Fauna sections the way a human
+  // does it by hand. Uses the taxonomic Class where present, else a name hint;
+  // anything unresolved defaults to fauna (and the flora seed says so).
+  const PLANT_CLASS_RE = /\b(flora|plant|plants|magnoliopsida|liliopsida|pteridopsida|polypodiopsida|pinopsida|cycadopsida|bryopsida|equisetopsida|gnetopsida|dicot|monocot)\b/i;
+  const ANIMAL_CLASS_RE = /\b(bird|birds|aves|mammal|mammals|mammalia|reptil|amphib|fish|actinopterygii|chondrichthyes|shark|insect|insecta|snail|gastropoda|crustacea|malacostraca|arachnid)\b/i;
+  const PLANT_NAME_RE = /\b(wattle|acacia|eucalyptus|corymbia|grevillea|orchid|grass|sedge|rush|fern|pea|daisy|lily|shrub|myrtle|banksia|hakea|boronia|pomaderris|correa|zieria|prostanthera|plectranthus|pepper-?cress|bluegrass|turpentine|greenhood|wildflower|cycad|sea-?berry|toadflax|cornflower|panic)\b/i;
+  function pmstIsPlant(cls, name) {
+    if (cls && PLANT_CLASS_RE.test(cls)) return true;
+    if (cls && ANIMAL_CLASS_RE.test(cls)) return false;
+    return PLANT_NAME_RE.test(name || "");
+  }
+
+  // QLD koala-district note for the Fauna section. Districts A/B cover South East
+  // Queensland; the rest of the State is district C (where the plan's sequential
+  // clearing rules do not apply). District is provisional from location only.
+  function koalaNote(site) {
+    const K = STMT().koala || {};
+    if (!site || site.state !== "QLD" || !K.explainer) return "";
+    const bb = K.seq_bbox || {}, lat = +site.lat, lon = +site.lon;
+    const inSEQ = isFinite(lat) && isFinite(lon) &&
+      lat >= bb.lat_min && lat <= bb.lat_max && lon >= bb.lon_min && lon <= bb.lon_max;
+    const district = inSEQ ? K.district_ab : K.district_c;
+    const tail = [K.explainer, district, K.confirm, K.link ? "See: " + K.link : ""].filter(Boolean).join(" ");
+    return tail;
+  }
+
+  // Group {name, cat} rows by threatened category in severity order, e.g.
+  // "Critically Endangered: A, B. Endangered: C." — mirrors the human paragraphs.
+  const CAT_ORDER = ["Critically Endangered", "Endangered", "Vulnerable", "Conservation Dependent", "Extinct in the Wild", "Extinct"];
+  function groupByCategory(list) {
+    const g = {};
+    list.forEach((x) => { const c = x.cat || "Listed"; (g[c] = g[c] || []).push(x.name); });
+    return Object.keys(g)
+      .sort((a, b) => { const ia = CAT_ORDER.indexOf(a), ib = CAT_ORDER.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); })
+      .map((c) => `${c}: ${g[c].join(", ")}.`);
+  }
+
+  // Build {threatened_habitat, threatened_flora, threatened_fauna} section seeds
+  // ({choice, note}) from a PMST "Known" result. The choice is the "…local area"
+  // wording (opts[2]) when matters exist — the honest reading of a wide-buffer
+  // search — or the "no known…" wording (opts[0]) otherwise.
+  function buildPmstSeeds(mnes, site) {
+    const dd = DATA.dropdowns || {}, S = STMT();
+    const localOpt = (k) => { const o = dd[k] || []; return o[2] || o[1] || o[0] || ""; };
+    const noneOpt = (k) => (dd[k] || [])[0] || "";
+    const impact = S.impact_boilerplate ? "\n\n" + S.impact_boilerplate : "";
+
+    // Habitat ← threatened ecological communities
+    let habitat;
+    if (mnes.communities.length) {
+      habitat = { choice: localOpt("threatened_habitat"),
+        note: `A Protected Matters search identified ${mnes.communities.length} threatened ecological communit${mnes.communities.length === 1 ? "y" : "ies"} recorded as Known in the wider search area:\n• ${groupByCategory(mnes.communities).join("\n• ")}\nKnown to occur in the region; not necessarily present within or immediately adjacent to the site. All other communities returned were Likely/May occurrences and are excluded.` };
+    } else {
+      habitat = { choice: noneOpt("threatened_habitat"),
+        note: "A Protected Matters search identified no threatened ecological communities recorded as Known in the wider search area." };
+    }
+
+    const plants = mnes.species.filter((s) => pmstIsPlant(s.cls, s.name));
+    const animals = mnes.species.filter((s) => !pmstIsPlant(s.cls, s.name));
+
+    // Flora ← threatened species classified as plants
+    let flora;
+    if (plants.length) {
+      flora = { choice: localOpt("threatened_flora"),
+        note: `The PMST identified threatened flora recorded as Known in the wider region:\n• ${groupByCategory(plants).join("\n• ")}${impact}` };
+    } else {
+      flora = { choice: noneOpt("threatened_flora"),
+        note: "The PMST identified no threatened flora recorded as Known in the wider region." };
+    }
+
+    // Fauna ← threatened species classified as animals, plus migratory (a separate
+    // matter), plus the koala note where applicable.
+    let fauna;
+    if (animals.length || mnes.migratory.length) {
+      const bits = [];
+      if (animals.length) bits.push(`The PMST identified threatened fauna recorded as Known in the wider region:\n• ${groupByCategory(animals).join("\n• ")}`);
+      if (mnes.migratory.length) bits.push(`Listed migratory species recorded as Known: ${mnes.migratory.map((m) => m.name).join(", ")}.` + (S.migratory_note ? " " + S.migratory_note : ""));
+      let note = bits.join("\n\n");
+      if (animals.length && S.impact_boilerplate) note += "\n\n" + S.impact_boilerplate;
+      const kn = /koala/i.test(animals.map((a) => a.name).join(" ")) ? koalaNote(site) : "";
+      if (kn) note += "\n\n" + kn;
+      fauna = { choice: localOpt("threatened_fauna"), note };
+    } else {
+      fauna = { choice: noneOpt("threatened_fauna"),
+        note: "The PMST identified no threatened fauna or migratory species recorded as Known in the wider region." };
+    }
+
+    return { threatened_habitat: habitat, threatened_flora: flora, threatened_fauna: fauna };
+  }
+
+  // Assemble a suggested detail paragraph for a section from its FOUND evidence
+  // plus the standardized templates — the "✨ Insert suggested detail" button.
+  // Returns "" when there's nothing useful to offer.
+  function sectionNarrative(section) {
+    const S = STMT(), site = state.site || {};
+    const ev = evidenceFor(section);
+    const foundNotes = ev.filter((x) => x.f.status === "found").map((x) => findingText(x.f).trim()).filter(Boolean);
+    const anyFound = ev.some((x) => x.f.status === "found");
+    const parts = [];
+    switch (section.id) {
+      case "threatened_habitat":
+        if (foundNotes.length) parts.push(foundNotes.join("\n\n"));
+        break;
+      case "threatened_flora":
+        if (foundNotes.length) parts.push(foundNotes.join("\n\n"));
+        if (anyFound && S.impact_boilerplate) parts.push(S.impact_boilerplate);
+        break;
+      case "threatened_fauna": {
+        if (foundNotes.length) parts.push(foundNotes.join("\n\n"));
+        if (anyFound && S.impact_boilerplate) parts.push(S.impact_boilerplate);
+        const kn = koalaNote(site);
+        if (kn && /koala/i.test(foundNotes.join(" "))) parts.push(kn);
+        break;
+      }
+      case "indigenous_areas":
+        if (foundNotes.length) parts.push(foundNotes.join("\n\n"));
+        else if (S.no_ipa_note) parts.push(S.no_ipa_note);
+        if (S.duty_of_care) parts.push(S.duty_of_care);
+        break;
+      case "heritage":
+        if (foundNotes.length) parts.push(foundNotes.join("\n\n"));
+        else if (S.no_heritage_note) parts.push(S.no_heritage_note);
+        break;
+      case "invasive_plants":
+      case "invasive_animals":
+      case "diseases":
+        if (foundNotes.length) parts.push(foundNotes.join("\n\n"));
+        break;
+      case "additional": {
+        const gbo = S.general_biosecurity_obligation || {};
+        const t = gbo[site.state] || gbo["*"];
+        if (t) parts.push(t);
+        const ass = sourcesForSite().find((s) => s.id === "acid-sulfate-soils");
+        if (ass && (state.findings[ass.id] || {}).status === "found" && S.acid_sulfate_note) parts.push(S.acid_sulfate_note);
+        break;
+      }
+    }
+    return parts.filter(Boolean).join("\n\n").trim();
+  }
+
+  // Flag the mistakes the human sheets are full of: a standardized statement that
+  // contradicts the section's evidence, or a "matters present" statement left with
+  // no supporting detail. Only applies to the none/known-scale dropdowns (their
+  // first option starts "There are no…"); skips the biosecurity treatment scale.
+  function sectionWarnings(section, rstate) {
+    if (!section || !section.dropdown) return [];
+    const opts = DATA.dropdowns[section.dropdown] || [];
+    if (!opts.length || !/^there are no/i.test(opts[0])) return [];
+    const idx = opts.indexOf(rstate.choice || "");
+    if (idx < 0) return [];
+    const ev = evidenceFor(section);
+    const anyFound = ev.some((x) => x.f.status === "found");
+    const note = rstate.note || "";
+    const noteHasMatter = /\b(critically|endangered|vulnerable|threatened|listed|weed|weeds|pest|pests|declared|heritage|ramsar|world heritage)\b/i.test(note);
+    const w = [];
+    if (idx === 0 && (anyFound || noteHasMatter))
+      w.push('Statement says "no known…" but the evidence or notes indicate matters were found — reconsider the statement or the note.');
+    if (idx >= 1 && !anyFound && !note.trim())
+      w.push("Statement indicates matters are present, but no supporting detail is recorded — add the specifics.");
+    return w;
+  }
+
   function renderReport() {
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
@@ -1788,7 +1992,7 @@
 
       if (section.dropdown) {
         const opts = DATA.dropdowns[section.dropdown] || [];
-        const sel = el("select", { onchange: (e) => { rstate.choice = e.target.value; save(); if (section.bioDetail) syncBioDetail(section, box); } });
+        const sel = el("select", { onchange: (e) => { rstate.choice = e.target.value; save(); renderReportWarnings(section, box, rstate); if (section.bioDetail) syncBioDetail(section, box); } });
         opts.forEach((o) => sel.append(el("option", { value: o, selected: rstate.choice === o ? "selected" : null }, o)));
         box.append(el("div", { class: "r-field" }, sel));
       }
@@ -1799,13 +2003,33 @@
         setTimeout(() => syncBioDetail(section, box), 0);
       }
 
+      // Consistency warnings — the class of mistake the human sheets are full of.
+      // Lives in its own container so it can refresh live as the note is edited.
+      const warnBox = el("div", { class: "r-warns" });
+      box.append(warnBox);
+      renderReportWarnings(section, box, rstate);
+
       // Reference link for invasive/disease sections (mirrors the proforma hyperlinks)
       const ref = section.ref && state.site.refs && state.site.refs[section.ref];
       if (ref) box.append(el("p", { class: "r-sub" }, "Reference: ", el("a", { href: ref, target: "_blank", rel: "noopener" }, ref)));
 
-      const ta = el("textarea", { placeholder: "Free-text comments for this section…", oninput: (e) => { rstate.note = e.target.value; save(); } });
+      const ta = el("textarea", { placeholder: "Free-text comments for this section…", oninput: (e) => { rstate.note = e.target.value; renderReportWarnings(section, box, rstate); save(); } });
       ta.value = rstate.note || "";
       box.append(el("div", { class: "r-field" }, ta));
+
+      // Draft a standardized paragraph from the evidence + standard wording. Fills
+      // an empty note, or appends below existing text — never overwrites.
+      const suggestion = sectionNarrative(section);
+      if (suggestion) {
+        const btn = el("button", { class: "btn-mini", type: "button",
+          title: "Draft this section from the collected evidence and standard wording (appends; never overwrites)",
+          onclick: () => {
+            const cur = (ta.value || "").trim();
+            ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
+            rstate.note = ta.value; renderReportWarnings(section, box, rstate); save();
+          } }, "✨ Insert suggested detail");
+        box.append(el("div", { class: "r-actions" }, btn));
+      }
 
       // Evidence chips from collection
       const ev = evidenceFor(section);
@@ -1830,6 +2054,16 @@
     const detail = box.querySelector("#bio-detail") || $("#bio-detail");
     const map = DATA.dropdowns.biosecurity_detail || {};
     if (detail) detail.textContent = map[rstate.choice] || "";
+  }
+
+  // Repaint just this section's consistency warnings (called live as the note or
+  // the dropdown changes, without re-rendering the whole report).
+  function renderReportWarnings(section, box, rstate) {
+    const holder = box.querySelector(".r-warns");
+    if (!holder) return;
+    holder.innerHTML = "";
+    sectionWarnings(section, rstate).forEach((msg) =>
+      holder.append(el("p", { class: "r-warn" }, "⚠ ", msg)));
   }
 
   // ---------------------------------------------------------------- persistence
@@ -1932,13 +2166,17 @@
               source: MAP_ATTRIB + (state.mapImage.labels ? " · " + MAP_REF_ATTRIB : ""), data_url: state.mapImage.dataUrl }
           : null,
       },
-      sections: REPORT_SECTIONS.map((sec) => ({
-        id: sec.id, title: sec.title,
-        choice: (state.report[sec.id] || {}).choice || "",
-        note: (state.report[sec.id] || {}).note || "",
-        detail: sec.bioDetail ? (DATA.dropdowns.biosecurity_detail || {})[(state.report[sec.id] || {}).choice] || "" : "",
-        images: photosForSection(sec).map(({ im, src }) => exportImage({ ...im, caption: im.caption || src.name })),
-      })),
+      sections: REPORT_SECTIONS.map((sec) => {
+        const rstate = state.report[sec.id] || {};
+        return {
+          id: sec.id, title: sec.title,
+          choice: rstate.choice || "",
+          note: rstate.note || "",
+          detail: sec.bioDetail ? (DATA.dropdowns.biosecurity_detail || {})[rstate.choice] || "" : "",
+          warnings: sectionWarnings(sec, rstate),
+          images: photosForSection(sec).map(({ im, src }) => exportImage({ ...im, caption: im.caption || src.name })),
+        };
+      }),
       collection_log: buildFindings(),
     };
   }
@@ -1956,10 +2194,12 @@
       : "";
     const siteShots = s.images && s.images.length
       ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images)}</div>` : "";
+    const nl2br = (x) => esc(x).replace(/\n/g, "<br>");
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
-      ${sec.detail ? `<p>${esc(sec.detail)}</p>` : ""}
-      ${sec.note ? `<p>${esc(sec.note)}</p>` : ""}
+      ${sec.detail ? `<p>${nl2br(sec.detail)}</p>` : ""}
+      ${sec.note ? `<p>${nl2br(sec.note)}</p>` : ""}
+      ${(sec.warnings || []).map((wn) => `<p class="pr-warn">⚠ Review: ${esc(wn)}</p>`).join("")}
       ${photosHtml(sec.images)}</div>`).join("");
     const logRows = r.collection_log.map((c) => `<tr>
       <td>${esc(c.name)}</td>
@@ -2010,7 +2250,8 @@
       .pr-photos figcaption .credit{display:block;font-size:9px;color:#777;margin-top:1px}
       .pr-photos figcaption .credit a{color:#777}
       .pr-map-img{display:block;width:100%;max-width:520px;border:1px solid #bbb;border-radius:6px}
-      .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}</style>
+      .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}
+      .pr-warn{font-size:11px;font-weight:600;color:#b3261e;background:#fbe6e4;border-radius:5px;padding:5px 8px;margin:6px 0 0}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.html`, "text/html", html);
   }
@@ -2266,6 +2507,7 @@
     try {
       await loadData();
       await loadReference();
+      await loadStatements();
       await loadStateBoundaries();
     } catch (err) {
       const local = location.protocol === "file:";

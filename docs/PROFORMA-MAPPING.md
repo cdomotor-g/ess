@@ -57,6 +57,34 @@ otherwise the **"no known"** option. The user/agent can override. Example
 threatened plants at this site"*; nothing found → *"There are no known threatened
 plants at this site"*.
 
+On **PMST import**, the threatened sections are suggested the **"…in the local
+area"** option instead — a 50 km Protected Matters buffer speaks to the wider
+region, not the footprint. (Human sheets routinely over-claim "…at this site"
+here; see [HUMAN-VS-WORKBENCH.md](HUMAN-VS-WORKBENCH.md).)
+
+### Section narratives (`data/statements.json`)
+The proforma sections carry a paragraph, not just the one-line statement. The tool
+drafts those paragraphs:
+
+- **PMST import** splits the Matters of NES across **Threatened Habitat**
+  (ecological communities), **Threatened Flora** (threatened plants) and
+  **Threatened Fauna** (threatened animals + a separate migratory sentence),
+  grouped by category, and seeds each section's note — only where the reviewer
+  hasn't already written it.
+- **"✨ Insert suggested detail"** on every section assembles a default paragraph
+  from that section's evidence plus standardized wording in **`data/statements.json`**
+  (hand-authored, not build-generated): the impact-assessment sentence, the QLD
+  Koala Conservation Plan note + link, the per-state General Biosecurity Obligation
+  text and an acid-sulfate note (only when that source is *Found*) under Additional
+  Information, and the cultural-heritage duty-of-care sentence.
+
+### Consistency warnings (QA)
+The report flags the mistakes the human sheets are full of: a standardized
+statement that **contradicts its evidence** (says "no known…" while sources came
+back *Found* or the note lists species), and a "matters present" statement left
+with **no supporting detail**. Warnings show on-screen and as review flags in the
+Print/HTML export and the JSON (`sections[].warnings`).
+
 ### Biosecurity declaration text
 The proforma's biosecurity cell (`A19`) uses an `IFS` to expand the chosen level
 into full declaration text. That mapping is preserved in

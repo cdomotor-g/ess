@@ -190,7 +190,17 @@ no_result_means, priority`. See [ADDING-A-SOURCE.md](ADDING-A-SOURCE.md).
 The exact proforma statement lists per section, plus `biosecurity_detail`
 mapping each biosecurity level to its declaration text. Lists are ordered
 `[no known…, known…, …local area]` so a front-end can suggest the right option
-from the collection result.
+from the collection result. **Build-generated** from the FWIN ESS Template — do
+not hand-edit.
+
+### `statements.json`
+Hand-authored narrative templates (durable; *not* build-generated) that seed the
+report-section detail text: the impact-assessment sentence, per-state General
+Biosecurity Obligation paragraphs, the QLD Koala Conservation Plan district logic
++ link, cultural-heritage duty-of-care, and the migratory/acid-sulfate notes.
+Consumed by `assets/app.js` (PMST import section-seeding and the "Insert suggested
+detail" button) and surfaced to the agent via `resolve.py --json`. Loaded
+best-effort — a missing file just disables the auto-draft, never breaks the tool.
 
 ## The status taxonomy
 
