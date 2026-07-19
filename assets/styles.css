@@ -115,6 +115,25 @@ main { max-width: none; margin: 0 auto; padding: 22px 24px 60px; }
 .step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 13px; font-weight: 700; }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* Floating report toolbar. On the two-column desktop layout the right column
+   scrolls on its own, so pin the ESS-report card head — which holds the four
+   export buttons (Generate Report / Print / JSON / Copy summary) — to the top of
+   that column. They stay reachable no matter how far down the report the operator
+   has scrolled. Scoped to the wide layout; on the stacked mobile layout the page
+   scrolls normally and the topbar is the only sticky element. */
+@media (min-width: 981px) {
+  #report .card-head {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--surface);
+    margin: -20px -22px 14px;
+    padding: 14px 22px 12px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 /* ---------- forms ---------- */
 .field-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin: 0 0 5px; }
 .opt { font-weight: 400; opacity: .7; }
@@ -471,7 +490,7 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 #print-root .pr th, #print-root .pr td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
 #print-root .pr .k { color: #444; width: 32%; }
 #print-root .pr .st { font-weight: 700; }
-#print-root .pr .st-found { color: #b5570f; }
+#print-root .pr .st-found { color: #c1123c; }
 #print-root .pr .st-none { color: #8a6d1a; }
 #print-root .pr .st-failed { color: #b3261e; }
 #print-root .pr .st-manual { color: #3a5a99; }

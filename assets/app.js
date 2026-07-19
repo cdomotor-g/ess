@@ -43,9 +43,9 @@
   // Default free-text seeded into a report section's note when a site is first
   // loaded (only if the operator hasn't written anything there yet). The general
   // biosecurity obligation (GBO) under Queensland's Biosecurity Act 2014 applies
-  // to every QLD site, so it's pre-filled into Additional Information for QLD —
+  // to every QLD site, so it's pre-filled into the Biosecurity section for QLD —
   // it flows straight into the exported report unless the operator edits it out.
-  const GBO_ADDITIONAL_TEXT =
+  const GBO_BIOSECURITY_TEXT =
     "Under the Biosecurity Act 2014, everyone in Queensland has a general biosecurity obligation (GBO) to ensure that they do not spread a pest, disease or a contaminant. We are all responsible for managing biosecurity risks that are under our control.\n\n" +
     "Under the GBO, individuals and corporations whose activities pose a biosecurity risk must:\n\n" +
     "•  take all reasonable and practical steps to prevent or minimise each biosecurity risk\n" +
@@ -55,7 +55,7 @@
   // Section-note defaults, applied by newReportState() when a report section is
   // first created for a site. State-aware where a default is jurisdiction-specific.
   function defaultSectionNote(sectionId) {
-    if (sectionId === "additional" && state.site && state.site.state === "QLD") return GBO_ADDITIONAL_TEXT;
+    if (sectionId === "biosecurity" && state.site && state.site.state === "QLD") return GBO_BIOSECURITY_TEXT;
     return "";
   }
   function newReportState(sectionId) { return { choice: null, note: defaultSectionNote(sectionId) }; }
@@ -1542,6 +1542,14 @@
       onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
     }, "Open ↗");
 
+    // Copy just the site's lat/long — for when the operator already has the tab
+    // the "Open ↗" link would open and only needs to paste the coordinates in.
+    const copyCoordBtn = el("button", {
+      type: "button", class: "btn tiny",
+      title: "Copy this site's latitude, longitude to the clipboard",
+      onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Lat/Lon copied"),
+    }, "⧉ Copy Lat Lon");
+
     const statusSel = el("div", { class: "status-select" });
     [[STATUS.FOUND, "Found"], [STATUS.NONE, "None"], [STATUS.FAILED, "Failed"], [STATUS.MANUAL, "Manual"]].forEach(([s, lab]) => {
       statusSel.append(el("button", {
@@ -1550,7 +1558,7 @@
       }, lab));
     });
 
-    const actions = el("div", { class: "src-actions" }, link, statusSel);
+    const actions = el("div", { class: "src-actions" }, link, copyCoordBtn, statusSel);
     const runner = apiRunnerFor(src);
     if (runner) {
       actions.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
@@ -2532,7 +2540,7 @@
       h1{font-size:22px} .pr-sec{border:1px solid #ccc;border-radius:6px;padding:8px 12px;margin:10px 0}
       .pr-sec h2{font-size:14px;background:#12507b;color:#fff;margin:-8px -12px 8px;padding:6px 12px;border-radius:6px 6px 0 0}
       table{width:100%;border-collapse:collapse;font-size:12px} th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;vertical-align:top}
-      .k{color:#555} .st{font-weight:700} .st-found{color:#1f7a4d}.st-none{color:#8a6d1a}.st-failed{color:#b3261e}.st-manual{color:#3a5a99}
+      .k{color:#555} .st{font-weight:700} .st-found{color:#c1123c}.st-none{color:#8a6d1a}.st-failed{color:#b3261e}.st-manual{color:#3a5a99}
       .pr-photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px} .pr-photos figure{margin:0;width:150px}
       .pr-photos img{width:100%;height:110px;object-fit:cover;border:1px solid #bbb;border-radius:4px}
       .pr-photos figcaption{font-size:10px;color:#444;margin-top:2px}
