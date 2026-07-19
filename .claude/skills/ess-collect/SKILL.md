@@ -85,6 +85,13 @@ Go through the list the helper printed. Handle each by its `method`:
   SharePoint marked `INTERNAL`). Still do a best-effort web search to surface
   anything public (e.g. a heritage place name), but the definitive check is
   MANUAL. Always include the aimed deep-link and the steps.
+  - **Internal sources are an operator action list, kept out of the report.**
+    Sources flagged `internal` (the Bureau permits register, POPE / leasing
+    SharePoint) can't be reached without a Bureau login. Record them `manual` with
+    a **short, staff-facing** note ("check register X for station N", "review lease
+    conditions") — not report-style prose. The browser tool deliberately excludes
+    these notes from the exported ESS report, so keep them terse and action-focused;
+    they exist so staff action the internal check before the site visit.
 
 Do not skip a source because it looks hard. If you cannot check it, that is a
 MANUAL or FAILED result — record it, with the link and the reason.
@@ -130,6 +137,55 @@ Read `totalRecords` and `facetResults`. Interpretation:
 - zero records → **NONE**, but note the area is sparsely surveyed (absence of
   records ≠ absence of species).
 - request errors → **FAILED**.
+
+### Queensland WildNet — a public species API (QLD sites)
+
+Queensland's authoritative wildlife register, WildNet, publishes a **public API**
+(no key required — see the `api` block on the `qld-wildnet` source in
+`data/sources.json`). The one call you need for an ESS:
+
+```
+GET https://wildnet-pub.science-data.qld.gov.au/api/v1/species-list
+      ?central_point_latitude={lat}
+      &central_point_longitude={lon}
+      &distance={radius_km}         # circular point search, radius in km
+      &con_sig=1                    # conservation-significant taxa only
+      &page_size=5000
+```
+
+Each row has `kingdom_name` (Plantae / Animalia / Fungi…), `scientific_name`,
+`accepted_common_name`, `nca_code` (QLD *Nature Conservation Act* status) and
+`epbc_code` (national status). Interpretation:
+
+- rows returned → **FOUND**; list them **grouped by kingdom** (plants vs animals)
+  with their NCA/EPBC codes.
+- empty array → **NONE** (no conservation-significant taxa in the radius).
+- request errors / blocked → **FAILED** (fall back to the aimed web link, which
+  the card's Open ↗ launches:
+  `https://wildnet.science-data.qld.gov.au/species-search?central_point_latitude={lat}&central_point_longitude={lon}&distance=1&location_search_by=point&advanced=false&tab=0`).
+
+`GET …/api/v1/species-list-row-count` with the same params returns just the count.
+Fetch `…/openapi.json` for the full endpoint list. WildNet returns both plants and
+animals, so **classify them** (next section) — file plants under Threatened Flora
+and animals under Threatened Fauna. (The browser tool's "Check live" button on the
+WildNet card runs exactly this query and groups the result for you.)
+
+### Threatened species — classify flora vs fauna vs community
+
+The broad biodiversity sources (EPBC PMST, Atlas of Living Australia, WildNet,
+BioNet, state atlases) return **both plants and animals** in one result. Do not
+lump them under one heading — a threatened plant reported as fauna is a real
+error. For every threatened taxon, decide what it is and file it under the
+matching proforma section:
+
+- a **plant** → `threatened_flora`
+- an **animal** (mammal, bird, reptile, amphibian, fish, invertebrate) →
+  `threatened_fauna`
+- an **ecological community / regional ecosystem / habitat** →
+  `threatened_habitat`
+
+Set that section's `choice` and put the taxon names in its `note`. If unsure
+whether a name is a plant or an animal, look it up before filing it.
 
 ## Step 3 — Produce the findings
 
@@ -192,11 +248,14 @@ note). Use it. The browser tool auto-drafts these on PMST import and via the
   Plan note and link from `statements.json.koala` (districts A/B cover South East
   Queensland; the rest of the State is district C, where the sequential clearing
   rules do not apply).
-- **Additional Information** — add the General Biosecurity Obligation paragraph for
-  the **site's state** (`statements.json.general_biosecurity_obligation[STATE]`).
-  Only mention acid sulfate soils if the acid-sulfate-soils source actually
-  indicates they are likely (coastal/estuarine, low-lying) — do **not** assert it
-  for inland/upland sites.
+- **Biosecurity** — add the General Biosecurity Obligation paragraph for the
+  **site's state** (`statements.json.general_biosecurity_obligation[STATE]`) after
+  the chosen treatment level. (The browser tool auto-seeds this into the
+  Biosecurity section, so keep it there — not under Additional Information — to
+  match the tool and avoid duplication.)
+- **Additional Information** — mention acid sulfate soils only if the
+  acid-sulfate-soils source actually indicates they are likely (coastal/estuarine,
+  low-lying) — do **not** assert it for inland/upland sites.
 - **Invasive Plants / Animals** — resolve the **actual local council / region** for
   the site and list *its* priority/declared species with the council's link. Do
   not paste another region's list.
@@ -231,10 +290,17 @@ A tight Markdown recap:
 
 ### Suggesting the standardized statements
 
-`data/dropdowns.json` holds the exact proforma wording per section. The lists are
-ordered `[no known…, known…/at-site, …local area]`. Pick the "known" option when
-the relevant checks were FOUND, otherwise the "no known" option. For Biosecurity,
-`biosecurity_detail` maps the chosen level to its full declaration text.
+`data/dropdowns.json` holds the exact proforma wording per section. For the
+threatened flora/fauna/habitat and invasive plant/animal lists the options run
+`[no known…, known…/at-site, …local area, region-but-not-at-site]`. Pick the
+"known … at this site" option when the relevant checks were FOUND *at or
+immediately adjacent to* the site; the "Known to occur in the region but not
+present within or immediately adjacent to the site." option when records exist
+only across the wider region/locality; and the "no known …" option otherwise.
+File each threatened taxon under the correct section (flora vs fauna vs habitat —
+see Step 2). For Biosecurity, `biosecurity_detail` maps the chosen level to its
+full declaration text, and the browser tool pre-seeds the **Biosecurity** section
+note with the general biosecurity obligation (GBO) text for the site's state.
 
 ## Honesty rules
 

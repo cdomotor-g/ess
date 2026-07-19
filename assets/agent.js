@@ -181,6 +181,12 @@
         return toolResult(id, r.text || "No ALA summary.");
       } catch (e) { return toolResult(id, "ALA query failed (network/CORS): " + e.message, true); }
     }
+    if (name === "query_wildnet") {
+      try {
+        const r = await window.ESS.queryWildnet(Number(input.radius) || 10);
+        return toolResult(id, r.text || "No WildNet summary.");
+      } catch (e) { return toolResult(id, "WildNet query failed (network/CORS) — fall back to web_fetch of the WildNet API or the aimed link: " + e.message, true); }
+    }
     if (name === "set_source_result") {
       const ok = window.ESS.setResult(input.id, input.status, input.note, input.result_text, input.image_subjects);
       return toolResult(id, ok ? "recorded" : `error: unknown source id or invalid status (${input.id} / ${input.status})`, !ok);
@@ -216,15 +222,20 @@
   // ---------------------------------------------------------------- prompt/tools
   function systemPrompt(site, sources, cfg) {
     const lines = sources.map((s, i) => {
-      const tags = [s.is_ala ? "USE query_ala" : null, s.internal ? "INTERNAL (needs Bureau login → manual)" : null].filter(Boolean);
-      return `${i + 1}. [${s.id}] ${s.name} (${s.category}, ${s.jurisdiction})${tags.length ? " — " + tags.join("; ") : ""}\n   what to find: ${s.what_to_find}\n   url: ${s.url}`;
+      const tags = [s.is_ala ? "USE query_ala" : null, s.is_wildnet ? "USE query_wildnet" : null, s.internal ? "INTERNAL (needs Bureau login → manual)" : null].filter(Boolean);
+      let block = `${i + 1}. [${s.id}] ${s.name} (${s.category}, ${s.jurisdiction})${tags.length ? " — " + tags.join("; ") : ""}\n   what to find: ${s.what_to_find}\n   url: ${s.url}`;
+      if (s.api) {
+        const parts = [s.api.base_url && ("base " + s.api.base_url), s.api.openapi && ("OpenAPI " + s.api.openapi), s.api.endpoint && ("endpoint " + s.api.endpoint), s.api.dataset && ("dataset " + s.api.dataset)].filter(Boolean);
+        block += `\n   public API (query it with web_fetch for this point + radius, then classify each taxon): ${parts.join("; ")}${s.api.docs ? ". " + s.api.docs : ""}`;
+      }
+      return block;
     }).join("\n");
     const fetchLine = cfg.fetch ? "web_search and web_fetch" : "web_search";
     return [
       "You are completing the desktop-research stage of a Bureau of Meteorology Environmental Site Summary (ESS).",
       `SITE: ${site.name} — station ${site.station_num || "—"}, WMO ${site.wmo || "—"}, ${site.state || "?"}, lat ${site.lat}, lon ${site.lon}.`,
       "",
-      `For EVERY source in the list below, decide a result and record it by calling set_source_result exactly once for that source id. Use ${fetchLine} to research each source's URL and "what to find". For the Atlas of Living Australia source, call query_ala instead of searching (it returns structured conservation data for this site).`,
+      `For EVERY source in the list below, decide a result and record it by calling set_source_result exactly once for that source id. Use ${fetchLine} to research each source's URL and "what to find". For the Atlas of Living Australia source, call query_ala; for the Queensland WildNet source, call query_wildnet — each returns structured conservation data for this site (WildNet is already grouped into flora vs fauna). If query_wildnet is blocked by the browser, fall back to web_fetch of the WildNet API.`,
       "",
       "Assign exactly one status per source:",
       "- found: the source has something relevant. Put specifics (species, listing names/IDs, outbreak names, lease conditions) in note, and the raw detail in result_text.",
@@ -232,7 +243,13 @@
       "- failed: you tried but could not get an answer (blocked, error, unreachable, no data at the URL).",
       "- manual: the source needs a human — an interactive/draw-a-polygon map (e.g. EPBC Protected Matters), an INTERNAL SharePoint page, or a portal with no readable data at the URL. Put the aimed link + the steps in note; do NOT invent a result.",
       "",
+      "THREATENED SPECIES — label plants vs animals vs communities. Broad biodiversity registers (EPBC PMST, Atlas of Living Australia, QLD WildNet, NSW BioNet, state atlases) return BOTH flora and fauna. In your note/result_text for such a source, group and clearly label each taxon as a PLANT (flora), an ANIMAL (fauna: mammal/bird/reptile/amphibian/fish/invertebrate), or an ecological COMMUNITY/habitat — a threatened plant must never be described as fauna. If unsure whether a name is a plant or an animal, look it up before recording it. This lets the reviewer file each under the correct proforma section (Threatened Flora / Fauna / Habitat).",
+      "",
+      "INTERNAL sources (marked INTERNAL — e.g. the permits register, POPE / leasing SharePoint) are an operator action list only: record them as manual with a SHORT, staff-facing note of what to check. The tool keeps their notes OUT of the exported ESS report, so do not write report-style prose there.",
+      "",
       "For species/subject sources (categories invasive_plants, invasive_animals, disease, threatened) that you mark FOUND, also fill image_subjects with the identifiable species/subject names you found (common or scientific, e.g. \"Gamba grass\", \"Phytophthora cinnamomi\") — the tool auto-fetches a labelled reference photo for each. Leave it empty for non-species sources and for none/failed/manual.",
+      "",
+      "In your evidence note, state whether records fall within/immediately adjacent to the site, or only across the wider region/locality — this distinction drives which standardized proforma phrase the reviewer picks (there is a \"Known to occur in the region but not present within or immediately adjacent to the site.\" option for the latter).",
       "",
       "Rules: never leave a source unrecorded. Be honest — 'none' (checked, absent) and 'failed' (unknown) are different and both matter. Record specifics, not just yes/no. Don't fabricate. The EPBC Protected Matters Search Tool has no API — record it as manual with the 50 km-buffer steps. When every source has been recorded, briefly summarise and stop.",
       "",
@@ -248,6 +265,11 @@
     tools.push({
       name: "query_ala",
       description: "Query the Atlas of Living Australia for conservation-listed flora & fauna near this site. Use for the Atlas of Living Australia source.",
+      input_schema: { type: "object", properties: { radius: { type: "number", description: "search radius in km (default 10)" } } },
+    });
+    if (sources.some((s) => s.is_wildnet)) tools.push({
+      name: "query_wildnet",
+      description: "Query the Queensland WildNet species register for conservation-significant taxa near this site. Returns them already grouped into flora (plants) vs fauna (animals) with their NCA/EPBC status. Use for the Queensland WildNet source.",
       input_schema: { type: "object", properties: { radius: { type: "number", description: "search radius in km (default 10)" } } },
     });
     tools.push({

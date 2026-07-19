@@ -7,6 +7,14 @@
   <meta name="description" content="Look up a Bureau site by name or coordinates and run the ESS desktop assessment: deep-links and live checks for every environmental & heritage source, with a report that flags what was found, what was empty and what failed." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
   <link rel="stylesheet" href="assets/styles.css" />
+  <script>
+    // Apply the saved light/dark theme before first paint so there's no flash of
+    // the wrong colour scheme. The full toggle lives in assets/app.js.
+    try {
+      var t = localStorage.getItem("ess-workbench:v1:theme");
+      if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -19,6 +27,7 @@
         </div>
       </div>
       <div class="topbar-meta" id="topbar-meta">
+        <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">🌙 Dark</button>
         <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">🧨 Clear cache</button>
         <button class="ghost-link" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">🔑 Agent</button>
         <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
@@ -27,6 +36,9 @@
   </header>
 
   <main id="app">
+   <div class="split">
+    <!-- LEFT column — site pick, summary, collection dashboard (independently scrolls) -->
+    <div class="col col-left" id="col-left">
     <!-- Load / error banner -->
     <div id="load-banner" class="banner" hidden></div>
 
@@ -41,7 +53,7 @@
       <div class="tabs" role="tablist">
         <button class="tab is-active" data-tab="by-name" role="tab">By station name</button>
         <button class="tab" data-tab="by-coords" role="tab">By coordinates</button>
-        <button class="tab" data-tab="import" role="tab">Import agent findings</button>
+        <button class="tab" data-tab="import" role="tab">Import JSON</button>
       </div>
 
       <div class="tab-panel is-active" data-panel="by-name">
@@ -104,21 +116,10 @@
         </div>
         <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
-        <div class="site-map-section" id="site-map-section">
-          <div class="map-head">
-            <label class="field-label" id="map-label">Location map <span class="opt">(satellite — auto-populated, carried through to the report &amp; export)</span></label>
-            <div class="map-controls">
-              <span class="map-presets" id="map-presets"><!-- preset buttons filled by JS --></span>
-              <label class="map-km-field" for="map-km">Side
-                <input id="map-km" type="number" min="1" max="2000" step="5" value="100" inputmode="numeric" />
-                <span>km</span>
-              </label>
-              <label class="map-toggle" for="map-labels" title="Overlay roads and locality/place labels on the satellite imagery"><input type="checkbox" id="map-labels" checked /> Roads &amp; labels</label>
-              <button class="btn tiny" id="btn-map-refresh" title="Reload the satellite map for this location">↻ Refresh</button>
-            </div>
-          </div>
-          <figure class="site-map" id="site-map"><!-- filled by JS: map image / loading / error --></figure>
-        </div>
+        <!-- Two locator maps (hyper-local + greater-region), each with its own
+             controls + figure, built dynamically by assets/app.js. Both are
+             auto-populated and carried through to the report &amp; export. -->
+        <div class="site-maps" id="site-maps"><!-- filled by JS: renderMapsSections() --></div>
 
         <div class="summary-editable">
           <div>
@@ -155,7 +156,7 @@
           <h2><span class="step">3</span> Collect location metadata</h2>
           <div class="head-actions">
             <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
-            <label class="inline-check" title="When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings — from your note edits, imported findings, and agent runs"><input type="checkbox" id="toggle-auto-images" checked /> Auto-fetch reference images</label>
+            <label class="inline-check" title="Off by default (keeps the browser light). When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings on import / agent / API runs. Editing a card's notes never triggers a search — use the buttons on a species card to fetch reference images on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images</label>
             <button class="btn ghost" id="btn-filter-attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
             <button class="btn ghost" id="btn-filter-unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
             <button class="btn ghost" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant (ChatGPT, Gemini, Claude, Copilot…) to run this assessment and hand back JSON you can import here">📋 Copy prompt</button>
@@ -182,22 +183,7 @@
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
 
-      <!-- STEP 4 — report -->
-      <section class="card" id="report">
-        <div class="card-head">
-          <h2><span class="step">4</span> ESS report</h2>
-          <div class="head-actions">
-            <button class="btn ghost" id="btn-print">🖨 Print / PDF</button>
-            <button class="btn ghost" id="btn-download-html">⬇ HTML</button>
-            <button class="btn ghost" id="btn-download-json">⬇ JSON</button>
-            <button class="btn primary" id="btn-copy-summary">Copy summary</button>
-          </div>
-        </div>
-        <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
-        <div id="report-sections"><!-- filled by JS --></div>
-      </section>
-
-    </div><!-- /workspace -->
+    </div><!-- /workspace (left) -->
 
     <footer class="foot">
       <p>Client-side only — nothing you enter leaves your browser. Work is saved locally per site. <span id="foot-meta"></span></p>
@@ -207,6 +193,37 @@
         <a href="mailto:enviro@bom.gov.au">enviro@bom.gov.au</a>
       </p>
     </footer>
+    </div><!-- /col-left -->
+
+    <!-- RIGHT column — the ESS report (independently scrolls) -->
+    <div class="col col-right" id="col-right">
+      <!-- shown until a site is loaded -->
+      <div id="report-placeholder" class="report-placeholder">
+        <div class="rp-inner">
+          <span class="rp-mark" aria-hidden="true">📄</span>
+          <p class="rp-title">The ESS report will build here</p>
+          <p class="rp-sub">Choose a site on the left. As you collect metadata and press <b>Include</b> on each card, its notes and photos land in the matching report section.</p>
+        </div>
+      </div>
+
+      <!-- STEP 4 — report -->
+      <div id="workspace-right" hidden>
+        <section class="card" id="report">
+          <div class="card-head">
+            <h2><span class="step">4</span> ESS report</h2>
+            <div class="head-actions">
+              <button class="btn primary" id="btn-download-html">⬇ Generate Report</button>
+              <button class="btn ghost" id="btn-print">🖨 Print Page</button>
+              <button class="btn ghost" id="btn-download-json">⬇ JSON</button>
+              <button class="btn ghost" id="btn-copy-summary">Copy summary</button>
+            </div>
+          </div>
+          <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
+          <div id="report-sections"><!-- filled by JS --></div>
+        </section>
+      </div>
+    </div><!-- /col-right -->
+   </div><!-- /split -->
   </main>
 
   <!-- report render target for export/print -->

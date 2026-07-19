@@ -74,9 +74,11 @@ drafts those paragraphs:
 - **"✨ Insert suggested detail"** on every section assembles a default paragraph
   from that section's evidence plus standardized wording in **`data/statements.json`**
   (hand-authored, not build-generated): the impact-assessment sentence, the QLD
-  Koala Conservation Plan note + link, the per-state General Biosecurity Obligation
-  text and an acid-sulfate note (only when that source is *Found*) under Additional
-  Information, and the cultural-heritage duty-of-care sentence.
+  Koala Conservation Plan note + link, an acid-sulfate note under Additional
+  Information (only when that source is *Found*), and the cultural-heritage
+  duty-of-care sentence. The per-state **General Biosecurity Obligation** paragraph
+  is seeded straight into the **Biosecurity** section note when a site is first
+  opened (`defaultSectionNote`), so it isn't repeated by the button.
 
 ### Consistency warnings (QA)
 The report flags the mistakes the human sheets are full of: a standardized
