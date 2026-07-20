@@ -1,7 +1,6 @@
 # ESS Workbench
 
-A tool that helps generate **Environmental Site Summaries (ESS)** for Bureau of
-Meteorology sites — pick a site by name (or drop in a latitude/longitude), and it
+A tool that helps generate **Environmental Site Summaries (ESS)**  — pick a site by name (or drop in a latitude/longitude), and it
 auto-populates the station metadata, opens every relevant environmental and
 heritage source aimed at that location, runs the checks that can be automated,
 and builds a report that flags **what was found, what was empty, and what
