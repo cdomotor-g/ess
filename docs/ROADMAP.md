@@ -40,7 +40,11 @@ slice. Each backlog item names the files to touch and how to verify.
   with live found / needs-attention counts, persisted across visits, each opening
   into the same review/export surface. **🔍 Check all** copies one combined
   fact/consistency-check prompt for every site; **Clear batch** drops the grouping
-  but keeps each site's saved work.
+  but keeps each site's saved work. To keep a large batch inside the localStorage
+  quota, a loaded batch keeps each site's auto-generated satellite maps **in memory
+  only** (they still render and travel into every export) and regenerates them when
+  a site is reopened, rather than persisting two large map JPEGs per visited site;
+  single-site work persists maps as before.
 - **Report self-check prompt** — a **🔍 Check report** button (report toolbar)
   builds a self-contained fact-and-consistency-check prompt for the finished
   report and copies it for any assistant. The output contract is deliberately

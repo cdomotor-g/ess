@@ -2611,9 +2611,15 @@
       const findingImages = {};
       for (const [id, f] of Object.entries(state.findings))
         if (f.images && f.images.length) findingImages[id] = f.images;
-      // Per-slot generated map images (data URLs).
+      // Per-slot generated map images (data URLs). For a loaded batch these are the
+      // avoidable bulk in storage — each visited site would otherwise persist two
+      // large map JPEGs, and a big batch can blow the localStorage quota. So while a
+      // batch is active we keep the maps in memory (they still render and travel into
+      // every export) but don't persist them; they regenerate cheaply when the site
+      // is reopened (mapsMeta above still remembers each slot's km/labels).
+      const persistMaps = !(state.batch && state.batch.keys && state.batch.keys.length);
       const mapImages = {};
-      for (const [k, ms] of Object.entries(state.maps || {})) if (ms.image) mapImages[k] = ms.image;
+      if (persistMaps) for (const [k, ms] of Object.entries(state.maps || {})) if (ms.image) mapImages[k] = ms.image;
       const hasAny = state.siteImages.length || Object.keys(mapImages).length || Object.keys(findingImages).length;
       try {
         if (hasAny)
