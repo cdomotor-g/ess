@@ -45,6 +45,20 @@ Best when: batches of sites, or you want to use an LLM you already pay for. No
 agent can drive interactive portals (EPBC PMST) or log into SharePoint — those
 come back `manual` for you to finish in the browser.
 
+### Batches — many sites at once
+
+For several sites, use the batch envelope **`ess-findings-batch/1`** =
+`{ schema, generated, tool, sites: [ <ess-findings/1>, … ] }`. Scaffold every
+site's skeleton in one call — `resolve.py --batch sites.txt --template` (a file
+with one station/number or `lat,lon[,name]` per line; `-` reads stdin) — have the
+agent fill each site's slot (see the `ess-collect` skill's "Running a batch of
+sites"), then paste the whole object into **Choose a site → Import JSON**. The tool
+shows a **batch picker bar** (one chip per site, with its found / needs-attention
+counts), loads each into the same review/export surface, and a **🔍 Check all**
+button copies one combined fact/consistency-check prompt covering every site. The
+batch grouping is remembered across visits; **Clear batch** drops the grouping but
+keeps each site's saved work.
+
 ---
 
 ## B. BYOK in-browser agent (this browser + your key)
@@ -107,7 +121,10 @@ The client is written to make this a one-line change: swap `API_BASE` in
 `{ schema, generated, tool, site, sections[], collection_log[] }` — the exact
 object the browser tool imports and exports, and that `resolve.py --template`
 scaffolds. Statuses: `found` / `none` / `failed` / `manual` / `unset`. Keeping
-one schema is why both agent paths and the reviewer UI interoperate.
+one schema is why both agent paths and the reviewer UI interoperate. A batch is
+just the envelope **`ess-findings-batch/1`** = `{ schema, generated, tool, sites:
+[ <ess-findings/1>, … ] }`; the importer detects the `sites[]` array and loads them
+as a batch, so the same per-site object composes for one site or many.
 `site` and each `sections[]`/`collection_log[]` entry may also carry an
 optional `images: [{ caption, data_url, credit?, source_url? }]` — photos
 attached in the browser tool (uploaded, or reference images auto-sourced from

@@ -32,6 +32,10 @@
   // Persisted in localStorage; default on. Auto-fetch only ever *adds* images —
   // the user can delete any, and the manual "Fetch image" field always works.
   const LS_AUTO_IMAGES = "ess-workbench:v1:auto-images";
+  // Batch membership (the list of sites imported together). Only the site keys +
+  // display info live here; each site's full findings stay under its own per-site
+  // key (siteKey), so a batch is just an index over storage that already exists.
+  const LS_BATCH = "ess-workbench:v1:batch";
   // Default OFF: auto-fetching reference photos fires a burst of Wikipedia requests
   // + canvas re-encoding, which was bogging the browser down. It now runs only when
   // the operator opts in via the dashboard toggle (and even then only on import /
@@ -190,6 +194,7 @@
     filterStatus: null,     // dashboard: show only sources with this one status (found/none/failed/manual/unset)
     filterUnreviewed: false, // dashboard: show only sources not yet ticked "Reviewed"
     showAttention: false,   // show the attention banner (after import / agent run)
+    batch: null,            // { generated, keys: [siteKey,…], active: siteKey|null } when a batch is loaded
   };
   const mapGenTokens = {}; // per-slot guard against a stale async render landing after a newer request
   const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
@@ -812,8 +817,11 @@
 
   function siteKey(site) { return site.station_num ? `num:${site.station_num}` : `xy:${site.lat.toFixed(5)},${site.lon.toFixed(5)}`; }
 
-  function loadSite(site) {
-    flushSave(); // persist any pending debounced edit for the previous site before switching
+  // Point `state` at a site and pull its saved progress from localStorage, WITHOUT
+  // rendering. Used both by loadSite (interactive) and, in the batch flow, to visit
+  // each site's stored state in turn (e.g. to build a batch review) without touching
+  // the DOM or kicking off per-site map/image work.
+  function loadSiteState(site) {
     state.site = site;
     state.findings = {};
     state.report = {};
@@ -827,6 +835,12 @@
     state.showAttention = false;
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
+  }
+
+  function loadSite(site) {
+    flushSave(); // persist any pending debounced edit for the previous site before switching
+    loadSiteState(site);
+    syncBatchActive(); // highlight the matching chip if this site belongs to the loaded batch
     renderWorkspace();
   }
 
@@ -848,12 +862,14 @@
     $("#workspace").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  // Load a completed (or partial) ess-findings/1 object — from the agent skill
-  // or a prior export — and populate the same review/export surface.
-  function importFindings(json) {
-    if (!json || typeof json !== "object" || !json.site || !Array.isArray(json.collection_log))
-      throw new Error("Not an ESS findings file — expected a `site` object and a `collection_log` array.");
-    flushSave(); // persist any pending debounced edit for the previously loaded site first
+  function isFindingsObject(json) {
+    return json && typeof json === "object" && json.site && Array.isArray(json.collection_log);
+  }
+
+  // Build `state` from one ess-findings/1 object, WITHOUT rendering, saving, or
+  // fetching images. The reusable core of importFindings — the batch importer calls
+  // it once per site to populate + persist each without a full workspace render.
+  function applyFindings(json) {
     const si = json.site;
     const lat = parseFloat(si.lat), lon = parseFloat(si.lon);
     if (isNaN(lat) || isNaN(lon)) throw new Error("The findings file has no valid site latitude/longitude.");
@@ -909,10 +925,49 @@
     state.filterStatus = null;
     state.filterUnreviewed = false;
     state.showAttention = true; // surface what the agent left for the human
+  }
+
+  // Load a completed (or partial) ess-findings/1 object — from the agent skill
+  // or a prior export — and populate the same review/export surface.
+  function importFindings(json) {
+    if (!isFindingsObject(json))
+      throw new Error("Not an ESS findings file — expected a `site` object and a `collection_log` array.");
+    flushSave(); // persist any pending debounced edit for the previously loaded site first
+    clearBatch(false); // a single import stands alone — drop any loaded batch (keeps each site's saved work)
+    applyFindings(json);
     renderWorkspace();
     imagesDirty = true; // imported photos + map must be written to the image key
     save();
     autoFetchAfterImport(json.collection_log); // async, best-effort (Task 3)
+  }
+
+  // Import an ess-findings-batch/1 object: { sites: [ <ess-findings/1>, … ] }.
+  // Each site is populated + persisted under its own per-site key (no render), then
+  // the batch tray is shown and the first site is opened in the workspace.
+  function importBatch(batch) {
+    const all = Array.isArray(batch && batch.sites) ? batch.sites : [];
+    const sites = all.filter(isFindingsObject);
+    if (!sites.length) throw new Error("Not an ESS batch file — expected a `sites` array of findings objects.");
+    flushSave(); // persist any pending edit for the previously loaded site first
+    const keys = [];
+    let firstSite = null;
+    sites.forEach((sj) => {
+      try {
+        applyFindings(sj);           // build state for this site
+        const key = siteKey(state.site);
+        if (keys.includes(key)) return; // de-dupe within the batch
+        imagesDirty = true;
+        saveNow();                   // persist synchronously under this site's key (state-sourced)
+        keys.push(key);
+        if (!firstSite) firstSite = state.site;
+      } catch (_) { /* skip an unparseable site rather than fail the whole batch */ }
+    });
+    if (!keys.length) throw new Error("None of the sites in the batch could be loaded.");
+    state.batch = { generated: batch.generated || new Date().toISOString(), keys, active: keys[0] };
+    persistBatch();
+    loadSite(firstSite);             // open the first site (restore + render); highlights its chip
+    renderBatchBar();
+    toast(`Imported ${keys.length} site${keys.length > 1 ? "s" : ""} — pick one below to review`);
   }
 
   // ---------------------------------------------------------------- summary
@@ -2541,8 +2596,8 @@
     const textPayload = {
       v: 2, site: state.site, findings: findingsText, report: state.report,
       maps: mapsMeta,
-      date: $("#fld-date") ? $("#fld-date").value : state.date,
-      maintenance: $("#fld-maintenance") ? $("#fld-maintenance").value : state.maintenance,
+      date: state.date,
+      maintenance: state.maintenance,
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -2556,9 +2611,15 @@
       const findingImages = {};
       for (const [id, f] of Object.entries(state.findings))
         if (f.images && f.images.length) findingImages[id] = f.images;
-      // Per-slot generated map images (data URLs).
+      // Per-slot generated map images (data URLs). For a loaded batch these are the
+      // avoidable bulk in storage — each visited site would otherwise persist two
+      // large map JPEGs, and a big batch can blow the localStorage quota. So while a
+      // batch is active we keep the maps in memory (they still render and travel into
+      // every export) but don't persist them; they regenerate cheaply when the site
+      // is reopened (mapsMeta above still remembers each slot's km/labels).
+      const persistMaps = !(state.batch && state.batch.keys && state.batch.keys.length);
       const mapImages = {};
-      for (const [k, ms] of Object.entries(state.maps || {})) if (ms.image) mapImages[k] = ms.image;
+      if (persistMaps) for (const [k, ms] of Object.entries(state.maps || {})) if (ms.image) mapImages[k] = ms.image;
       const hasAny = state.siteImages.length || Object.keys(mapImages).length || Object.keys(findingImages).length;
       try {
         if (hasAny)
@@ -2686,7 +2747,7 @@
       site: {
         name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
         delivery_group: s.delivery_group, facility_types: s.facility_types,
-        lat: s.lat, lon: s.lon, assessment_date: $("#fld-date").value, site_maintenance: $("#fld-maintenance").value,
+        lat: s.lat, lon: s.lon, assessment_date: state.date, site_maintenance: state.maintenance,
         images: (state.siteImages || []).map(exportImage),
         // Both locator maps, keyed by slot, so a re-import restores them. `map`
         // stays populated (local slot) for backward-compatible consumers.
@@ -2805,10 +2866,10 @@
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}
       .pr-warn{font-size:11px;font-weight:600;color:#b3261e;background:#fbe6e4;border-radius:5px;padding:5px 8px;margin:6px 0 0}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
-    download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.html`, "text/html", html);
+    download(`ESS_${slug(state.site.name)}_${state.date || "draft"}.html`, "text/html", html);
   }
   function downloadJson() {
-    download(`ESS_${slug(state.site.name)}_${$("#fld-date").value || "draft"}.json`, "application/json", JSON.stringify(reportObject(), null, 2));
+    download(`ESS_${slug(state.site.name)}_${state.date || "draft"}.json`, "application/json", JSON.stringify(reportObject(), null, 2));
   }
   function copySummary() {
     const r = reportObject();
@@ -3001,47 +3062,116 @@
   // return verbose, inconsistently-structured reviews. Takes a reportObject()-
   // shaped object (default: the current site) so the batch flow can reuse it
   // per site.
-  function buildReviewPrompt(report) {
-    const r = report || reportObject();
-    const s = r.site;
+  // The "what to check" checklist, shared by the single-site and batch reviewers.
+  // Pass the site for site-specific geography wording; pass null for the generic
+  // (per-site) phrasing used when several reports are reviewed at once.
+  function reviewChecklistLines(s) {
+    const geo = s
+      ? `- Geography — the coordinates (lat ${s.lat}, lon ${s.lon}) actually fall within the stated State/Territory (${s.state || "unstated"}); and the local council / region / weeds authority named in the report is the one that truly governs that location. Pasting another region's weed or pest list is a common error.`
+      : `- Geography — each site's stated coordinates actually fall within its stated State/Territory; and the local council / region / weeds authority named is the one that truly governs that location. Pasting another region's weed or pest list is a common error.`;
+    return [
+      `**Factual accuracy** (verify against authoritative / public sources where you can):`,
+      geo,
+      `- Species & communities — each named species or ecological community is a real taxon, and its stated conservation status (EPBC national and/or the relevant State Act) is correct and current.`,
+      `- Heritage & protected areas — named heritage places, Ramsar wetlands, marine parks and Indigenous Protected Areas exist and are genuinely at or near the site.`,
+      ``,
+      `**Internal consistency** (read the report against itself — no web access needed):`,
+      `- Statement vs evidence — a section whose standardized statement says "There are no known…" must NOT carry evidence or a narrative that lists matters found; and a "…are present / known to occur" statement MUST be backed by named specifics.`,
+      `- Correct section — a threatened **plant** belongs under Threatened Flora, an **animal** under Threatened Fauna, an **ecological community / regional ecosystem** under Threatened Habitat. Flag anything filed in the wrong section.`,
+      `- Migratory ≠ threatened — listed migratory species are a separate matter of national significance; flag any lumped in with threatened fauna.`,
+      `- Buffer wording — a matter recorded only across the wider region/buffer should read "…in the local area" or "…in the region but not at the site", not "…at this site", unless there is an on-site record.`,
+      `- Unsupported hazards — anything asserted (e.g. acid sulfate soils) with no supporting source, especially for an inland / upland site.`,
+      ``,
+      `**Gaps:** any source in the collection log left unchecked, or marked FAILED / MANUAL, that still needs a human; and any contradiction between the site header, the section narratives, and the collection log.`,
+    ];
+  }
+
+  // The rigid output contract, shared by both reviewers. `perSiteHeading`, when
+  // given, is prepended so a batch review repeats the block under each site.
+  function reviewOutputContractLines(perSiteHeading) {
+    return [
+      `Reply with ONLY the four numbered sections below${perSiteHeading ? `, ${perSiteHeading}` : ""}, in this order, with these exact headings. No preamble, no restating the report, no closing summary, no praise, no emoji. Be terse — at most one sentence per table cell — and keep each report's reply under ~400 words excluding tables.`,
+      ``,
+      `### 1. Verdict`,
+      `A single line: one of \`PASS\` / \`PASS WITH FIXES\` / \`NEEDS WORK\`, then " — " then a reason of 20 words or fewer.`,
+      ``,
+      `### 2. Issues`,
+      `A Markdown table with exactly these columns and no others: \`# | Severity | Section | Issue | Recommended fix\`. Severity is High, Medium or Low. One row per issue, High first. If there are none, write exactly \`None.\` and omit the table.`,
+      ``,
+      `### 3. Fact checks`,
+      `A Markdown table with exactly these columns and no others: \`Claim checked | Verdict | Source\`. Verdict is Confirmed, Refuted or Unverifiable. Include only claims material to the assessment (species, statuses, heritage places, geography, council/region) — maximum 12 rows. Cite the source name + URL you used. If you have no web access, mark every claim \`Unverifiable\`, source \`no web access\`, and say so in the Verdict line.`,
+      ``,
+      `### 4. Outstanding / gaps`,
+      `A short bullet list of unchecked / failed / manual sources or unsupported claims still needing a human. If none, write exactly \`None.\``,
+      ``,
+      `Rules: do NOT reproduce the report back to me; do NOT supply a fully rewritten report (recommend targeted fixes only); if you cannot verify a claim mark it \`Unverifiable\` — never guess or invent a source.`,
+    ];
+  }
+
+  function sectionFlags(r) {
     const flags = [];
     (r.sections || []).forEach((sec) => (sec.warnings || []).forEach((w) => flags.push(`${sec.title} — ${w}`)));
+    return flags;
+  }
+
+  function buildReviewPrompt(report) {
+    const r = report || reportObject();
+    const flags = sectionFlags(r);
     const L = [];
     L.push(`# Environmental Site Summary (ESS) — independent fact & consistency check`, ``);
     L.push(`> In a Claude Code session in this project's repo you can instead just say "check this ESS report". Otherwise paste this whole message into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…).`, ``);
     L.push(`## Your task`);
     L.push(`You are a meticulous reviewer of an Australian **Environmental Site Summary (ESS)** — a desk-based assessment of the environmental, heritage and biosecurity matters near a site. A finished draft is provided under "The report". **Do not rewrite it.** Independently check it for (1) factual accuracy, (2) internal consistency, and (3) gaps, using web search where you are able. Then reply in the exact structure under "Output format" — and nothing else.`, ``);
-    L.push(`## What to check`);
-    L.push(`**Factual accuracy** (verify against authoritative / public sources where you can):`);
-    L.push(`- Geography — the coordinates (lat ${s.lat}, lon ${s.lon}) actually fall within the stated State/Territory (${s.state || "unstated"}); and the local council / region / weeds authority named in the report is the one that truly governs that location. Pasting another region's weed or pest list is a common error.`);
-    L.push(`- Species & communities — each named species or ecological community is a real taxon, and its stated conservation status (EPBC national and/or the relevant State Act) is correct and current.`);
-    L.push(`- Heritage & protected areas — named heritage places, Ramsar wetlands, marine parks and Indigenous Protected Areas exist and are genuinely at or near the site.`);
-    L.push(``);
-    L.push(`**Internal consistency** (read the report against itself — no web access needed):`);
-    L.push(`- Statement vs evidence — a section whose standardized statement says "There are no known…" must NOT carry evidence or a narrative that lists matters found; and a "…are present / known to occur" statement MUST be backed by named specifics.`);
-    L.push(`- Correct section — a threatened **plant** belongs under Threatened Flora, an **animal** under Threatened Fauna, an **ecological community / regional ecosystem** under Threatened Habitat. Flag anything filed in the wrong section.`);
-    L.push(`- Migratory ≠ threatened — listed migratory species are a separate matter of national significance; flag any lumped in with threatened fauna.`);
-    L.push(`- Buffer wording — a matter recorded only across the wider region/buffer should read "…in the local area" or "…in the region but not at the site", not "…at this site", unless there is an on-site record.`);
-    L.push(`- Unsupported hazards — anything asserted (e.g. acid sulfate soils) with no supporting source, especially for an inland / upland site.`);
-    L.push(``);
-    L.push(`**Gaps:** any source in the collection log left unchecked, or marked FAILED / MANUAL, that still needs a human; and any contradiction between the site header, the section narratives, and the collection log.`, ``);
+    L.push(`## What to check`, ...reviewChecklistLines(r.site), ``);
     if (flags.length) {
       L.push(`### Automated flags the tool already raised (verify and extend — do not just repeat these)`);
       flags.forEach((f) => L.push(`- ${f}`));
       L.push(``);
     }
     L.push(`## The report`, ``, "```", reportToPlainText(r), "```", ``);
+    L.push(`## Output format — follow this EXACTLY`, ...reviewOutputContractLines());
+    return L.join("\n");
+  }
+
+  // Combined fact/consistency-check prompt covering every site in the loaded batch.
+  // Reuses the same checklist + rigid output contract, stated once, then embeds each
+  // site's report; the model repeats the 4-section block per site and adds a final
+  // one-line-per-site summary table. Visits each site's stored state (no render) and
+  // restores the previously-active site afterwards.
+  function buildBatchReviewPrompt() {
+    if (!state.batch || !state.batch.keys.length) return "";
+    flushSave();
+    const prevKey = state.site ? siteKey(state.site) : null;
+    const reports = [];
+    state.batch.keys.forEach((key) => {
+      const site = siteFromKey(key);
+      if (!site) return;
+      loadSiteState(site);
+      reports.push(reportObject());
+    });
+    const back = prevKey ? siteFromKey(prevKey) : null;
+    if (back) loadSiteState(back); // restore state to the site that was open
+    if (!reports.length) return "";
+
+    const L = [];
+    L.push(`# Environmental Site Summaries (ESS) — independent fact & consistency check (batch of ${reports.length})`, ``);
+    L.push(`> In a Claude Code session in this project's repo you can instead say "check this ESS batch". Otherwise paste this whole message into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…).`, ``);
+    L.push(`## Your task`);
+    L.push(`You are a meticulous reviewer of Australian **Environmental Site Summaries (ESS)** — desk-based assessments of the environmental, heritage and biosecurity matters near a site. ${reports.length} finished drafts are provided under "The reports". **Do not rewrite them.** Independently check EACH for (1) factual accuracy, (2) internal consistency, and (3) gaps, using web search where you are able. Reply in the exact structure under "Output format" — and nothing else.`, ``);
+    L.push(`## What to check (apply to every report)`, ...reviewChecklistLines(null), ``);
+    L.push(`## The reports`, ``);
+    reports.forEach((r, i) => {
+      const flags = sectionFlags(r);
+      L.push(`### Report ${i + 1} — ${r.site.name}`);
+      if (flags.length) {
+        L.push(`Automated flags the tool already raised (verify and extend): ${flags.join(" · ")}`);
+      }
+      L.push("```", reportToPlainText(r), "```", ``);
+    });
     L.push(`## Output format — follow this EXACTLY`);
-    L.push(`Reply with ONLY the four numbered sections below, in this order, with these exact headings. No preamble, no restating the report, no closing summary, no praise, no emoji. Be terse — at most one sentence per table cell — and keep the whole reply under ~400 words excluding tables.`, ``);
-    L.push(`### 1. Verdict`);
-    L.push(`A single line: one of \`PASS\` / \`PASS WITH FIXES\` / \`NEEDS WORK\`, then " — " then a reason of 20 words or fewer.`, ``);
-    L.push(`### 2. Issues`);
-    L.push(`A Markdown table with exactly these columns and no others: \`# | Severity | Section | Issue | Recommended fix\`. Severity is High, Medium or Low. One row per issue, High first. If there are none, write exactly \`None.\` and omit the table.`, ``);
-    L.push(`### 3. Fact checks`);
-    L.push(`A Markdown table with exactly these columns and no others: \`Claim checked | Verdict | Source\`. Verdict is Confirmed, Refuted or Unverifiable. Include only claims material to the assessment (species, statuses, heritage places, geography, council/region) — maximum 12 rows. Cite the source name + URL you used. If you have no web access, mark every claim \`Unverifiable\`, source \`no web access\`, and say so in the Verdict line.`, ``);
-    L.push(`### 4. Outstanding / gaps`);
-    L.push(`A short bullet list of unchecked / failed / manual sources or unsupported claims still needing a human. If none, write exactly \`None.\``, ``);
-    L.push(`Rules: do NOT reproduce the report back to me; do NOT supply a fully rewritten report (recommend targeted fixes only); if you cannot verify a claim mark it \`Unverifiable\` — never guess or invent a source.`);
+    L.push(`For EACH report above, output the four-section block below under a level-2 heading \`## <site name>\` (in the same order the reports are given). ${reviewOutputContractLines("repeated once per report").join("\n")}`, ``);
+    L.push(`## Finally — batch summary`);
+    L.push(`After all per-report blocks, add one more heading \`## Batch summary\` with a Markdown table, columns exactly: \`Site | Verdict | High | Med | Low\` — one row per report, counts of issues at each severity. Nothing after the table.`);
     return L.join("\n");
   }
 
@@ -3049,6 +3179,104 @@
     if (!state.site) { toast("Load a site first"); return; }
     copy(buildReviewPrompt(), "Review prompt copied — paste it into your assistant");
     flashButton((e && e.currentTarget) || $("#btn-check-report"));
+  }
+
+  function copyBatchReviewPrompt(e) {
+    if (!state.batch || !state.batch.keys.length) { toast("Import a batch first"); return; }
+    const p = buildBatchReviewPrompt();
+    if (!p) { toast("No batch reports to check"); return; }
+    copy(p, "Batch review prompt copied — paste it into your assistant");
+    flashButton((e && e.currentTarget) || $("#btn-batch-review"));
+  }
+
+  // ---------------------------------------------------------------- batch bar
+  function readSitePayload(key) {
+    try { return JSON.parse(localStorage.getItem(LS_PREFIX + key) || "null"); } catch (_) { return null; }
+  }
+  function siteFromKey(key) { const d = readSitePayload(key); return d && d.site ? d.site : null; }
+
+  function countStatuses(d) {
+    const f = (d && d.findings) || {};
+    let found = 0, attention = 0, total = 0;
+    for (const v of Object.values(f)) {
+      total++;
+      if (v.status === "found") found++;
+      if (!v.status || v.status === "manual" || v.status === "failed" || v.status === STATUS.UNSET) attention++;
+    }
+    return { found, attention, total };
+  }
+
+  function persistBatch() {
+    try {
+      if (state.batch && state.batch.keys && state.batch.keys.length) localStorage.setItem(LS_BATCH, JSON.stringify(state.batch));
+      else localStorage.removeItem(LS_BATCH);
+    } catch (_) {}
+  }
+
+  // Highlight the chip for the currently-open site (or none if it isn't in the
+  // batch). Called from loadSite so switching sites keeps the tray in sync.
+  function syncBatchActive() {
+    if (!state.batch || !state.site) return;
+    const key = siteKey(state.site);
+    state.batch.active = state.batch.keys.includes(key) ? key : null;
+    persistBatch();
+    renderBatchBar();
+  }
+
+  function loadSiteFromBatch(key) {
+    const site = siteFromKey(key);
+    if (!site) { toast("That site's saved data is no longer available"); return; }
+    loadSite(site); // restores + renders; syncBatchActive highlights the chip
+  }
+
+  // Drop the batch membership. Site work stays in localStorage unless deleteSiteData.
+  function clearBatch(deleteSiteData) {
+    if (state.batch && deleteSiteData) {
+      state.batch.keys.forEach((k) => {
+        try { localStorage.removeItem(LS_PREFIX + k); localStorage.removeItem(LS_PREFIX + k + IMG_SUFFIX); } catch (_) {}
+      });
+    }
+    state.batch = null;
+    persistBatch();
+    renderBatchBar();
+  }
+
+  function renderBatchBar() {
+    const bar = $("#batch-bar");
+    if (!bar) return;
+    const tray = $("#batch-tray");
+    if (!state.batch || !state.batch.keys.length) { bar.hidden = true; if (tray) tray.innerHTML = ""; return; }
+    bar.hidden = false;
+    const cnt = $("#batch-count");
+    if (cnt) cnt.textContent = `· ${state.batch.keys.length} site${state.batch.keys.length > 1 ? "s" : ""}`;
+    tray.innerHTML = "";
+    state.batch.keys.forEach((key) => {
+      const d = readSitePayload(key);
+      const name = (d && d.site && d.site.name) || key;
+      const c = countStatuses(d);
+      const meta = el("span", { class: "batch-chip-meta" });
+      if (c.found) meta.append(el("span", { class: "bc found", title: `${c.found} found` }, `⚑ ${c.found}`));
+      if (c.attention) meta.append(el("span", { class: "bc attn", title: `${c.attention} need attention` }, `⚠ ${c.attention}`));
+      if (!c.found && !c.attention && c.total) meta.append(el("span", { class: "bc ok", title: "all reviewed / nothing outstanding" }, "✓"));
+      tray.append(el("button", {
+        class: "batch-chip" + (key === state.batch.active ? " is-active" : ""),
+        title: `Open ${name}`, onclick: () => loadSiteFromBatch(key),
+      }, el("span", { class: "batch-chip-name" }, name), meta));
+    });
+  }
+
+  function restoreBatch() {
+    let b = null;
+    try { b = JSON.parse(localStorage.getItem(LS_BATCH) || "null"); } catch (_) {}
+    if (!b || !Array.isArray(b.keys) || !b.keys.length) return;
+    // Keep only keys whose per-site data still exists.
+    b.keys = b.keys.filter((k) => localStorage.getItem(LS_PREFIX + k) != null);
+    if (!b.keys.length) { clearBatch(false); return; }
+    if (!b.keys.includes(b.active)) b.active = b.keys[0];
+    state.batch = b;
+    renderBatchBar();
+    const site = siteFromKey(b.active);
+    if (site) loadSite(site); // resume where the user left off
   }
 
   // The report toolbar's "More ▾" overflow menu (Print / JSON / Copy summary).
@@ -3069,8 +3297,13 @@
     const text = $("#import-text").value.trim();
     const file = $("#import-file").files && $("#import-file").files[0];
     const parse = (raw) => {
-      try { importFindings(JSON.parse(raw)); toast("Findings imported"); }
-      catch (err) { alert("Import failed: " + err.message); }
+      try {
+        const json = JSON.parse(raw);
+        // A batch envelope (ess-findings-batch/1, or any object with a sites[] array)
+        // routes to importBatch; a single findings object to importFindings.
+        if (json && Array.isArray(json.sites)) importBatch(json);
+        else { importFindings(json); toast("Findings imported"); }
+      } catch (err) { alert("Import failed: " + err.message); }
     };
     if (file) {
       const r = new FileReader();
@@ -3287,14 +3520,23 @@
     }));
     $("#btn-copy-prompt").addEventListener("click", copyFullPrompt);
     $("#btn-run-auto").addEventListener("click", runAllAuto);
-    $("#fld-date").addEventListener("change", save);
-    $("#fld-maintenance").addEventListener("input", save);
+    // Mirror the two free-text header fields into `state` so state is the single
+    // source of truth (saveNow / reportObject read state, not the DOM) — this lets
+    // the batch flow persist and review sites whose DOM isn't currently shown.
+    $("#fld-date").addEventListener("change", () => { state.date = $("#fld-date").value; save(); });
+    $("#fld-maintenance").addEventListener("input", () => { state.maintenance = $("#fld-maintenance").value; save(); });
     $("#btn-print").addEventListener("click", doPrint);
     $("#btn-download-html").addEventListener("click", downloadHtml);
     $("#btn-download-json").addEventListener("click", downloadJson);
     $("#btn-copy-summary").addEventListener("click", copySummary);
     $("#btn-check-report").addEventListener("click", copyReviewPrompt);
     wireOverflowMenu();
+    const batchReviewBtn = $("#btn-batch-review");
+    if (batchReviewBtn) batchReviewBtn.addEventListener("click", copyBatchReviewPrompt);
+    const batchClearBtn = $("#btn-batch-clear");
+    if (batchClearBtn) batchClearBtn.addEventListener("click", () => {
+      if (state.batch && confirm("Clear the batch list? Each site's saved work is kept — this only removes the batch grouping.")) clearBatch(false);
+    });
 
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");
@@ -3327,6 +3569,7 @@
     $("#station-count-hint").textContent =
       `${DATA.stations.length.toLocaleString()} Bureau sites · ${DATA.sources.length} sources · data ${DATA.meta.generated_utc ? DATA.meta.generated_utc.slice(0, 10) : ""}`;
     $("#foot-meta").textContent = `${DATA.stations.length.toLocaleString()} sites · ${DATA.sources.length} sources.`;
+    restoreBatch(); // if a batch was loaded in a previous visit, show the tray + resume the active site
     $("#station-search").focus();
     document.dispatchEvent(new CustomEvent("ess:ready")); // signals the optional agent module
   }

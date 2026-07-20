@@ -16,7 +16,7 @@ Usage:
 Paths default to the repo's data/ directory (three levels up from this file).
 """
 from __future__ import annotations
-import argparse, datetime, json, os, sys
+import argparse, datetime, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -57,6 +57,63 @@ def find_station(stations, q):
     con = [s for s in stations if q in s["name"].lower()]
     hits = pre + [s for s in con if s not in pre]
     return (hits[0] if hits else None), hits[:15]
+
+
+# A batch line is treated as a coordinate pair only when it is two numbers
+# (comma- or whitespace-separated) with at least one decimal point, the first in
+# [-90,90] and the second in [-180,180], optionally followed by ",Name" / ";Name".
+# This keeps bare station numbers (e.g. "539251") and station names as name lookups.
+COORD_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*(?:[,;]\s*(.*?))?\s*$")
+
+
+def _as_coords(spec):
+    m = COORD_RE.match(spec)
+    if not m:
+        return None
+    a, b, name = m.group(1), m.group(2), (m.group(3) or "").strip()
+    if "." not in a and "." not in b:
+        return None  # two bare ints — treat as a name/number lookup, not coordinates
+    lat, lon = float(a), float(b)
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return lat, lon, name
+
+
+def coord_site(lat, lon, state, name=None):
+    st = state or state_from_coords(lat, lon)
+    return {
+        "name": name or f"Site @ {lat:.4f},{lon:.4f}", "station_num": "", "wmo": "",
+        "state": st, "delivery_group": "", "facility_types": [], "primary_facility": "",
+        "lat": round(lat, 6), "lon": round(lon, 6),
+        "refs": {"invasive_plants": WEEDS.get(st, ""),
+                 "invasive_animals": "https://www.dcceew.gov.au/environment/invasive-species",
+                 "diseases": "https://www.outbreak.gov.au/"},
+    }
+
+
+def resolve_spec(spec, stations, default_state=None):
+    """Resolve one batch line to (site, note). `note` is '' or a warning string
+    (ambiguous match); site is None when nothing matched (note carries the reason)."""
+    spec = spec.strip()
+    coords = _as_coords(spec)
+    if coords:
+        lat, lon, name = coords
+        return coord_site(lat, lon, default_state, name or None), ""
+    site, hits = find_station(stations, spec)
+    if not site:
+        return None, f"no station matched '{spec}'"
+    note = ""
+    if len(hits) > 1 and site["name"].lower() != spec.lower() and str(site["station_num"]) != spec:
+        others = ", ".join(f"{h['name']} ({h['state']},{h['station_num']})" for h in hits[1:5])
+        note = f"'{spec}' matched {len(hits)} sites; used {site['name']} ({site['state']},{site['station_num']}). Others: {others}"
+    return site, note
+
+
+def read_batch_specs(path):
+    """Read one site spec per line from a file (or stdin when path == '-').
+    Blank lines and lines starting with '#' are skipped."""
+    text = sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read()
+    return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
 
 
 def fill(url, site):
@@ -166,6 +223,64 @@ def findings_template(site, sources, srcs):
     }
 
 
+def run_batch(a, stations, sources):
+    """Resolve a list of sites and emit one payload covering all of them.
+
+    --template → ess-findings-batch/1 { sites: [ <ess-findings/1 skeleton>, … ] },
+                 ready to fill and import into the browser tool in one go.
+    --json     → the resolved payload per site (site + aimed sources), with the
+                 shared dropdowns/statements/epbc_matters hoisted to the top once.
+    (neither)  → a human-readable per-site summary.
+    Unresolved / ambiguous lines are always reported on stderr so they are fixed
+    once, up front, rather than silently dropped."""
+    specs = read_batch_specs(a.batch)
+    today = datetime.date.today().isoformat()
+    resolved, unresolved, notes = [], [], []
+    seen = set()
+    for spec in specs:
+        site, note = resolve_spec(spec, stations, a.state)
+        if not site:
+            unresolved.append((spec, note))
+            continue
+        key = f"num:{site['station_num']}" if site.get("station_num") else f"xy:{site['lat']:.5f},{site['lon']:.5f}"
+        if key in seen:
+            notes.append(f"duplicate skipped: {spec} → {site['name']}")
+            continue
+        seen.add(key)
+        if note:
+            notes.append(note)
+        resolved.append(site)
+
+    for n in notes:
+        print(f"# Note: {n}", file=sys.stderr)
+    for spec, why in unresolved:
+        print(f"# UNRESOLVED: {why}", file=sys.stderr)
+    if not resolved:
+        print("No sites resolved from the batch list.", file=sys.stderr)
+        sys.exit(2)
+    print(f"# Resolved {len(resolved)} site(s); {len(unresolved)} unresolved.", file=sys.stderr)
+
+    if a.template:
+        out = {"schema": "ess-findings-batch/1", "generated": today, "tool": "ess-collect",
+               "sites": [findings_template(s, sources, build(s, sources)) for s in resolved]}
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return
+    if a.json:
+        out = {"schema": "ess-findings-batch/1", "generated": today, "tool": "ess-collect",
+               "epbc_matters": sources.get("epbc_matters", []),
+               "dropdowns": load("dropdowns.json"), "statements": load_optional("statements.json", {}),
+               "sites": [{"site": s, "sources": build(s, sources)} for s in resolved]}
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return
+
+    for i, s in enumerate(resolved, 1):
+        srcs = build(s, sources)
+        print(f"[{i}/{len(resolved)}] {s['name']}  —  {s.get('state') or '?'}  "
+              f"(station {s.get('station_num') or '—'}, {s['lat']},{s['lon']})  ·  {len(srcs)} sources")
+    if unresolved:
+        print(f"\n{len(unresolved)} unresolved (see stderr): " + ", ".join(u[0] for u in unresolved))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--station")
@@ -173,6 +288,9 @@ def main():
     ap.add_argument("--lon", type=float)
     ap.add_argument("--state")
     ap.add_argument("--name")
+    ap.add_argument("--batch", metavar="FILE",
+                    help="resolve many sites: a file with one station/number or 'lat,lon[,name]' per line "
+                         "('-' reads stdin). Emits an ess-findings-batch/1 object with --template/--json.")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--template", action="store_true",
                     help="emit the ess-findings/1 skeleton to fill in and import")
@@ -180,6 +298,10 @@ def main():
 
     stations = load("stations.json")
     sources = load("sources.json")
+
+    if a.batch:
+        run_batch(a, stations, sources)
+        return
 
     if a.station:
         site, hits = find_station(stations, a.station)
