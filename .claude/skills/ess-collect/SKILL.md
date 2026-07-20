@@ -60,6 +60,10 @@ python .claude/skills/ess-collect/resolve.py --station "WOODGATE ALERT" --json
 
 # --template prints the empty ess-findings/1 skeleton you will fill in (see Step 3)
 python .claude/skills/ess-collect/resolve.py --station "WOODGATE ALERT" --template
+
+# --batch takes a file (one site per line) and emits all of them at once — see
+# "Running a batch of sites" below
+python .claude/skills/ess-collect/resolve.py --batch sites.txt --template
 ```
 
 The site block it prints is the ESS header (station number, WMO, state, delivery
@@ -301,6 +305,46 @@ File each threatened taxon under the correct section (flora vs fauna vs habitat 
 see Step 2). For Biosecurity, `biosecurity_detail` maps the chosen level to its
 full declaration text, and the browser tool pre-seeds the **Biosecurity** section
 note with the general biosecurity obligation (GBO) text for the site's state.
+
+## Running a batch of sites
+
+To assess several sites from one request, do a normal pass per site and return a
+single `ess-findings-batch/1` object the browser tool imports in one go.
+
+1. Put the sites in a file, one per line — a station name/number, or
+   `lat,lon[,name]`. Blank lines and `#` comments are ignored. Scaffold every
+   site's skeleton at once:
+
+   ```bash
+   python .claude/skills/ess-collect/resolve.py --batch sites.txt --template > batch.json
+   ```
+
+   This prints `{ "schema": "ess-findings-batch/1", "sites": [ <ess-findings/1>, … ] }`
+   (one skeleton per resolved site) and reports any **unresolved or ambiguous**
+   lines on **stderr**. Fix those first — disambiguate a name, correct a typo —
+   rather than proceeding with a wrong match. (`--batch -` reads the list from
+   stdin; `--batch … --json` gives the resolved site+sources payload with the
+   shared dropdowns/statements hoisted once.)
+
+2. Work the sites **one at a time**, exactly as for a single ESS (Steps 2–3): for
+   each object in `sites[]`, set every `collection_log` status/note and each
+   `section`. Do **not** blur sites together — a species found at one site is not
+   evidence for another. Sites that are geographically close *do* share regional
+   matters (weeds region, council, the PMST buffer may overlap); you may reuse that
+   regional research, but record it per site.
+
+3. Write each site's findings back into its slot as you finish it, so a long run is
+   **resumable** — a failure at site 7 keeps sites 1–6. Emit the whole
+   `ess-findings-batch/1` object at the end.
+
+4. Add a short **roll-up**: one line per site — name · state · counts of
+   FOUND / MANUAL / FAILED · anything notable (a threatened species, a heritage
+   place) — so the reader sees at a glance which sites need attention.
+
+The user imports the batch at **Choose a site → Import JSON**: the tool shows a
+picker bar with one chip per site (and its found / needs-attention counts), and
+they open each to finish the Manual/Failed items and export. PMST stays MANUAL per
+site (no API), so N sites means N polygon draws — flag them together.
 
 ## Honesty rules
 

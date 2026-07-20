@@ -96,6 +96,15 @@ feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT
   Best for batches. *(In a Claude Code session in this repo, the prompt's top
   note lets you run the `ess-collect` skill instead — same JSON — or just ask
   "Run an ESS for WOODGATE ALERT".)*
+  * **Batches.** For several sites, scaffold them all at once with
+    `resolve.py --batch sites.txt --template` (one station/number or
+    `lat,lon[,name]` per line) — it emits one `ess-findings-batch/1` object
+    (`{ sites: [ … ] }`). Fill each site, import the whole object, and the tool
+    shows a **batch picker bar**: one chip per site (with its found /
+    needs-attention counts, remembered across visits), each opening into the same
+    review/export surface, plus a **🔍 Check all** button that copies one combined
+    fact-and-consistency-check prompt covering every site. Ask a Claude Code
+    session to "run an ESS for these sites: …" and it does the whole batch.
 - **BYOK in-browser (beta).** Click **🔑 Agent**, paste your **own** Anthropic
   API key, and **Run full assessment**. The browser drives Claude directly
   (Anthropic's server-side web search/fetch bypass CORS) and fills the dashboard

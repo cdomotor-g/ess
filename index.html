@@ -97,10 +97,24 @@
         <label class="field-label" for="import-file">Load an ESS findings file (JSON)</label>
         <input id="import-file" type="file" accept="application/json,.json" />
         <p class="hint" style="margin:12px 0 5px">…or paste the JSON:</p>
-        <textarea id="import-text" rows="4" placeholder='{"schema":"ess-findings/1", "site": {…}, "collection_log": […]}'></textarea>
+        <textarea id="import-text" rows="4" placeholder='{"schema":"ess-findings/1", "site": {…}, "collection_log": […]}  — or a batch: {"schema":"ess-findings-batch/1", "sites": [ … ]}'></textarea>
         <button class="btn primary" id="import-load" style="margin-top:12px">Import findings</button>
-        <p class="hint">Produced by the <code>ess-collect</code> agent skill (<code>resolve.py --template</code>, filled in) or exported from this tool. Manual &amp; failed sources are flagged so you can finish them here.</p>
+        <p class="hint">A single <code>ess-findings/1</code> object, or a <code>ess-findings-batch/1</code> object with a <code>sites</code> array (from <code>resolve.py --batch … --template</code>, filled in). A batch loads a picker bar; single files load straight in. Manual &amp; failed sources are flagged so you can finish them here.</p>
       </div>
+    </section>
+
+    <!-- Batch bar — shown when a batch of sites is imported together. Each chip
+         opens that site in the workspace below; work is saved per site. -->
+    <section class="card" id="batch-bar" hidden>
+      <div class="card-head">
+        <h2>Batch <span class="batch-count" id="batch-count"></span></h2>
+        <div class="head-actions">
+          <button class="btn ghost" id="btn-batch-review" title="Copy one fact- &amp; consistency-check prompt covering every site in this batch — paste into any assistant">🔍 Check all</button>
+          <button class="btn ghost" id="btn-batch-clear" title="Remove the batch grouping (each site's saved work is kept)">Clear batch</button>
+        </div>
+      </div>
+      <p class="dash-note">Pick a site to open it below. Finish its Manual / Failed items and export, then move to the next.</p>
+      <div class="batch-tray" id="batch-tray"><!-- filled by JS: renderBatchBar() --></div>
     </section>
 
     <!-- Everything below appears once a site is loaded -->

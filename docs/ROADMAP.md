@@ -32,6 +32,15 @@ slice. Each backlog item names the files to touch and how to verify.
   is high-precision (curated lists + scientific binomials only); a global toggle
   governs it. Schema: optional `image_subjects[]` on species `collection_log`
   entries.
+- **Batch mode** — a `ess-findings-batch/1` envelope (`{ sites: [ <ess-findings/1>,
+  … ] }`) runs end-to-end: `resolve.py --batch` scaffolds many sites in one call
+  (names/numbers or `lat,lon[,name]`, file or stdin; ambiguous/unresolved lines
+  reported on stderr), the `ess-collect` skill fills each, and the browser's Import
+  JSON tab detects the array and shows a **batch picker bar** — one chip per site
+  with live found / needs-attention counts, persisted across visits, each opening
+  into the same review/export surface. **🔍 Check all** copies one combined
+  fact/consistency-check prompt for every site; **Clear batch** drops the grouping
+  but keeps each site's saved work.
 - **Report self-check prompt** — a **🔍 Check report** button (report toolbar)
   builds a self-contained fact-and-consistency-check prompt for the finished
   report and copies it for any assistant. The output contract is deliberately
@@ -73,8 +82,12 @@ slice. Each backlog item names the files to touch and how to verify.
 - [x] **Map preview** of the site — done: a dependency-free satellite locator
       (Esri tiles stitched on a canvas) with road/locality overlays, in the site
       summary + report. A drawn search *buffer* ring could still be added.
-- [ ] **Batch mode** for the skill: take a list of stations and emit one report
-      each. *Files:* `.claude/skills/ess-collect/` (a loop wrapper).
+- [x] **Batch mode** — done. `resolve.py --batch` resolves a list of sites
+      (names/numbers or `lat,lon[,name]`, from a file or stdin) into one
+      `ess-findings-batch/1` envelope; the skill fills each site; the browser
+      imports the array and shows a picker bar (per-site found/attention counts,
+      resumes across visits) with a **Check all** combined-review button. See
+      Built.
 
 ### Phase 2 — More live checks (the main automation win)
 Each is: find the ArcGIS REST / WFS endpoint behind the portal, add an `api`
