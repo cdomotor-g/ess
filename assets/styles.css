@@ -221,6 +221,41 @@ textarea { resize: vertical; min-height: 62px; }
 .batch-chip-meta .bc.attn { color: var(--manual); background: var(--manual-bg); }
 .batch-chip-meta .bc.ok { color: var(--reviewed); background: var(--reviewed-bg); }
 
+/* ---------- batch builder modal (pick several sites in-browser) ---------- */
+.bb-overlay { position: fixed; inset: 0; z-index: 120; background: rgba(8,14,18,.6);
+  display: none; align-items: flex-start; justify-content: center; padding: 6vh 16px 16px;
+  overflow-y: auto; overscroll-behavior: contain; }
+.bb-overlay.show { display: flex; }
+.bb-dialog { width: 100%; max-width: 560px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 12px 48px rgba(0,0,0,.35);
+  padding: 20px 22px 18px; }
+.bb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bb-head h2 { font-size: 18px; margin: 0; }
+.bb-close { border: none; background: var(--surface-2); color: var(--ink-soft); cursor: pointer;
+  width: 30px; height: 30px; border-radius: 8px; font-size: 15px; line-height: 1; }
+.bb-close:hover { color: var(--ink); background: var(--line); }
+.bb-note { color: var(--ink-soft); font-size: 13px; line-height: 1.5; margin: 6px 0 14px; }
+.bb-body { position: relative; }
+.bb-paste { margin-top: 12px; }
+.bb-paste > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--brand); }
+.bb-paste textarea { width: 100%; }
+.bb-paste-msg { margin: 8px 0 0; }
+.bb-paste-msg.err { color: var(--failed); }
+.bb-selected { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.bb-selected-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.bb-count { color: var(--ink-soft); font-weight: 600; font-size: .85em; }
+.bb-chips { display: flex; flex-wrap: wrap; gap: 8px; max-height: 30vh; overflow-y: auto; }
+.bb-empty { color: var(--ink-soft); font-size: 13px; margin: 2px 0; }
+.bb-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); max-width: 100%; }
+.bb-chip .bb-chip-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 220px; }
+.bb-chip .bb-chip-meta { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+.bb-chip .bb-chip-x { border: none; background: none; color: var(--ink-soft); cursor: pointer;
+  font-size: 15px; line-height: 1; width: 20px; height: 20px; border-radius: 50%; }
+.bb-chip .bb-chip-x:hover { color: var(--failed); background: var(--failed-bg); }
+.bb-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
 /* ---------- summary grid ---------- */
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 26px; background: var(--surface-2); border-radius: 10px; padding: 14px 16px; }
 .summary-item { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0; border-bottom: 1px dashed var(--line); }

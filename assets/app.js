@@ -764,15 +764,21 @@
     ul.hidden = false;
   }
 
-  function selectStation(s) {
-    $("#station-search").value = s.name;
-    $("#station-results").hidden = true;
-    loadSite({
+  // Turn a DATA.stations entry into the internal site object. Shared by the
+  // single-site picker and the batch builder so both resolve stations identically.
+  function stationToSite(s) {
+    return {
       name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
       region: s.region, delivery_group: s.delivery_group, facility_types: s.facility_types,
       primary_facility: s.primary_facility, lat: s.lat, lon: s.lon,
       operating_authority: s.operating_authority, ident: s.ident, refs: s.refs, manual: false,
-    });
+    };
+  }
+
+  function selectStation(s) {
+    $("#station-search").value = s.name;
+    $("#station-results").hidden = true;
+    loadSite(stationToSite(s));
   }
 
   // Split a pasted "lat, lon" pair into its two parts. Accepts any mix of
@@ -788,16 +794,23 @@
     return { lat: parts[0], lon: parts[1] };
   }
 
+  // Build the internal site object for a manual coordinate entry. Shared by the
+  // single-site coordinate loader and the batch builder's pasted `lat,lon` lines.
+  function coordToSite(lat, lon, name, st) {
+    st = st || stateFromCoords(lat, lon);
+    return {
+      name: (name && name.trim()) || `Site @ ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+      station_num: "", wmo: "", state: st, region: st, delivery_group: "", facility_types: [],
+      primary_facility: "", lat, lon, operating_authority: "", ident: "",
+      refs: refsForState(st), manual: true,
+    };
+  }
+
   function loadCoordSite() {
     const lat = parseFloat($("#in-lat").value), lon = parseFloat($("#in-lon").value);
     if (isNaN(lat) || isNaN(lon)) { alert("Enter a valid latitude and longitude."); return; }
     const st = $("#in-state").value || stateFromCoords(lat, lon);
-    loadSite({
-      name: $("#in-name").value.trim() || `Site @ ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
-      station_num: "", wmo: "", state: st, region: st, delivery_group: "", facility_types: [],
-      primary_facility: "", lat, lon, operating_authority: "", ident: "",
-      refs: refsForState(st), manual: true,
-    });
+    loadSite(coordToSite(lat, lon, $("#in-name").value, st));
   }
 
   // National reference links by state (fallback for manual coordinate sites).
@@ -968,6 +981,33 @@
     loadSite(firstSite);             // open the first site (restore + render); highlights its chip
     renderBatchBar();
     toast(`Imported ${keys.length} site${keys.length > 1 ? "s" : ""} — pick one below to review`);
+  }
+
+  // Create a batch straight from a list of resolved site objects (the in-browser
+  // batch builder). Each site gets a blank per-site state — or its existing saved
+  // work, if it was assessed before — persisted under its own key, then the batch
+  // tray is shown and the first site opens. Same end state as importBatch, minus
+  // the file: the user then works each site with the normal collect tools.
+  function createBatchFromSites(sites) {
+    const list = (sites || []).filter((s) => s && isFinite(s.lat) && isFinite(s.lon));
+    if (!list.length) { toast("Pick at least one site first"); return; }
+    flushSave(); // persist any pending edit for the previously loaded site first
+    const keys = [];
+    let firstSite = null;
+    list.forEach((site) => {
+      const key = siteKey(site);
+      if (keys.includes(key)) return;   // de-dupe within the batch
+      loadSiteState(site);              // blank state (or restores this site's saved work)
+      saveNow();                        // persist the per-site payload so its chip renders + resumes
+      keys.push(key);
+      if (!firstSite) firstSite = site;
+    });
+    if (!keys.length) { toast("No valid sites to batch"); return; }
+    state.batch = { generated: new Date().toISOString(), keys, active: keys[0] };
+    persistBatch();
+    loadSite(firstSite);               // open the first site (restore + render); highlights its chip
+    renderBatchBar();
+    toast(`Batch of ${keys.length} site${keys.length > 1 ? "s" : ""} ready — pick one below to start`);
   }
 
   // ---------------------------------------------------------------- summary
@@ -3279,6 +3319,189 @@
     if (site) loadSite(site); // resume where the user left off
   }
 
+  // -------------------------------------------------- batch builder (modal)
+  // In-browser multi-site picker: search + add stations (or paste a list), then
+  // "Start batch" hands the collected site objects to createBatchFromSites.
+  let bbSel = [];          // selected site objects, in add order
+  let bbAcMatches = [], bbAcIndex = -1;
+
+  function openBatchBuilder() {
+    bbSel = [];
+    const ov = $("#batch-builder");
+    if (!ov) return;
+    $("#bb-search").value = "";
+    $("#bb-results").hidden = true;
+    $("#bb-paste-text").value = "";
+    const pm = $("#bb-paste-msg"); if (pm) { pm.hidden = true; pm.textContent = ""; }
+    bbRenderSelected();
+    ov.hidden = false;
+    ov.classList.add("show");
+    setTimeout(() => $("#bb-search").focus(), 0);
+  }
+  function closeBatchBuilder() {
+    const ov = $("#batch-builder");
+    if (!ov) return;
+    ov.classList.remove("show");
+    ov.hidden = true;
+    $("#bb-results").hidden = true;
+  }
+
+  function bbChipMeta(site) {
+    const bits = [site.state || "?"];
+    if (site.station_num) bits.push("#" + site.station_num);
+    else bits.push(`${(+site.lat).toFixed(3)}, ${(+site.lon).toFixed(3)}`);
+    return bits.join(" · ");
+  }
+
+  function bbRenderSelected() {
+    const wrap = $("#bb-chips");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    const cnt = $("#bb-count");
+    if (cnt) cnt.textContent = bbSel.length ? `· ${bbSel.length}` : "";
+    const clearBtn = $("#bb-clear-sel");
+    if (clearBtn) clearBtn.hidden = !bbSel.length;
+    const createBtn = $("#bb-create");
+    if (createBtn) {
+      createBtn.disabled = !bbSel.length;
+      createBtn.textContent = bbSel.length ? `Start batch (${bbSel.length})` : "Start batch";
+    }
+    if (!bbSel.length) {
+      wrap.append(el("p", { class: "bb-empty", id: "bb-empty" }, "No sites yet — search or paste above to add some."));
+      return;
+    }
+    bbSel.forEach((site) => {
+      const key = siteKey(site);
+      wrap.append(el("span", { class: "bb-chip" },
+        el("span", { class: "bb-chip-name", title: site.name }, site.name),
+        el("span", { class: "bb-chip-meta" }, bbChipMeta(site)),
+        el("button", { class: "bb-chip-x", type: "button", title: "Remove", "aria-label": `Remove ${site.name}`,
+          onclick: () => bbRemove(key) }, "✕")));
+    });
+  }
+
+  // Add a resolved site to the selection. Returns true only if newly added (a
+  // duplicate by siteKey is ignored). `silent` suppresses the per-add toast/render
+  // for bulk (paste) adds, which render once at the end.
+  function bbAdd(site, silent) {
+    if (!site || !isFinite(site.lat) || !isFinite(site.lon)) return false;
+    const key = siteKey(site);
+    if (bbSel.some((s) => siteKey(s) === key)) { if (!silent) toast(`${site.name} is already in the list`); return false; }
+    bbSel.push(site);
+    if (!silent) bbRenderSelected();
+    return true;
+  }
+  function bbRemove(key) {
+    bbSel = bbSel.filter((s) => siteKey(s) !== key);
+    bbRenderSelected();
+  }
+
+  // Resolve one pasted line to a site object: a decimal `lat,lon[,name]`, else an
+  // exact station number, else an exact station name, else the best name match.
+  function bbResolveLine(line) {
+    const raw = (line || "").trim();
+    if (!raw) return null;
+    const parts = raw.split(",").map((x) => x.trim());
+    if (parts.length >= 2 && isFinite(Number(parts[0])) && isFinite(Number(parts[1])) &&
+        Math.abs(Number(parts[0])) <= 90 && Math.abs(Number(parts[1])) <= 180) {
+      const lat = Number(parts[0]), lon = Number(parts[1]);
+      return coordToSite(lat, lon, parts.slice(2).join(", "), stateFromCoords(lat, lon));
+    }
+    const byNum = DATA.stations.find((s) => String(s.station_num) === raw);
+    if (byNum) return stationToSite(byNum);
+    const low = raw.toLowerCase();
+    const exact = DATA.stations.find((s) => s.name.toLowerCase() === low);
+    if (exact) return stationToSite(exact);
+    const matches = searchStations(raw);
+    return matches.length ? stationToSite(matches[0]) : null;
+  }
+
+  function bbAddPaste() {
+    const ta = $("#bb-paste-text");
+    const lines = (ta.value || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    let added = 0;
+    const unresolved = [];
+    lines.forEach((line) => {
+      const site = bbResolveLine(line);
+      if (site && bbAdd(site, true)) added++;
+      else if (!site) unresolved.push(line);
+    });
+    bbRenderSelected();
+    ta.value = unresolved.join("\n"); // keep only the lines we couldn't place, to fix
+    const msg = $("#bb-paste-msg");
+    if (msg) {
+      const bits = [];
+      if (added) bits.push(`Added ${added} site${added > 1 ? "s" : ""}`);
+      if (unresolved.length) bits.push(`couldn't match ${unresolved.length} line${unresolved.length > 1 ? "s" : ""} (left above)`);
+      msg.textContent = bits.join(" · ") || "Nothing to add.";
+      msg.hidden = false;
+      msg.classList.toggle("err", unresolved.length > 0 && !added);
+    }
+  }
+
+  // Autocomplete inside the modal — mirrors the main station search but each pick
+  // adds to the selection (and clears the box) instead of loading the site.
+  function bbRenderAc(matches) {
+    const ul = $("#bb-results");
+    ul.innerHTML = "";
+    bbAcMatches = matches; bbAcIndex = -1;
+    if (!matches.length) { ul.hidden = true; return; }
+    matches.forEach((s, i) => {
+      ul.append(el("li", { "data-i": i, onmousedown: (e) => { e.preventDefault(); bbPick(s); } },
+        el("span", { class: "ac-name" }, s.name),
+        el("span", { class: "ac-meta" }, `${s.state || "?"} · ${(s.facility_types[0] || s.primary_facility || "site")}${s.station_num ? " · " + s.station_num : ""}`)));
+    });
+    ul.hidden = false;
+  }
+  function bbPick(s) {
+    bbAdd(stationToSite(s));
+    const input = $("#bb-search");
+    input.value = "";
+    $("#bb-results").hidden = true;
+    input.focus();
+  }
+  function bbStartBatch() {
+    if (!bbSel.length) { toast("Add at least one site first"); return; }
+    const sites = bbSel.slice();
+    closeBatchBuilder();
+    createBatchFromSites(sites);
+  }
+
+  function wireBatchBuilder() {
+    const openBtn = $("#btn-open-batch");
+    if (openBtn) openBtn.addEventListener("click", openBatchBuilder);
+    const ov = $("#batch-builder");
+    if (!ov) return;
+    $("#bb-close").addEventListener("click", closeBatchBuilder);
+    $("#bb-cancel").addEventListener("click", closeBatchBuilder);
+    ov.addEventListener("click", (e) => { if (e.target === ov) closeBatchBuilder(); }); // backdrop
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ov.classList.contains("show")) closeBatchBuilder(); });
+    $("#bb-create").addEventListener("click", bbStartBatch);
+    $("#bb-clear-sel").addEventListener("click", () => { bbSel = []; bbRenderSelected(); });
+    $("#bb-paste-add").addEventListener("click", bbAddPaste);
+
+    const search = $("#bb-search");
+    search.addEventListener("input", () => bbRenderAc(searchStations(search.value)));
+    search.addEventListener("focus", () => { if (search.value) bbRenderAc(searchStations(search.value)); });
+    search.addEventListener("keydown", (e) => {
+      const ul = $("#bb-results");
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (!ul.hidden && bbAcIndex >= 0) bbPick(bbAcMatches[bbAcIndex]);
+        else if (bbAcMatches.length) bbPick(bbAcMatches[0]); // Enter adds the top match
+        return;
+      }
+      if (ul.hidden) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        bbAcIndex += e.key === "ArrowDown" ? 1 : -1;
+        bbAcIndex = Math.max(0, Math.min(bbAcMatches.length - 1, bbAcIndex));
+        $$("#bb-results li").forEach((li, i) => li.classList.toggle("active", i === bbAcIndex));
+      } else if (e.key === "Escape") { ul.hidden = true; }
+    });
+    search.addEventListener("blur", () => setTimeout(() => { $("#bb-results").hidden = true; }, 120));
+  }
+
   // The report toolbar's "More ▾" overflow menu (Print / JSON / Copy summary).
   // Keeps the toolbar uncluttered now that Generate Report + Check report lead.
   function wireOverflowMenu() {
@@ -3537,6 +3760,7 @@
     if (batchClearBtn) batchClearBtn.addEventListener("click", () => {
       if (state.batch && confirm("Clear the batch list? Each site's saved work is kept — this only removes the batch grouping.")) clearBatch(false);
     });
+    wireBatchBuilder();
 
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");
