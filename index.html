@@ -49,6 +49,9 @@
     <section class="card" id="site-picker">
       <div class="card-head">
         <h2><span class="step">1</span> Choose a site</h2>
+        <div class="head-actions">
+          <button class="btn ghost" id="btn-open-batch" title="Pick several sites and assess them together as a batch">🗂 Batch multiple sites</button>
+        </div>
       </div>
       <div class="tabs" role="tablist">
         <button class="tab is-active" data-tab="by-name" role="tab">By station name</button>
@@ -245,6 +248,54 @@
     </div><!-- /col-right -->
    </div><!-- /split -->
   </main>
+
+  <!-- Batch builder — pick several sites, then start a batch. Selecting sites here
+       creates blank per-site assessments and lights up the batch tray above the
+       workspace (same machinery as an imported ess-findings-batch/1 file). -->
+  <div id="batch-builder" class="bb-overlay" hidden>
+    <div class="bb-dialog" role="dialog" aria-modal="true" aria-labelledby="bb-title">
+      <div class="bb-head">
+        <h2 id="bb-title">🗂 Build a batch</h2>
+        <button class="bb-close" id="bb-close" title="Close" aria-label="Close">✕</button>
+      </div>
+      <p class="bb-note">Add several sites, then start the batch. Each opens into its own assessment below and is saved separately, so you can work through them one at a time and <b>Check all</b> at the end.</p>
+
+      <div class="bb-body">
+        <label class="field-label" for="bb-search">Add by station name or number</label>
+        <div class="autocomplete">
+          <input id="bb-search" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="e.g. Woodgate, 540001, radar…" />
+          <ul id="bb-results" class="ac-list" hidden></ul>
+        </div>
+        <details class="bb-paste">
+          <summary>…or paste a list of sites</summary>
+          <p class="hint" style="margin:8px 0 5px">One site per line — a station name or number, or a decimal
+            <code>lat,lon</code> (optionally <code>lat,lon,Site name</code>). Same format as
+            <code>resolve.py --batch</code>.</p>
+          <textarea id="bb-paste-text" rows="4" placeholder="Woodgate
+540001
+-25.0891,152.5489,North tank"></textarea>
+          <button class="btn ghost" id="bb-paste-add" type="button" style="margin-top:8px">Add all</button>
+          <p class="hint bb-paste-msg" id="bb-paste-msg" hidden></p>
+        </details>
+      </div>
+
+      <div class="bb-selected">
+        <div class="bb-selected-head">
+          <span class="field-label" style="margin:0">Selected <span class="bb-count" id="bb-count"></span></span>
+          <button class="btn tiny ghost" id="bb-clear-sel" type="button" hidden>Clear all</button>
+        </div>
+        <div class="bb-chips" id="bb-chips">
+          <p class="bb-empty" id="bb-empty">No sites yet — search or paste above to add some.</p>
+        </div>
+      </div>
+
+      <div class="bb-foot">
+        <button class="btn ghost" id="bb-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="bb-create" type="button" disabled>Start batch</button>
+      </div>
+    </div>
+  </div>
 
   <!-- report render target for export/print -->
   <div id="print-root" aria-hidden="true"></div>

@@ -32,7 +32,10 @@ python3 -m http.server 8000
 Opening `index.html` directly with `file://` will **not** work (browsers block
 `fetch()` of the JSON data from the filesystem). Serve it, or publish to Pages.
 
-1. Type a station name/number, or switch to **By coordinates**.
+1. Type a station name/number, or switch to **By coordinates**. Doing several
+   sites? Click **🗂 Batch multiple sites** to pick a whole list at once (search
+   and add stations, or paste names/numbers or `lat,lon[,name]`, one per line) —
+   **Start batch** opens the picker bar and the first site, ready to work through.
 2. The site summary auto-populates (station #, WMO, state, delivery group,
    facility, lat/long) — this replicates the workbook's VLOOKUP autofill. A
    **satellite locator map** is generated automatically with a pin on the
@@ -95,13 +98,16 @@ feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT
   Best for batches. *(In a Claude Code session in this repo, the prompt's top
   note lets you run the `ess-collect` skill instead — same JSON — or just ask
   "Run an ESS for WOODGATE ALERT".)*
-  * **Batches.** For several sites, scaffold them all at once with
-    `resolve.py --batch sites.txt --template` (one station/number or
-    `lat,lon[,name]` per line) — it emits one `ess-findings-batch/1` object
-    (`{ sites: [ … ] }`). Fill each site, import the whole object, and the tool
-    shows a **batch picker bar**: one chip per site (with its found /
-    needs-attention counts, remembered across visits), each opening into the same
-    review/export surface, plus a **🔍 Check all** button that copies one combined
+  * **Batches.** Two ways to start a batch. In the browser, click **🗂 Batch
+    multiple sites** (top of **Choose a site**) to pick a list — search-and-add
+    stations, or paste names/numbers or `lat,lon[,name]`, one per line — and
+    **Start batch**. Or scaffold them all outside the browser with
+    `resolve.py --batch sites.txt --template` (same one-per-line format) — it
+    emits one `ess-findings-batch/1` object (`{ sites: [ … ] }`) for an agent to
+    fill and the **Import JSON** tab to load. Either way the tool shows a **batch
+    picker bar**: one chip per site (with its found / needs-attention counts,
+    remembered across visits), each opening into the same review/export surface,
+    plus a **🔍 Check all** button that copies one combined
     fact-and-consistency-check prompt covering every site. Ask a Claude Code
     session to "run an ESS for these sites: …" and it does the whole batch.
 - **BYOK in-browser (beta).** Click **🔑 Agent**, paste your **own** Anthropic

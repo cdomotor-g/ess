@@ -33,12 +33,17 @@ slice. Each backlog item names the files to touch and how to verify.
   governs it. Schema: optional `image_subjects[]` on species `collection_log`
   entries.
 - **Batch mode** — a `ess-findings-batch/1` envelope (`{ sites: [ <ess-findings/1>,
-  … ] }`) runs end-to-end: `resolve.py --batch` scaffolds many sites in one call
+  … ] }`) runs end-to-end, with two entry points into the same **batch picker bar**.
+  (1) **In the browser** — a **🗂 Batch multiple sites** button in the site picker
+  opens a modal (`#batch-builder`) to multi-select sites (search-and-add stations,
+  or paste a `resolve.py`-style list of names/numbers or `lat,lon[,name]`);
+  `createBatchFromSites` scaffolds a blank per-site state for each and opens the
+  first. (2) **From a file** — `resolve.py --batch` scaffolds many sites in one call
   (names/numbers or `lat,lon[,name]`, file or stdin; ambiguous/unresolved lines
   reported on stderr), the `ess-collect` skill fills each, and the browser's Import
-  JSON tab detects the array and shows a **batch picker bar** — one chip per site
-  with live found / needs-attention counts, persisted across visits, each opening
-  into the same review/export surface. **🔍 Check all** copies one combined
+  JSON tab detects the array. Either way the tray shows one chip per site with live
+  found / needs-attention counts, persisted across visits, each opening into the
+  same review/export surface. **🔍 Check all** copies one combined
   fact/consistency-check prompt for every site; **Clear batch** drops the grouping
   but keeps each site's saved work. To keep a large batch inside the localStorage
   quota, a loaded batch keeps each site's auto-generated satellite maps **in memory
