@@ -213,9 +213,15 @@
             <h2><span class="step">4</span> ESS report</h2>
             <div class="head-actions">
               <button class="btn primary" id="btn-download-html">⬇ Generate Report</button>
-              <button class="btn ghost" id="btn-print">🖨 Print Page</button>
-              <button class="btn ghost" id="btn-download-json">⬇ JSON</button>
-              <button class="btn ghost" id="btn-copy-summary">Copy summary</button>
+              <button class="btn ghost" id="btn-check-report" title="Copy a precise fact- &amp; consistency-check prompt for this finished report — paste it into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) to have it independently reviewed">🔍 Check report</button>
+              <div class="menu" id="report-more-menu">
+                <button class="btn ghost menu-toggle" id="btn-report-more" aria-haspopup="true" aria-expanded="false" title="More export options">More ▾</button>
+                <div class="menu-list" role="menu" hidden>
+                  <button class="menu-item" id="btn-print" role="menuitem">🖨 Print page</button>
+                  <button class="menu-item" id="btn-download-json" role="menuitem">⬇ JSON export</button>
+                  <button class="menu-item" id="btn-copy-summary" role="menuitem">📋 Copy summary</button>
+                </div>
+              </div>
             </div>
           </div>
           <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>

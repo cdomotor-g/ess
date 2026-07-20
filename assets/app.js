@@ -2967,6 +2967,104 @@
     flashButton((e && e.currentTarget) || $("#btn-copy-prompt"));
   }
 
+  // Render a finished report as compact plain text for an external reviewer.
+  // Mirrors what the exported report contains — internal / login-only sources are
+  // operator actions and stay out, exactly as buildReportHtml drops them.
+  function reportToPlainText(r) {
+    const s = r.site;
+    const L = [];
+    L.push(`SITE: ${s.name}`);
+    L.push(`Station #: ${s.station_num || "—"} · WMO: ${s.wmo || "—"} · State: ${s.state || "?"} · Delivery group: ${s.delivery_group || "—"}`);
+    L.push(`Facility: ${(s.facility_types || []).join(", ") || "—"} · Site maintenance: ${s.site_maintenance || "—"}`);
+    L.push(`Latitude: ${s.lat} · Longitude: ${s.lon} · Assessment date: ${s.assessment_date || "—"}`);
+    L.push(``, `REPORT SECTIONS`);
+    (r.sections || []).forEach((sec) => {
+      L.push(``, `## ${sec.title}`);
+      if (sec.choice) L.push(`Standardized statement: ${sec.choice}`);
+      if (sec.detail && sec.detail.trim()) L.push(sec.detail.trim());
+      if (sec.note && sec.note.trim()) L.push(sec.note.trim());
+      (sec.evidence_notes || []).forEach((e) => L.push(`  - evidence [${STATUS_LABEL[e.status] || e.status}] ${e.source}: ${e.note}`));
+      if (!sec.choice && !(sec.note && sec.note.trim()) && !(sec.evidence_notes && sec.evidence_notes.length)) L.push(`(no content recorded)`);
+    });
+    L.push(``, `COLLECTION LOG (sources checked)`);
+    (r.collection_log || []).filter((c) => !c.internal).forEach((c) => {
+      const detail = c.result_text || c.note;
+      L.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${detail ? " — " + detail : ""}`);
+    });
+    return L.join("\n");
+  }
+
+  // Build a precise, self-contained fact- & consistency-check prompt for a
+  // FINISHED report, to hand to any assistant. The output contract is
+  // deliberately rigid — a fixed four-section structure with tables and word
+  // caps — because some assistants (notably Microsoft 365 Copilot) otherwise
+  // return verbose, inconsistently-structured reviews. Takes a reportObject()-
+  // shaped object (default: the current site) so the batch flow can reuse it
+  // per site.
+  function buildReviewPrompt(report) {
+    const r = report || reportObject();
+    const s = r.site;
+    const flags = [];
+    (r.sections || []).forEach((sec) => (sec.warnings || []).forEach((w) => flags.push(`${sec.title} — ${w}`)));
+    const L = [];
+    L.push(`# Environmental Site Summary (ESS) — independent fact & consistency check`, ``);
+    L.push(`> In a Claude Code session in this project's repo you can instead just say "check this ESS report". Otherwise paste this whole message into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…).`, ``);
+    L.push(`## Your task`);
+    L.push(`You are a meticulous reviewer of an Australian **Environmental Site Summary (ESS)** — a desk-based assessment of the environmental, heritage and biosecurity matters near a site. A finished draft is provided under "The report". **Do not rewrite it.** Independently check it for (1) factual accuracy, (2) internal consistency, and (3) gaps, using web search where you are able. Then reply in the exact structure under "Output format" — and nothing else.`, ``);
+    L.push(`## What to check`);
+    L.push(`**Factual accuracy** (verify against authoritative / public sources where you can):`);
+    L.push(`- Geography — the coordinates (lat ${s.lat}, lon ${s.lon}) actually fall within the stated State/Territory (${s.state || "unstated"}); and the local council / region / weeds authority named in the report is the one that truly governs that location. Pasting another region's weed or pest list is a common error.`);
+    L.push(`- Species & communities — each named species or ecological community is a real taxon, and its stated conservation status (EPBC national and/or the relevant State Act) is correct and current.`);
+    L.push(`- Heritage & protected areas — named heritage places, Ramsar wetlands, marine parks and Indigenous Protected Areas exist and are genuinely at or near the site.`);
+    L.push(``);
+    L.push(`**Internal consistency** (read the report against itself — no web access needed):`);
+    L.push(`- Statement vs evidence — a section whose standardized statement says "There are no known…" must NOT carry evidence or a narrative that lists matters found; and a "…are present / known to occur" statement MUST be backed by named specifics.`);
+    L.push(`- Correct section — a threatened **plant** belongs under Threatened Flora, an **animal** under Threatened Fauna, an **ecological community / regional ecosystem** under Threatened Habitat. Flag anything filed in the wrong section.`);
+    L.push(`- Migratory ≠ threatened — listed migratory species are a separate matter of national significance; flag any lumped in with threatened fauna.`);
+    L.push(`- Buffer wording — a matter recorded only across the wider region/buffer should read "…in the local area" or "…in the region but not at the site", not "…at this site", unless there is an on-site record.`);
+    L.push(`- Unsupported hazards — anything asserted (e.g. acid sulfate soils) with no supporting source, especially for an inland / upland site.`);
+    L.push(``);
+    L.push(`**Gaps:** any source in the collection log left unchecked, or marked FAILED / MANUAL, that still needs a human; and any contradiction between the site header, the section narratives, and the collection log.`, ``);
+    if (flags.length) {
+      L.push(`### Automated flags the tool already raised (verify and extend — do not just repeat these)`);
+      flags.forEach((f) => L.push(`- ${f}`));
+      L.push(``);
+    }
+    L.push(`## The report`, ``, "```", reportToPlainText(r), "```", ``);
+    L.push(`## Output format — follow this EXACTLY`);
+    L.push(`Reply with ONLY the four numbered sections below, in this order, with these exact headings. No preamble, no restating the report, no closing summary, no praise, no emoji. Be terse — at most one sentence per table cell — and keep the whole reply under ~400 words excluding tables.`, ``);
+    L.push(`### 1. Verdict`);
+    L.push(`A single line: one of \`PASS\` / \`PASS WITH FIXES\` / \`NEEDS WORK\`, then " — " then a reason of 20 words or fewer.`, ``);
+    L.push(`### 2. Issues`);
+    L.push(`A Markdown table with exactly these columns and no others: \`# | Severity | Section | Issue | Recommended fix\`. Severity is High, Medium or Low. One row per issue, High first. If there are none, write exactly \`None.\` and omit the table.`, ``);
+    L.push(`### 3. Fact checks`);
+    L.push(`A Markdown table with exactly these columns and no others: \`Claim checked | Verdict | Source\`. Verdict is Confirmed, Refuted or Unverifiable. Include only claims material to the assessment (species, statuses, heritage places, geography, council/region) — maximum 12 rows. Cite the source name + URL you used. If you have no web access, mark every claim \`Unverifiable\`, source \`no web access\`, and say so in the Verdict line.`, ``);
+    L.push(`### 4. Outstanding / gaps`);
+    L.push(`A short bullet list of unchecked / failed / manual sources or unsupported claims still needing a human. If none, write exactly \`None.\``, ``);
+    L.push(`Rules: do NOT reproduce the report back to me; do NOT supply a fully rewritten report (recommend targeted fixes only); if you cannot verify a claim mark it \`Unverifiable\` — never guess or invent a source.`);
+    return L.join("\n");
+  }
+
+  function copyReviewPrompt(e) {
+    if (!state.site) { toast("Load a site first"); return; }
+    copy(buildReviewPrompt(), "Review prompt copied — paste it into your assistant");
+    flashButton((e && e.currentTarget) || $("#btn-check-report"));
+  }
+
+  // The report toolbar's "More ▾" overflow menu (Print / JSON / Copy summary).
+  // Keeps the toolbar uncluttered now that Generate Report + Check report lead.
+  function wireOverflowMenu() {
+    const menu = $("#report-more-menu");
+    if (!menu) return;
+    const toggle = $("#btn-report-more");
+    const list = menu.querySelector(".menu-list");
+    const setOpen = (open) => { list.hidden = !open; toggle.setAttribute("aria-expanded", open ? "true" : "false"); };
+    toggle.addEventListener("click", (e) => { e.stopPropagation(); setOpen(list.hidden); });
+    list.addEventListener("click", () => setOpen(false)); // close after choosing an item
+    document.addEventListener("click", (e) => { if (!menu.contains(e.target)) setOpen(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+  }
+
   function doImport() {
     const text = $("#import-text").value.trim();
     const file = $("#import-file").files && $("#import-file").files[0];
@@ -3195,6 +3293,8 @@
     $("#btn-download-html").addEventListener("click", downloadHtml);
     $("#btn-download-json").addEventListener("click", downloadJson);
     $("#btn-copy-summary").addEventListener("click", copySummary);
+    $("#btn-check-report").addEventListener("click", copyReviewPrompt);
+    wireOverflowMenu();
 
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");

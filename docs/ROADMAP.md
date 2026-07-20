@@ -32,6 +32,14 @@ slice. Each backlog item names the files to touch and how to verify.
   is high-precision (curated lists + scientific binomials only); a global toggle
   governs it. Schema: optional `image_subjects[]` on species `collection_log`
   entries.
+- **Report self-check prompt** — a **🔍 Check report** button (report toolbar)
+  builds a self-contained fact-and-consistency-check prompt for the finished
+  report and copies it for any assistant. The output contract is deliberately
+  rigid (verdict → issues table → fact-check table → gaps, with word caps) so
+  verbose/inconsistent assistants (e.g. 365 Copilot) return a usable review. It
+  folds in the tool's own consistency warnings and takes a `reportObject()`-shaped
+  object (`buildReviewPrompt`), so the batch flow reuses it per site. The toolbar's
+  less-used exports (Print / JSON / Copy summary) moved under a **More ▾** menu.
 - **Agent skill** — `ess-collect` with a deterministic `resolve.py` helper
   (incl. `--template` → the `ess-findings/1` skeleton) and a full playbook,
   emitting the same status taxonomy + JSON.

@@ -72,8 +72,13 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
    section's evidence plus standard wording (`data/statements.json`), and the tool
    **flags contradictions** — a statement that says "no known…" while the evidence
    came back *Found*, or a "matters present" statement with no supporting detail.
-   Export to **Print/PDF**, **HTML**, or **JSON** — photos and review flags travel
-   with the export (embedded, so the HTML/JSON stay self-contained).
+   Export to **Print/PDF**, **HTML**, or **JSON** (under **More ▾**) — photos and
+   review flags travel with the export (embedded, so the HTML/JSON stay
+   self-contained). When the report is finished, **🔍 Check report** copies a
+   precise fact-and-consistency-check prompt for that report — paste it into any
+   assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) for an independent
+   review with a fixed, terse output structure (verdict · issues table · fact-check
+   table · outstanding gaps).
 
 Your work is saved in the browser (localStorage) per site, so you can come back
 to it.
