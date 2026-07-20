@@ -188,6 +188,22 @@ textarea { resize: vertical; min-height: 62px; }
   .btn.flash { animation-duration: .3s; }
 }
 
+/* ---------- overflow menu (report toolbar "More ▾") ---------- */
+.menu { position: relative; display: inline-flex; }
+.menu-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  min-width: 168px; padding: 6px; margin: 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px;
+}
+.menu-list[hidden] { display: none; }
+.menu-item {
+  font: inherit; font-weight: 600; text-align: left; white-space: nowrap;
+  padding: 8px 10px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+
 /* ---------- summary grid ---------- */
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 26px; background: var(--surface-2); border-radius: 10px; padding: 14px 16px; }
 .summary-item { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
