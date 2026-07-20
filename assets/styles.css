@@ -369,6 +369,11 @@ a.photo-credit:hover { text-decoration: underline; }
 .rsection .r-field { margin-bottom: 10px; }
 .rsection .evidence { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
 .rsection .evidence .chip { margin-right: 4px; }
+.rsection .r-actions { margin: -4px 0 10px; }
+.btn-mini { font: inherit; font-size: 12px; font-weight: 600; border-radius: 7px; padding: 4px 10px; border: 1px dashed var(--line); background: var(--surface-2); color: var(--ink-soft); cursor: pointer; }
+.btn-mini:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+.rsection .r-warns:empty { display: none; }
+.rsection .r-warn { font-size: 12px; font-weight: 600; color: var(--failed); background: var(--failed-bg); border-radius: 7px; padding: 6px 10px; margin: 0 0 10px; }
 .report-map { margin: 0; }
 .report-map img { display: block; width: 100%; max-width: 420px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
 .report-map figcaption { font-size: 11px; color: var(--ink-soft); margin-top: 6px; }
@@ -510,3 +515,4 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 #print-root .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
 #print-root .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
 #print-root .pr .pr-map-cap { font-size: 10px; color: #444; margin: 4px 0 0; }
+#print-root .pr .pr-warn { font-size: 10px; font-weight: 700; color: #b3261e; background: #fbe6e4; border-radius: 4px; padding: 4px 7px; margin: 5px 0 0; }

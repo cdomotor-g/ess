@@ -40,6 +40,14 @@ def load(name):
         return json.load(f)
 
 
+def load_optional(name, default=None):
+    """Like load(), but returns default if the file is absent (e.g. an older checkout)."""
+    try:
+        return load(name)
+    except FileNotFoundError:
+        return default
+
+
 def find_station(stations, q):
     q = str(q).strip().lower()
     exact = [s for s in stations if s["name"].lower() == q or str(s["station_num"]) == q]
@@ -197,7 +205,8 @@ def main():
         return
 
     payload = {"site": site, "sources": srcs, "epbc_matters": sources.get("epbc_matters", []),
-               "dropdowns": load("dropdowns.json")}
+               "dropdowns": load("dropdowns.json"),
+               "statements": load_optional("statements.json", {})}
 
     if a.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -225,7 +234,9 @@ def main():
         print(f"      URL: {x['url']}")
         if x["web_search"]:
             print(f"      web_search: {x['web_search']}")
-    print("\nStandardized proforma wording is in data/dropdowns.json (use --json to include it).")
+    print("\nStandardized proforma wording is in data/dropdowns.json, and the")
+    print("narrative templates (GBO text, koala district, duty-of-care, impact")
+    print("sentence) are in data/statements.json (use --json to include both).")
 
 
 if __name__ == "__main__":

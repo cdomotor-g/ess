@@ -62,11 +62,18 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      **Matters of National Environmental Significance** down to a text summary in
      the notes — heritage, Ramsar, GBRMP and marine areas in full; threatened
      **communities and species filtered to those recorded as "Known"** (Likely/May
-     are counted but not listed).
+     are counted but not listed). It also **drafts the Threatened Habitat / Flora /
+     Fauna section narratives** from that split (communities → habitat, plants →
+     flora, animals + migratory → fauna), so the report body reads like a
+     hand-written one — without overwriting anything you've already typed.
 4. The **ESS report** section fills with the standardized proforma wording,
-   your collection evidence, and any attached photos. Export to **Print/PDF**,
-   **HTML**, or **JSON** — photos travel with the export (embedded, so the
-   HTML/JSON stay self-contained).
+   your collection evidence, and any attached photos. Each section has an
+   **✨ Insert suggested detail** button that drafts a paragraph from that
+   section's evidence plus standard wording (`data/statements.json`), and the tool
+   **flags contradictions** — a statement that says "no known…" while the evidence
+   came back *Found*, or a "matters present" statement with no supporting detail.
+   Export to **Print/PDF**, **HTML**, or **JSON** — photos and review flags travel
+   with the export (embedded, so the HTML/JSON stay self-contained).
 
 Your work is saved in the browser (localStorage) per site, so you can come back
 to it.
@@ -144,7 +151,8 @@ assets/app.js, styles.css      Tool logic + styling (vanilla, no dependencies)
 data/
   stations.json                ~6,600 Bureau sites (name -> metadata + refs)
   sources.json                 Extensible registry of every ESS search source
-  dropdowns.json               Standardized proforma statement lists
+  dropdowns.json               Standardized proforma statement lists (build-generated)
+  statements.json              Narrative templates (GBO, koala, duty-of-care…) — hand-authored
   reference/                   Weeds list, disease notes
   meta.json                    Build provenance (source hash, counts, date)
 build/
@@ -164,7 +172,9 @@ docs/                          Architecture, roadmap, how to add a source, mappi
 - [Adding a source](docs/ADDING-A-SOURCE.md) — extend the registry (the main way
   this grows).
 - [Proforma mapping](docs/PROFORMA-MAPPING.md) — how tool output maps back to the
-  ESS spreadsheet.
+  ESS spreadsheet, including the section narratives and consistency warnings.
+- [Human ESS vs the workbench](docs/HUMAN-VS-WORKBENCH.md) — assessment of real
+  staff-completed ESS documents against the tool, and the improvements it drove.
 
 ## Scope & honesty
 

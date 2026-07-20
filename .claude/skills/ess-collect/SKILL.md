@@ -217,13 +217,62 @@ The skeleton already has the `site` block, every applicable source pre-listed in
   each, so a reviewer sees what they're looking for. Leave it `[]` for
   none/failed/manual or where you can't name the subject.
 - For **each `section`**: set `choice` to the exact standardized statement from
-  `data/dropdowns.json` (the "known…" variant when that section's sources were
-  FOUND, else the "no known…" variant), and add any free-text in `note`. For the
+  `data/dropdowns.json`, and write a real **narrative** in `note` (see 3c — this
+  is what makes the output match a human's, not just a one-line verdict). For the
   `biosecurity` section, put the declaration text (from
   `dropdowns.json.biosecurity_detail`) in `detail`.
 
 Emit the completed object as a fenced ```json block (and/or write it to a file)
 so it can be copied into the tool verbatim.
+
+### 3c. Writing the section narratives (match the human depth)
+
+A good ESS section is a short paragraph, not a single sentence. Reusable
+standardized wording lives in **`data/statements.json`** (GBO text per state, the
+impact-assessment sentence, the koala-district note, duty-of-care, the migratory
+note). Use it. The browser tool auto-drafts these on PMST import and via the
+"Insert suggested detail" button; when you run headless, write them yourself:
+
+- **Threatened Habitat / Flora / Fauna** — split the PMST result across the three
+  sections the way the samples do. Habitat ← threatened ecological communities;
+  Flora ← threatened *plants*; Fauna ← threatened *animals*. Group by category
+  (Critically Endangered → Endangered → Vulnerable) and name the species. Close
+  flora/fauna with the impact-assessment sentence
+  (`statements.json.impact_boilerplate`). Put **listed migratory species** in a
+  sentence of their own — they are a *separate* matter of NES, not "threatened".
+- **Choice wording — read the buffer.** A PMST/ALA result over a 50 km buffer
+  speaks to the *wider region*, so choose the **"…found in the local area"** option
+  (the third in each list), **not** "…at this site", unless you have an on-site
+  record. This is the single most common human error (see below).
+- **Koala (QLD)** — when a koala is among the fauna, add the Koala Conservation
+  Plan note and link from `statements.json.koala` (districts A/B cover South East
+  Queensland; the rest of the State is district C, where the sequential clearing
+  rules do not apply).
+- **Biosecurity** — add the General Biosecurity Obligation paragraph for the
+  **site's state** (`statements.json.general_biosecurity_obligation[STATE]`) after
+  the chosen treatment level. (The browser tool auto-seeds this into the
+  Biosecurity section, so keep it there — not under Additional Information — to
+  match the tool and avoid duplication.)
+- **Additional Information** — mention acid sulfate soils only if the
+  acid-sulfate-soils source actually indicates they are likely (coastal/estuarine,
+  low-lying) — do **not** assert it for inland/upland sites.
+- **Invasive Plants / Animals** — resolve the **actual local council / region** for
+  the site and list *its* priority/declared species with the council's link. Do
+  not paste another region's list.
+- **Indigenous Protected Areas & Heritage** — name the Traditional Owner group and
+  any contact where you can identify it, and add the cultural-heritage duty-of-care
+  sentence (`statements.json.duty_of_care`).
+
+### Common mistakes to avoid (seen in real staff-completed ESS)
+
+1. **Never let the standardized statement contradict the evidence.** If you write a
+   paragraph listing found species, the statement must not say "There are no
+   known…". The browser tool flags this; you should not produce it.
+2. **Do not paste another region's council content.** Confirm the council/region
+   that actually contains the site before listing weeds/pests.
+3. **Do not assert acid sulfate soils** (or any generic hazard) without a source.
+4. **Do not file migratory species under threatened fauna** — they are separate.
+5. Prefer "…in the local area" over "…at this site" for buffer-based findings.
 
 ### 3b. The human summary (required)
 
@@ -250,8 +299,8 @@ present within or immediately adjacent to the site." option when records exist
 only across the wider region/locality; and the "no known …" option otherwise.
 File each threatened taxon under the correct section (flora vs fauna vs habitat —
 see Step 2). For Biosecurity, `biosecurity_detail` maps the chosen level to its
-full declaration text. For QLD sites the `additional` section is pre-seeded in
-the browser tool with the general biosecurity obligation (GBO) text.
+full declaration text, and the browser tool pre-seeds the **Biosecurity** section
+note with the general biosecurity obligation (GBO) text for the site's state.
 
 ## Honesty rules
 
