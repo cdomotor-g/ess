@@ -2206,15 +2206,6 @@
   // section and stay in sync without any copy/paste going stale.
   function renderIncludeRow(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
-    // Internal / login-only sources are operator working items only — their notes
-    // are staff instructions ("check internal system X"), never ESS report content,
-    // so they can't be added to a report section and get an explainer instead of
-    // the Include controls.
-    if (src.internal) {
-      return el("div", { class: "include-row is-internal" },
-        el("span", { class: "inc-lead" }, "🔒 Internal check"),
-        el("span", { class: "inc-internal-note" }, "For the operator only — kept out of the ESS report. Record it here so it's actioned before the site visit."));
-    }
     const included = cardIncluded(f);
     const target = targetSectionOf(src, f);
     const sel = el("select", { class: "inc-target",

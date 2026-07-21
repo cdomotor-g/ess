@@ -390,8 +390,6 @@ a.photo-credit:hover { text-decoration: underline; }
 .include-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
   padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
 .include-row.is-in { border-style: solid; border-color: var(--reviewed); background: var(--reviewed-bg); }
-.include-row.is-internal { border-style: solid; border-color: var(--manual); background: var(--manual-bg); }
-.include-row .inc-internal-note { font-size: 12px; color: var(--manual); }
 .include-row .inc-lead { font-size: 12px; font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
 .include-row .inc-target { flex: 1; min-width: 130px; width: auto; padding: 6px 9px; font-size: 12.5px; }
 .include-row .inc-btn { white-space: nowrap; }
