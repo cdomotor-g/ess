@@ -126,11 +126,14 @@ See [`.claude/skills/ess-collect/SKILL.md`](.claude/skills/ess-collect/SKILL.md)
 The whole thing is static — no build step.
 
 1. Push this repo (or merge to your default branch).
-2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
-   The included workflow ([`.github/workflows/pages.yml`](.github/workflows/pages.yml))
-   deploys the repo root on every push to `main`.
-   *(Alternatively choose **Deploy from a branch → main → / (root)** — a
-   `.nojekyll` file is included so all `data/` and `assets/` files serve as-is.)*
+2. **Settings → Pages → Build and deployment → Source: Deploy from a branch →
+   `main` → `/ (root)`.** A `.nojekyll` file is included so every `data/` and
+   `assets/` file serves as-is. GitHub's built-in builder publishes the repo
+   root on each push to `main` — there is no custom workflow to maintain.
+   *(Do **not** also add a "GitHub Actions" Pages workflow: running both the
+   branch builder and an Actions deploy makes them race for the same
+   deployment, and merges intermittently fail with "No artifacts named
+   github-pages". Pick one source and leave it.)*
 3. Your tool is live at `https://<user>.github.io/<repo>/`.
 
 > **Before you publish:** `data/stations.json` contains ~6,600 Bureau site names
@@ -179,7 +182,7 @@ build/
   source/                      (git-ignored) drop the raw workbook here
 .claude/skills/ess-collect/    Agent skill: SKILL.md + resolve.py helper
 docs/                          Architecture, roadmap, how to add a source, mapping
-.github/workflows/pages.yml    GitHub Pages deploy
+.nojekyll                      Serve data/ & assets/ as-is (Pages, no Jekyll)
 ```
 
 ## Documentation
