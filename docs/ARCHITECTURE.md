@@ -123,6 +123,17 @@ collection card.
   is read once per open and matched by name; a `fallback` id is a last resort.
   A layer that resolves to nothing is **withheld** and says so — in the panel
   and in the diagnostics — rather than silently drawing the wrong dataset.
+- **The aerial imagery goes on the map *before* the `MapView` is constructed.**
+  This ordering is load-bearing, not cosmetic. A 2D `MapView` takes its spatial
+  reference from, in order, an explicit `spatialReference`, the basemap, then the
+  first layer on the map — and there is no Esri basemap to lean on here, because
+  those need an API key. Built over an empty `Map` the view never resolves a
+  projection, so it creates no layer views, never reaches `ready`, and
+  `view.when()` never settles: the modal times out with *"the map could not
+  start"* while every layer still reads `pending`. If the ImageServer is
+  unreachable the view is told the projection outright (Web Mercator) and opens
+  without a base picture, rather than leaving a dead modal. The diagnostics print
+  the view's projection so this state names itself.
 - **One `MapImageLayer` per service, not per layer.** Forty-odd catalogue
   entries map onto ~15 services; drawing each as its own layer would be forty
   `exportImage` round-trips per pan. Toggling a layer flips one sublayer's

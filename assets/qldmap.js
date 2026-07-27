@@ -90,7 +90,13 @@
     detailMinScale: 20000,
     // Everything external is bounded. The Esri bundle is a much bigger download
     // than a service metadata call, so it gets more headroom — still bounded.
-    timeouts: { esri: 15000, meta: 9000, layer: 12000, view: 9000 },
+    // `viewReady` is deliberately LONGER than `layer`: the view takes its
+    // projection from the imagery layer, so it must not be declared wedged
+    // while that layer's own bound is still running (see readyView).
+    timeouts: { esri: 15000, meta: 9000, layer: 12000, view: 9000, viewReady: 14000 },
+    // The projection these Queensland basemap/tile services publish in, named
+    // outright only when the imagery has failed to hand the view one.
+    fallbackWkid: 102100,
     thematicOpacity: 0.62,
     // Draw order (lower = further down the stack). Pins live in view.graphics
     // and are always above every layer here.
@@ -334,9 +340,10 @@
           if (!window.require) { reject(new Error("Esri loader did not initialise")); return; }
           window.require([
             "esri/Map", "esri/views/MapView", "esri/layers/ImageryTileLayer", "esri/layers/ImageryLayer",
-            "esri/layers/MapImageLayer", "esri/Graphic", "esri/core/reactiveUtils", "esri/widgets/ScaleBar",
-          ], (Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, reactiveUtils, ScaleBar) => {
-            M.esri = { Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, reactiveUtils, ScaleBar };
+            "esri/layers/MapImageLayer", "esri/Graphic", "esri/geometry/SpatialReference",
+            "esri/core/reactiveUtils", "esri/widgets/ScaleBar",
+          ], (Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, reactiveUtils, ScaleBar) => {
+            M.esri = { Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, reactiveUtils, ScaleBar };
             resolve(M.esri);
           }, reject);
         };
@@ -520,20 +527,33 @@
     }
   }
 
-  async function loadImagery(map) {
+  // The aerial base. Tagged with its z-order at construction because it goes on
+  // the map BEFORE the view exists (see buildView) rather than through
+  // insertOrdered(), and everything else still has to stack above it.
+  function newImageryLayer(Cls) {
+    const layer = new Cls({ url: IMAGERY_URL, title: "Queensland aerial imagery" });
+    layer.__z = CFG.z.imagery;
+    return layer;
+  }
+
+  // `imagery` is ALREADY on the map — buildView put it there so the view had a
+  // projection to adopt. This reports its outcome and, if the tile cache is
+  // unavailable, swaps in the slower dynamic layer.
+  async function loadImagery(map, imagery) {
     const start = now();
     // The ImageServer publishes a fused tile cache, so ImageryTileLayer (which
     // reads the pre-built /tile/{z}/{y}/{x}) is right and much faster than a
     // dynamic exportImage per pan. A dynamic ImageryLayer is the fallback.
     try {
-      const imagery = new M.esri.ImageryTileLayer({ url: IMAGERY_URL, title: "Queensland aerial imagery" });
       await withTimeout(imagery.load(), CFG.timeouts.layer, "Aerial imagery (ImageServer)");
-      insertOrdered(map, imagery, CFG.z.imagery);
       setDiag("imagery", { status: "loaded", ms: Math.round(now() - start), mode: "ImageryTileLayer (tiled)" }, "Aerial imagery loaded (tiled).");
       return imagery;
     } catch (e) {
+      // A tiled layer that never loaded contributes nothing but a projection the
+      // view may still be waiting on — take it off the map before trying again.
+      try { map.remove(imagery); } catch (_) {}
       try {
-        const dyn = new M.esri.ImageryLayer({ url: IMAGERY_URL, title: "Queensland aerial imagery" });
+        const dyn = newImageryLayer(M.esri.ImageryLayer);
         await withTimeout(dyn.load(), CFG.timeouts.layer, "Aerial imagery (ImageServer, dynamic)");
         insertOrdered(map, dyn, CFG.z.imagery);
         setDiag("imagery", { status: "loaded", ms: Math.round(now() - start), mode: "ImageryLayer (dynamic fallback)" }, "Tiled imagery unavailable; loaded the slower dynamic imagery instead.");
@@ -544,6 +564,47 @@
         banner(`Aerial imagery did not load (${e.message}). Layers and the pin still draw.`, "error");
         return null;
       }
+    }
+  }
+
+  /* ---- getting the view to `ready` --------------------------------------
+     A 2D MapView takes its spatial reference from, in order of precedence: an
+     explicit `spatialReference`, the basemap, then the FIRST LAYER on the map.
+     Until it has one it cannot resolve `zoom` into a scale, creates no layer
+     views, and never reaches `ready` — so `view.when()` never settles and the
+     modal reports "the map could not start" while every layer still says
+     "pending". Normally the imagery layer buildView added supplies it.
+
+     If the ImageServer is unreachable that source never arrives, so rather than
+     leave the operator with a dead modal the projection is named outright on a
+     second attempt. It costs nothing at that point: the base image is already
+     gone, and the thematic layers are dynamic MapImageLayers, which the ArcGIS
+     servers reproject server-side on export. */
+  async function readyView(view, imageryDone) {
+    // The wait ends at whichever comes first: the view coming up, the imagery
+    // giving up entirely (nothing else is going to hand this view a projection,
+    // so there is no point sitting out the rest of the bound), or the bound.
+    let imagerySaidSo = false;
+    const lostProjection = Promise.resolve(imageryDone).then((layer) => {
+      if (layer) return new Promise(() => {});
+      imagerySaidSo = true;   // loadImagery has already put a banner up
+      throw new Error("the aerial imagery did not load, so nothing supplied the map's projection");
+    });
+    try {
+      await withTimeout(Promise.race([view.when(), lostProjection]), CFG.timeouts.viewReady, "Map view");
+      if (view.ready) { dlog("Map view ready."); return view; }
+      throw new Error("the map view has not come up");
+    } catch (err) {
+      if (view.ready) { dlog("Map view ready."); return view; }
+      if (view.destroyed) throw err;
+      dlog(`The map view has no projection yet (${err.message}). Naming Web Mercator outright and trying once more.`);
+      try { view.spatialReference = new M.esri.SpatialReference({ wkid: CFG.fallbackWkid }); } catch (_) {}
+      await withTimeout(view.when(), CFG.timeouts.view, "Map view (without the aerial imagery)");
+      dlog(`Map view ready on Web Mercator (wkid ${CFG.fallbackWkid}).`);
+      // Don't say it twice: when the imagery reported its own failure it has
+      // already told the operator the base picture is missing.
+      if (!imagerySaidSo) banner("The map opened without a base picture — the aerial imagery did not supply the map projection in time. The station pin and the layers still draw.", "warn");
+      return view;
     }
   }
 
@@ -615,12 +676,23 @@
      Constructed AT the station coordinate so the framing never depends on an
      async step completing, the loading overlay clears on view.when() and
      nothing else, then the layers stream in underneath. None of them block the
-     already-open modal. */
+     already-open modal.
+
+     THE ORDER HERE IS LOAD-BEARING: the imagery layer goes on the map BEFORE
+     the MapView is constructed, because that layer is where the view gets its
+     spatial reference (readyView explains what happens without one — it is the
+     difference between this modal opening and it timing out). There is no Esri
+     basemap to lean on instead; those need an API key. This is the same
+     ordering the SoRT site map uses. */
   async function buildView(container) {
     const E = M.esri;
     const map = new E.Map();
     M.esriMap = map;
     M.svcLayers = {};
+
+    // On the map before the view exists. Its load outcome is reported below.
+    const imagery = newImageryLayer(E.ImageryTileLayer);
+    map.add(imagery);
 
     const view = new E.MapView({
       container, map,
@@ -631,7 +703,12 @@
     });
     M.view = view;
     dlog(`Constructing the map view at the station coordinate ${fmtCoord(M.site.lat, M.site.lon)} (zoom ${CFG.anchorZoom}).`);
-    await withTimeout(view.when(), CFG.timeouts.view, "Map view");
+    // Started, not awaited: the view needs only the layer's PROJECTION to come
+    // alive, so the modal must not sit behind a whole base image before it
+    // opens. readyView is handed the promise so it can stop waiting early if
+    // the imagery gives up.
+    const imageryDone = loadImagery(map, imagery);
+    await readyView(view, imageryDone);
 
     hideStatus();
     setProgress(0.3, "Drawing layers…");
@@ -650,7 +727,10 @@
     E.reactiveUtils.watch(() => view.updating, (u) => { if (!u) settleProgress(); });
     E.reactiveUtils.watch(() => view.scale, updateScaleHint);
 
-    await loadImagery(map);
+    // The imagery is left to finish in the background: it reports its own
+    // outcome, and insertOrdered keys off z-order rather than arrival order, so
+    // it slides under everything else whenever it lands. The thematic layers
+    // must not queue behind a slow base image.
     setProgress(0.45, "Drawing layers…");
     return view;
   }
@@ -1136,6 +1216,11 @@
       let drawing = 0, total = 0;
       try { const a = view.allLayerViews.toArray(); total = a.length; drawing = a.filter((lv) => lv.updating).length; } catch (_) {}
       L.push(`  suspended:${!!view.suspended} ready:${view.ready !== false} updating:${!!view.updating} size:${view.width || 0}×${view.height || 0}`);
+      // A view with no projection can never become ready, draws nothing and
+      // creates no layer views — say so here rather than leave a bare
+      // "ready:false" to be puzzled over.
+      const sr = view.spatialReference;
+      L.push(`  projection:   ${sr && sr.wkid ? `wkid ${sr.wkid}` : sr ? "set (no wkid)" : "** none — the view cannot become ready until a layer or an explicit spatialReference gives it one **"}`);
       L.push(`  layer views: ${total} total, ${drawing} still drawing`);
     } else L.push("  (no view)");
     L.push("");
@@ -1292,8 +1377,17 @@
       renderCaptureCard();
       renderDiagnostics();
     } catch (err) {
+      // A view that never came up must not be kept: re-opening the modal takes
+      // the "already built" path, which would skip buildView entirely and leave
+      // the operator with a permanently blank map — no error, no retry — even
+      // once the service is back. Throw it away so the next open rebuilds.
+      if (M.view && !M.view.ready) {
+        try { M.view.destroy(); } catch (_) {}
+        M.view = null; M.esriMap = null; M.svcLayers = {}; M.pinGraphic = null;
+      }
       setProgress(1, "");
       showStatus(`<div class="qm-offline"><b>🗺️ The map could not start.</b><span>${esc(err.message || "Could not load the map.")}</span><span>Open “Map diagnostics” in the panel for the detail.</span></div>`);
+      renderFurniture();
       renderDiagnostics();
     }
   }
