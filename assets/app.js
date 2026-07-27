@@ -1638,7 +1638,9 @@
     for (const cat of cats) {
       const inCat = list.filter((s) => s.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
       if (!inCat.length) continue;
-      const group = el("div", { class: "group" });
+      // id + --cat are what the nav rail jumps to and colours itself with.
+      const group = el("div", { class: "group", "data-cat": cat.id, id: `group-${cat.id}` });
+      group.style.setProperty("--cat", `var(--cat-${cat.id})`);
       group.append(el("div", { class: "group-head" },
         el("h3", {}, cat.label),
         el("span", { class: "g-count" }, `${inCat.length}`),
