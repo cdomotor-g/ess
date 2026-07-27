@@ -27,17 +27,10 @@
     threatened: "e.g. Koala, Wollemi pine…",
   };
 
-  // Queensland Globe's catalogue uses long, easily-confused layer names. The
-  // capture assistant keeps the commonly required ESS layers in one searchable
-  // legend, grouped and colour keyed. These are reference/selection aids (the
-  // authoritative symbology remains the legend shown inside Queensland Globe).
-  const QLD_GLOBE_LAYERS = [
-    ["Vegetation & habitat", "#2e7d32", ["Protected plants trigger map", "Essential habitat map", "Category A or B — endangered regional ecosystems", "Category A or B — of concern regional ecosystems", "Category C or R — endangered regional ecosystems", "Category C or R — of concern regional ecosystems", "MSES regulated vegetation — category B, endangered or of concern", "MSES regulated vegetation — category C, endangered or of concern", "MSES regulated vegetation — category R, GBR riverine", "MSES regulated vegetation — essential habitat", "MSES regulated vegetation — 100 m from wetland"]],
-    ["Protected places", "#6a1b9a", ["Protected areas", "Special wildlife reserve", "Protected areas and forests", "Wet tropics area", "Great Barrier Reef region (indicative)", "Marine park (non-general use zone)", "MSES protected area — estates", "MSES protected area — special wildlife reserves", "MSES protected area — nature refuges", "MSES marine park — highly protected", "MSES legally secured offset area — offset register", "MSES legally secured offset area — vegetation offsets", "MSES strategic environmental area — designated precinct"]],
-    ["Wildlife habitat", "#ef6c00", ["Koala priority area", "Core koala habitat area", "Locally refined koala habitat area", "MSES wildlife habitat — endangered or vulnerable", "MSES wildlife habitat — special least concern animal", "MSES wildlife habitat — SEQ koala habitat, core", "MSES wildlife habitat — SEQ koala habitat, locally refined", "MSES wildlife habitat — sea turtle nesting areas"]],
-    ["Water & wetlands", "#0277bd", ["Fish habitat area", "MSES declared fish habitat area — A and B areas", "MSES regulated vegetation — defined watercourse", "MSES declared high ecological value waters — watercourse", "MSES declared high ecological value waters — wetland", "MSES high ecological significance wetlands", "Wetlands of high ecological significance", "Prescribed and protected watercourses"]],
-    ["Reference", "#546e7a", ["Trigger area", "Imagery", "Map labels", "Population centres", "Road and rail"]],
-  ];
+  // The Queensland Globe site map (assets/qldmap.js) owns the layer catalogue —
+  // it is the thing that has to resolve each layer against the live QLD
+  // services, so it is also the only sensible place for the list to live. app.js
+  // just persists which layers were ticked and what the capture recorded.
 
   // Global preference: auto-source reference photos for the species/subjects
   // identified in a card's findings (from note edits, imports, and agent runs).
@@ -200,6 +193,11 @@
     // km/labels are persisted (text key); image is persisted (image key); status/
     // error are transient. freshMaps() seeds the defaults for a new site.
     maps: freshMaps(),
+    // Queensland Globe site map (QLD sites only): which layers are ticked, and
+    // the record of the last capture added to the report. `capture.layers` is
+    // what the report appendix lists — deliberately kept out of the picture and
+    // out of the report body, because there are far too many layers for either.
+    qldMap: { selection: null, capture: null },
     date: "",
     maintenance: "",
     filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
@@ -902,6 +900,7 @@
     state.report = {};
     state.siteImages = [];
     state.maps = freshMaps();
+    state.qldMap = { selection: null, capture: null };
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
     state.filterAttention = false;
@@ -994,6 +993,28 @@
       const rs = state.report[sec.id] || (state.report[sec.id] = { choice: null, note: "" });
       if (!rs.note || !rs.note.trim()) rs.note = def;
     });
+    // Rehydrate the Queensland Globe map appendix. It travels as its own object
+    // so an imported report still lists the layers the map was drawn from, even
+    // when the picture itself didn't survive the round trip.
+    const qg = json.qld_globe_map || (si && si.qld_globe_map);
+    state.qldMap = { selection: null, capture: null };
+    if (qg && typeof qg === "object") {
+      const selection = Array.isArray(qg.selection) ? qg.selection
+        : (Array.isArray(qg.layers) ? qg.layers.map((l) => l.id).filter(Boolean) : null);
+      // Prefer the file's own layer descriptions. A file that recorded only the
+      // ticked ids (hand-written, or an older export) still gets a real appendix
+      // by resolving those ids against the map module's catalogue.
+      let layers = Array.isArray(qg.layers) && qg.layers.length ? qg.layers : null;
+      if (!layers && selection && selection.length && window.ESSQldMap)
+        layers = window.ESSQldMap.describe(selection);
+      state.qldMap = {
+        selection,
+        capture: (layers && layers.length)
+          ? { at: qg.captured_at ? Date.parse(qg.captured_at) || Date.now() : Date.now(), caption: qg.caption || "",
+            lat: qg.lat, lon: qg.lon, scale: qg.scale, pin_in_view: qg.pin_in_view !== false, layers }
+          : null,
+      };
+    }
     state.date = si.assessment_date || new Date().toISOString().slice(0, 10);
     state.maintenance = si.site_maintenance || "";
     state.filterAttention = false;
@@ -1873,142 +1894,57 @@
     nodes.forEach((node) => railObserver.observe(node));
   }
 
-  // Queensland Globe blocks cross-origin embedding, so open the aimed map in its
-  // own tab. The operator can capture that tab with the Screen Capture API or paste
-  // / upload a screenshot; the prepared JPEG then follows the card's normal
-  // persistence, report-preview and export paths.
-  function openQldGlobeCapture(src) {
+  /* ------------------------------------------------------- Queensland Globe map
+     The "Open site map" button on the Queensland Globe card hands off to
+     assets/qldmap.js, which draws a real ArcGIS map of the site over the
+     published Queensland Government services. Everything the operator does in
+     there comes back through two callbacks:
+       onChange — the layer ticks; persisted so re-opening restores the stack
+       onAdd    — a captured map: the picture goes into the card's images (so it
+                  follows the normal report/export path) and the LAYER LIST goes
+                  into state.qldMap.capture, which the report renders as an
+                  appendix rather than cluttering the body or the picture.
+     A site outside Queensland never gets the button, so this is only ever
+     reached for QLD sites. */
+  function openQldGlobeMap(src) {
     if (!state.site || state.site.state !== "QLD") return;
-    let sourceImage = null;
-    // Start with the full ESS layer set enabled: the point of this workflow is to
-    // save the operator from rebuilding a large Queensland Globe layer stack.
-    const selected = new Set(QLD_GLOBE_LAYERS.flatMap((group) => group[2]));
-    const globeUrl = `${buildUrl(src)}?topic=environment&lat=${encodeURIComponent(state.site.lat)}` +
-      `&lon=${encodeURIComponent(state.site.lon)}&zoom=13&layers=${encodeURIComponent(Array.from(selected).join(","))}`;
-
-    const overlay = el("div", { class: "qg-overlay show", role: "presentation" });
-    const dialog = el("div", { class: "qg-dialog", role: "dialog", "aria-modal": "true", "aria-labelledby": "qg-title" });
-    const close = () => { document.removeEventListener("keydown", onKey); overlay.remove(); };
-    const onKey = (e) => { if (e.key === "Escape") close(); };
-    document.addEventListener("keydown", onKey);
-    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
-
-    const canvas = el("canvas", { class: "qg-canvas", "aria-label": "Prepared Queensland Globe map preview" });
-    const empty = el("div", { class: "qg-empty" }, "Open Queensland Globe, adjust the map, then capture its tab or add a screenshot.");
-    const preview = el("div", { class: "qg-preview" }, empty, canvas);
-    const legendList = el("div", { class: "qg-layer-list" });
-    const search = el("input", { type: "search", class: "qg-search", placeholder: "Filter layers…", "aria-label": "Filter Queensland Globe layers" });
-    const titleInput = el("input", { type: "text", value: `${state.site.name} — Queensland Globe`, "aria-label": "Map title" });
-    const legendToggle = el("input", { type: "checkbox" }); legendToggle.checked = true;
-    const cropInputs = {};
-
-    function redraw() {
-      if (!sourceImage) { canvas.hidden = true; empty.hidden = false; return; }
-      empty.hidden = true; canvas.hidden = false;
-      const crop = {};
-      for (const side of ["top", "right", "bottom", "left"]) crop[side] = Math.max(0, Math.min(40, Number(cropInputs[side].value) || 0)) / 100;
-      const sx = Math.round(sourceImage.width * crop.left), sy = Math.round(sourceImage.height * crop.top);
-      const sw = Math.max(10, Math.round(sourceImage.width * (1 - crop.left - crop.right)));
-      const sh = Math.max(10, Math.round(sourceImage.height * (1 - crop.top - crop.bottom)));
-      const shown = legendToggle.checked ? Array.from(selected) : [];
-      const legendW = shown.length ? 340 : 0, headerH = 86, footerH = 42;
-      const mapW = Math.min(1400, sw), mapH = Math.round(sh * mapW / sw);
-      canvas.width = mapW + legendW; canvas.height = headerH + mapH + footerH;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#153047"; ctx.fillRect(0, 0, canvas.width, headerH);
-      ctx.fillStyle = "#fff"; ctx.font = "600 26px system-ui, sans-serif"; ctx.fillText(titleInput.value || "Queensland Globe", 24, 38);
-      ctx.font = "16px system-ui, sans-serif"; ctx.fillStyle = "#d9e8f1";
-      ctx.fillText(`${state.site.lat}, ${state.site.lon}  •  Prepared ${new Date().toLocaleDateString("en-AU")}`, 24, 66);
-      ctx.drawImage(sourceImage, sx, sy, sw, sh, 0, headerH, mapW, mapH);
-      if (shown.length) {
-        ctx.fillStyle = "#f5f7f8"; ctx.fillRect(mapW, headerH, legendW, mapH);
-        ctx.fillStyle = "#153047"; ctx.font = "700 20px system-ui, sans-serif"; ctx.fillText("Selected layers", mapW + 20, headerH + 32);
-        let y = headerH + 60;
-        for (const name of shown) {
-          const group = QLD_GLOBE_LAYERS.find((g) => g[2].includes(name));
-          ctx.fillStyle = group ? group[1] : "#607d8b"; ctx.fillRect(mapW + 20, y - 12, 15, 15);
-          ctx.fillStyle = "#263238"; ctx.font = "14px system-ui, sans-serif";
-          const words = name.split(" "), lines = [""];
-          for (const word of words) { const test = `${lines.at(-1)} ${word}`.trim(); if (ctx.measureText(test).width > 275) lines.push(word); else lines[lines.length - 1] = test; }
-          for (const line of lines) { ctx.fillText(line, mapW + 45, y); y += 18; }
-          y += 8;
-          if (y > headerH + mapH - 18) { ctx.fillStyle = "#607d8b"; ctx.fillText("Additional selected layers not shown…", mapW + 20, y); break; }
-        }
-      }
-      ctx.fillStyle = "#fff"; ctx.fillRect(0, headerH + mapH, canvas.width, footerH);
-      ctx.fillStyle = "#455a64"; ctx.font = "13px system-ui, sans-serif";
-      ctx.fillText("Source: Queensland Globe — verify layer currency and authoritative symbology in the portal.", 20, headerH + mapH + 26);
-    }
-
-    function useImageFile(file) {
-      if (!file || !file.type.startsWith("image/")) { toast("Choose an image screenshot"); return; }
-      const reader = new FileReader();
-      reader.onload = () => { const img = new Image(); img.onload = () => { sourceImage = img; redraw(); }; img.src = reader.result; };
-      reader.readAsDataURL(file);
-    }
-    const screenshotInput = el("input", { type: "file", accept: "image/*", hidden: "" });
-    screenshotInput.addEventListener("change", () => useImageFile(screenshotInput.files[0]));
-
-    // The browser chooser lets the operator select the already-open Queensland
-    // Globe tab. Capture its complete visible viewport; fine-crop controls below
-    // remove browser chrome or unwanted map furniture if present.
-    async function captureGlobe() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        toast("This browser does not support tab capture. Paste or upload a screenshot instead."); return;
-      }
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "browser" }, audio: false });
-        const video = document.createElement("video"); video.srcObject = stream; video.muted = true; await video.play();
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight;
-        c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
-        const img = new Image(); img.onload = () => { sourceImage = img; redraw(); }; img.src = c.toDataURL("image/jpeg", .92);
-      } catch (err) { if (err && err.name !== "NotAllowedError") toast(`Could not capture the map: ${err.message}`); }
-      finally { if (stream) stream.getTracks().forEach((track) => track.stop()); }
-    }
-    const captureBtn = el("button", { type: "button", class: "btn primary", onclick: captureGlobe }, "📷 Capture Queensland Globe tab");
-    const pasteScreenshot = (e) => {
-      const file = Array.from((e.clipboardData && e.clipboardData.files) || []).find((x) => x.type.startsWith("image/"));
-      if (file) { e.preventDefault(); useImageFile(file); }
-    };
-    dialog.addEventListener("paste", pasteScreenshot);
-
-    for (const [group, color, layers] of QLD_GLOBE_LAYERS) {
-      const section = el("section", { class: "qg-layer-group" }, el("h4", {}, el("i", { style: `--swatch:${color}` }), group));
-      for (const name of layers) {
-        const cb = el("input", { type: "checkbox" }); cb.checked = selected.has(name);
-        cb.addEventListener("change", () => { cb.checked ? selected.add(name) : selected.delete(name); redraw(); });
-        section.append(el("label", { "data-layer": name.toLowerCase() }, cb, el("i", { style: `--swatch:${color}` }), el("span", {}, name)));
-      }
-      legendList.append(section);
-    }
-    search.addEventListener("input", () => { const q = search.value.trim().toLowerCase(); $$(".qg-layer-group label", legendList).forEach((x) => x.hidden = !!q && !x.dataset.layer.includes(q)); });
-    titleInput.addEventListener("input", redraw); legendToggle.addEventListener("change", redraw);
-    const cropRow = el("div", { class: "qg-crops" });
-    for (const side of ["top", "right", "bottom", "left"]) { const inp = el("input", { type: "number", min: "0", max: "40", value: "0", "aria-label": `Crop ${side} percent` }); cropInputs[side] = inp; inp.addEventListener("input", redraw); cropRow.append(el("label", {}, side[0].toUpperCase() + side.slice(1), inp, "%")); }
-
-    const saveBtn = el("button", { type: "button", class: "btn primary", onclick: () => {
-      if (!sourceImage) { toast("Capture, paste or upload a Queensland Globe screenshot first"); return; }
-      redraw();
-      const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
-      if (!f.images) f.images = [];
-      f.images.push({ id: `qg-${Date.now()}-${Math.random().toString(36).slice(2)}`, dataUrl: canvas.toDataURL("image/jpeg", 0.88), caption: titleInput.value || "Queensland Globe map", ts: Date.now() });
-      f.included = true; if (f.status === STATUS.UNSET) f.status = STATUS.FOUND;
-      saveImages(); save(); refreshCard(src.id); renderProgress(); renderReport(); close(); toast("Queensland Globe map added to the report");
-    } }, "Add prepared map to report");
-
-    dialog.append(
-      el("div", { class: "qg-head" }, el("div", {}, el("h2", { id: "qg-title" }, "Queensland Globe map capture"), el("p", {}, "Prepare a labelled, report-ready map image for this site.")), el("button", { type: "button", class: "qg-close", "aria-label": "Close", onclick: close }, "×")),
-      el("div", { class: "qg-workflow" }, el("b", {}, "Interactive Queensland Globe"), el("span", {}, "Queensland Globe does not allow embedded maps. Open the aimed map in a new tab, adjust it there, then return here to capture or add its screenshot."), el("a", { href: globeUrl, target: "_blank", rel: "noopener", class: "btn primary", onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied") }, "Open Queensland Globe ↗")),
-      el("div", { class: "qg-grid" },
-        el("aside", { class: "qg-layers" }, el("h3", {}, "Layer legend"), el("p", {}, "Tick the layers visible in your capture. Search names in Queensland Globe; always confirm its live legend and currency."), search, legendList),
-        el("main", { class: "qg-editor" }, el("h3", {}, "Map screenshot"),
-          el("div", { class: "qg-open-panel" }, el("div", {}, el("strong", {}, "Work in Queensland Globe in a separate tab"), el("p", {}, "After arranging the map, return here and select that tab in the capture chooser. You can also paste a screenshot (Ctrl/Cmd+V) or upload one."), el("div", { class: "qg-open-actions" }, captureBtn, el("button", { type: "button", class: "btn", onclick: () => screenshotInput.click() }, "Upload screenshot"), screenshotInput))),
-          el("div", { class: "qg-capture-row" }, el("span", {}, "Tip: choose the Queensland Globe tab—not this ESS tab—when your browser asks what to share.")), el("label", { class: "field-label" }, "Map title", titleInput), el("div", { class: "qg-crop-head" }, el("b", {}, "Fine crop captured map"), el("span", {}, "percentage of each edge")), cropRow, el("label", { class: "inline-check" }, legendToggle, " Add selected-layer legend beside the map"), preview)),
-      el("div", { class: "qg-foot" }, el("span", {}, "The prepared image will be attached to this card and included in the ESS report and exports."), el("button", { type: "button", class: "btn ghost", onclick: close }, "Cancel"), saveBtn));
-    overlay.append(dialog); document.body.append(overlay); redraw();
+    if (!window.ESSQldMap) { toast("The map module didn't load — reload the page and try again."); return; }
+    const qm = state.qldMap || (state.qldMap = { selection: null, capture: null });
+    window.ESSQldMap.open({
+      site: { name: state.site.name, station_num: state.site.station_num, lat: state.site.lat, lon: state.site.lon },
+      selection: qm.selection,
+      capture: qm.capture,
+      onChange: (selection) => { qm.selection = selection; save(); },
+      onAdd: (record) => {
+        const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+        if (!f.images) f.images = [];
+        // One Queensland Globe map per site: a second capture REPLACES the first
+        // rather than stacking near-identical maps through the report.
+        f.images = f.images.filter((im) => !String(im.id || "").startsWith("qldmap-"));
+        f.images.push({
+          id: `qldmap-${Date.now()}`,
+          dataUrl: record.dataUrl,
+          caption: record.caption,
+          ts: record.at || Date.now(),
+        });
+        f.included = true;
+        if (f.status === STATUS.UNSET) f.status = STATUS.FOUND;
+        // The appendix record. Kept separately from the image so it survives an
+        // image being deleted, and so an imported findings file can rebuild the
+        // appendix without the picture.
+        qm.capture = {
+          at: record.at || Date.now(),
+          caption: record.caption,
+          lat: record.meta && record.meta.lat, lon: record.meta && record.meta.lon,
+          scale: record.meta && record.meta.scale,
+          pin_in_view: !!(record.meta && record.meta.pinInView),
+          layers: record.layers || [],
+        };
+        saveImages(); save();
+        refreshCard(src.id); renderProgress(); renderReport();
+        toast(`Map added to the report — ${(record.layers || []).length} layers recorded in the appendix`);
+      },
+    });
   }
 
   function renderSourceCard(src) {
@@ -2055,7 +1991,7 @@
 
     const actions = el("div", { class: "src-actions" }, link, copyCoordBtn, statusSel);
     if (src.id === "qld-globe" && state.site.state === "QLD") {
-      actions.append(el("button", { type: "button", class: "btn tiny primary", onclick: () => openQldGlobeCapture(src), title: "Prepare a Queensland Globe screenshot with a layer legend and add it to the report" }, "🗺 Prepare map capture"));
+      actions.append(el("button", { type: "button", class: "btn tiny primary", onclick: () => openQldGlobeMap(src), title: "Open an interactive map of this site over the Queensland environmental layers, check the station pin, then capture it for the report" }, "🗺 Open site map"));
     }
     const runner = apiRunnerFor(src);
     if (runner) {
@@ -2909,6 +2845,59 @@
       }
       wrap.append(box);
     });
+    // Appendix last, after every report section — see qldMapAppendix().
+    const appendix = qldMapAppendixRows();
+    if (appendix) {
+      const box = el("div", { class: "rsection rsec-appendix", id: "rsec-appendix-map-layers" },
+        el("div", { class: "rsec-head" }, el("h3", {}, appendix.title)),
+        el("p", { class: "r-sub" }, appendix.blurb));
+      const list = el("div", { class: "r-appendix" });
+      appendix.groups.forEach((g) => {
+        list.append(el("div", { class: "r-appendix-group" },
+          el("h4", {}, g.title),
+          g.source ? el("p", { class: "r-appendix-src r-appendix-gsrc" }, g.source) : null,
+          el("ul", {}, g.layers.map((l) => el("li", {}, l.name, l.service ? el("span", { class: "r-appendix-src" }, l.service) : null)))));
+      });
+      box.append(list);
+      wrap.append(box);
+    }
+  }
+
+  /* --------------------------------------------------- QLD Globe map appendix
+     There are forty-odd layers behind a Queensland Globe map. Drawing their
+     names onto the picture buries the map, and listing them in a report section
+     buries the findings — so they go at the END of the report, as an appendix,
+     grouped exactly as the map's own catalogue groups them. Returns null when
+     no map has been captured for this site, so nothing empty is ever rendered.
+     Shared by the on-screen report, the printable/exported HTML and the JSON. */
+  function qldMapAppendixRows() {
+    const cap = state.site && state.qldMap && state.qldMap.capture;
+    if (!cap || !Array.isArray(cap.layers) || !cap.layers.length) return null;
+    const groups = [];
+    const byTitle = new Map();
+    cap.layers.forEach((l) => {
+      const title = l.group || "Layers";
+      if (!byTitle.has(title)) { const g = { title, layers: [] }; byTitle.set(title, g); groups.push(g); }
+      byTitle.get(title).layers.push({ name: l.name || l.id, service: l.service || "", url: l.url || "" });
+    });
+    // Where a whole group comes from one service, name it ONCE under the group
+    // heading. Repeating "Matters of State Environmental Significance" under all
+    // nineteen of its layers is noise that pushes the layer names apart and
+    // makes the appendix twice as long as it needs to be.
+    groups.forEach((g) => {
+      const services = [...new Set(g.layers.map((l) => l.service).filter(Boolean))];
+      if (services.length === 1) { g.source = services[0]; g.layers.forEach((l) => { l.service = ""; }); }
+    });
+    const when = cap.at ? new Date(cap.at).toLocaleString("en-AU") : "";
+    const where = (cap.lat != null && cap.lon != null) ? `${cap.lat}, ${cap.lon}` : `${state.site.lat}, ${state.site.lon}`;
+    return {
+      title: "Appendix A — Queensland Globe map layers",
+      blurb: `The site map in this report was drawn over the ${cap.layers.length} Queensland Government spatial layer${cap.layers.length === 1 ? "" : "s"} listed below, `
+        + `centred on ${where}${cap.scale ? ` at approximately 1:${(+cap.scale).toLocaleString()}` : ""}${when ? `, captured ${when}` : ""}. `
+        + "Layer currency and authoritative symbology remain those published by the Queensland Government.",
+      count: cap.layers.length,
+      groups,
+    };
   }
 
   function syncBioDetail(section, box) {
@@ -2991,6 +2980,9 @@
     const textPayload = {
       v: 2, site: state.site, findings: findingsText, report: state.report,
       maps: mapsMeta,
+      // Small (layer ids + one capture record, no picture) so it rides in the
+      // text payload; the map image itself lives in the card's images.
+      qldMap: state.qldMap,
       date: state.date,
       maintenance: state.maintenance,
     };
@@ -3054,6 +3046,9 @@
         const ms = mapState("local");
         ms.km = d.mapKm; ms.labels = d.mapLabels !== false;
       }
+      state.qldMap = (d.qldMap && typeof d.qldMap === "object")
+        ? { selection: Array.isArray(d.qldMap.selection) ? d.qldMap.selection : null, capture: d.qldMap.capture || null }
+        : { selection: null, capture: null };
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
@@ -3166,6 +3161,27 @@
         };
       }),
       collection_log: buildFindings(),
+      // Queensland Globe map provenance. Top-level (not nested under `site`) so
+      // a consumer can find the layer list without walking the site block, and
+      // so a re-import can rebuild the appendix even without the picture.
+      qld_globe_map: qldMapExport(),
+    };
+  }
+
+  // The map's layer list as exported/imported. null when no map was captured.
+  function qldMapExport() {
+    const cap = state.qldMap && state.qldMap.capture;
+    if (!cap || !Array.isArray(cap.layers) || !cap.layers.length) return null;
+    return {
+      captured_at: cap.at ? new Date(cap.at).toISOString() : null,
+      caption: cap.caption || "",
+      lat: cap.lat != null ? cap.lat : state.site.lat,
+      lon: cap.lon != null ? cap.lon : state.site.lon,
+      scale: cap.scale || null,
+      pin_in_view: cap.pin_in_view !== false,
+      source: "Queensland Government spatial services (Queensland Globe layers)",
+      selection: (state.qldMap.selection || cap.layers.map((l) => l.id)).filter(Boolean),
+      layers: cap.layers.map((l) => ({ id: l.id, name: l.name, group: l.group, service: l.service, url: l.url, sublayer: l.sublayer })),
     };
   }
 
@@ -3209,6 +3225,7 @@
       <td class="st st-${c.status}">${esc(STATUS_LABEL[c.status] || c.status)}</td>
       <td>${esc(c.result_text || c.note || "")}</td>
       <td><a href="${esc(c.url)}">link</a></td></tr>`).join("");
+    const appendixBlock = appendixHtml();
     return `<div class="pr">
       <h1>Environmental Site Summary — ${esc(s.name)}</h1>
       <p>Assessment date: ${esc(s.assessment_date || "")} · Generated ${esc(r.generated.slice(0, 10))}${r.data_version ? " · station data " + esc(r.data_version.slice(0, 10)) : ""}</p>
@@ -3225,8 +3242,23 @@
       <div class="pr-sec"><h2>Collection log — sources checked</h2>
         <table><thead><tr><th>Source</th><th>Result</th><th>Evidence / notes</th><th></th></tr></thead>
         <tbody>${logRows}</tbody></table></div>
+      ${appendixBlock}
       <p style="margin-top:10px;color:#555">Prepared with ESS Workbench · contact enviro@bom.gov.au</p>
     </div>`;
+  }
+
+  // The map-layer appendix as report HTML — a two-column list so forty layers
+  // take one page rather than four, and page-broken away from the findings.
+  function appendixHtml() {
+    const a = qldMapAppendixRows();
+    if (!a) return "";
+    return `<div class="pr-sec pr-appendix"><h2>${esc(a.title)}</h2>
+      <p class="pr-appendix-blurb">${esc(a.blurb)}</p>
+      <div class="pr-appendix-cols">${a.groups.map((g) => `<div class="pr-appendix-group">
+        <h3>${esc(g.title)}</h3>
+        ${g.source ? `<p class="pr-appendix-src pr-appendix-gsrc">${esc(g.source)}</p>` : ""}
+        <ul>${g.layers.map((l) => `<li>${esc(l.name)}${l.service ? `<span class="pr-appendix-src">${esc(l.service)}</span>` : ""}</li>`).join("")}</ul>
+      </div>`).join("")}</div></div>`;
   }
 
   function doPrint() {
@@ -3259,7 +3291,16 @@
       .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
       .pr-map-img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid #bbb;border-radius:6px}
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}
-      .pr-warn{font-size:11px;font-weight:600;color:#b3261e;background:#fbe6e4;border-radius:5px;padding:5px 8px;margin:6px 0 0}</style>
+      .pr-warn{font-size:11px;font-weight:600;color:#b3261e;background:#fbe6e4;border-radius:5px;padding:5px 8px;margin:6px 0 0}
+      .pr-appendix{page-break-before:always;break-before:page}
+      .pr-appendix-blurb{font-size:11.5px;color:#444;margin:0 0 10px}
+      .pr-appendix-cols{column-count:2;column-gap:22px}
+      .pr-appendix-group{break-inside:avoid;page-break-inside:avoid;margin:0 0 10px}
+      .pr-appendix-group h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#12507b;margin:0 0 4px}
+      .pr-appendix-group ul{margin:0;padding-left:16px}
+      .pr-appendix-group li{font-size:11px;line-height:1.45;margin:0 0 3px}
+      .pr-appendix-src{display:block;font-size:9.5px;color:#777}
+      .pr-appendix-gsrc{margin:0 0 4px;font-style:italic}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${state.date || "draft"}.html`, "text/html", html);
   }

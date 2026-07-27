@@ -105,6 +105,49 @@ Vanilla JS, no dependencies, no build. It:
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three.
 
+### Queensland Globe site map (`assets/qldmap.js`)
+A separate, lazily-initialised module behind `window.ESSQldMap`. It draws a
+**real interactive ArcGIS map** of the site — Queensland aerial imagery with the
+ESS environmental layer stack over it and the station pinned — so the operator
+can sanity-check the position and what the layers show, then capture that exact
+view for the report. It is only offered on QLD sites, from the Queensland Globe
+collection card.
+
+- **Nothing loads until it's opened.** The Esri bundle (~1 MB from
+  `js.arcgis.com`) and every QLD service call happen on first open, so the
+  workbench stays a fast, dependency-free page for the sessions that never use
+  the map.
+- **Sublayer IDs are resolved at runtime, never hardcoded.** Queensland's
+  MapServer sublayer IDs are undocumented and not stable, so every catalogue
+  entry declares a name `match` and each service's live layer list (`?f=json`)
+  is read once per open and matched by name; a `fallback` id is a last resort.
+  A layer that resolves to nothing is **withheld** and says so — in the panel
+  and in the diagnostics — rather than silently drawing the wrong dataset.
+- **One `MapImageLayer` per service, not per layer.** Forty-odd catalogue
+  entries map onto ~15 services; drawing each as its own layer would be forty
+  `exportImage` round-trips per pan. Toggling a layer flips one sublayer's
+  `visible` on a layer that already exists.
+- **Everything external is bounded and self-reporting.** Each call has a
+  timeout, each failure is worded for a non-developer, and a per-service
+  diagnostics panel (copyable as plain text) says exactly what worked. One
+  layer failing never stops the map, the pin, or the capture.
+- **The capture is guarded.** The raw screenshot raster is measured before any
+  fill is painted over it: a mostly-transparent, few-colour frame means the map
+  never rendered (typically a suspended view), and it is refused with an
+  explanation rather than exported as a plausible-looking blank.
+- **Layers go to an appendix, not onto the picture.** A ticked stack is far too
+  long for an on-map legend or a report section, so the picture carries only the
+  site, coordinate, scale and layer *count*, and the full list travels into
+  **Appendix A** of the report (see below). `state.qldMap` holds the ticked
+  selection (persisted, so re-opening restores the stack) and the capture record
+  that the appendix renders from.
+
+`app.js` owns all persistence and passes two callbacks in — `onChange` (ticks
+changed) and `onAdd` (a captured map). The picture follows the ordinary card-image
+path into the report and every export; the layer list is exported as a top-level
+`qld_globe_map` object in the JSON findings, so a re-imported report rebuilds its
+appendix even without the picture.
+
 ### Agent skill (`.claude/skills/ess-collect/`)
 `resolve.py` does the deterministic half (resolve station, filter sources, fill
 URL templates) and prints the worklist. `SKILL.md` tells the agent how to work
@@ -131,7 +174,7 @@ paths fill the same state, and the browser's own live checks (ALA) do too:
 ```
 
 **One schema ties it together — `ess-findings/1`:**
-`{ schema, generated, tool, site, sections[], collection_log[] }`, statuses
+`{ schema, generated, tool, site, sections[], collection_log[], qld_globe_map? }`, statuses
 `found|none|failed|manual|unset`. It is emitted by `app.js reportObject()`,
 scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
 — so a file the skill writes and a file the tool exports are interchangeable.
@@ -148,6 +191,14 @@ browser tool fetches a labelled Wikipedia reference photo for each name and adds
 it to that card's `images`. When it's absent, the tool falls back to extracting
 subjects from the entry's `note`/`result_text`. Auto-fetch is gated by a
 tool-side toggle (default on) and never overwrites existing photos.
+
+An optional top-level `qld_globe_map` carries the provenance of the Queensland
+Globe site map: `{ captured_at, lat, lon, scale, pin_in_view, selection[],
+layers: [{ id, name, group, service, url, sublayer }] }`. It is deliberately
+**not** nested under `site` — the report's Appendix A is built from it directly,
+so a re-imported file lists the layers the map was drawn from even when the
+picture itself didn't survive the round trip. Agents don't produce it; only the
+browser tool's map modal does.
 
 **Integration seam.** `app.js` exposes a tiny `window.ESS` (`site()`,
 `sources()`, `setResult()`, `queryAla()`, `beginRun()`/`endRun()`). The optional

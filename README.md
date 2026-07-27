@@ -68,15 +68,25 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      Fauna section narratives** from that split (communities → habitat, plants →
      flora, animals + migratory → fauna), so the report body reads like a
      hand-written one — without overwriting anything you've already typed.
-   * At Queensland sites, the **Queensland Globe** card has a **Prepare map
-     capture** workspace. It opens the actual interactive Queensland Globe, aims
-     it at the site and requests the complete ESS environmental layer stack in a
-     separate tab (the government portal blocks embedded maps). Pan, zoom or
-     adjust the live layers, then capture that tab through the browser's tab-capture
-     prompt, paste a screenshot, or upload one. The searchable layer legend, crop
-     controls, report title
-     and live preview prepare the final image; saving attaches it to the card and
-     carries it through the report, HTML, JSON and Print/PDF exports.
+   * At Queensland sites, the **Queensland Globe** card has an **🗺 Open site map**
+     button. It opens a full interactive map of the site *inside the workbench* —
+     Queensland aerial imagery drawn from the same government spatial services
+     Queensland Globe itself uses, with the ESS environmental layer stack over it
+     and **the station pinned**. Use it to sanity-check the position: pan and zoom
+     around the pin and see what the layers actually show there. The left panel
+     lists ~60 layers in seven searchable groups (MSES, vegetation & habitat,
+     protected places, wildlife habitat, water & wetlands, biodiversity
+     assessments, reference & terrain) with per-group *All/None* toggles and three
+     presets; your selection is remembered per site. Sublayer IDs are resolved
+     against each service's live layer list at open time, so a layer that can't be
+     found is struck through and named rather than silently missing, and a **Map
+     diagnostics** panel says exactly which service worked. When the map looks
+     right press **📸 Capture map**, check the thumbnail, then **Add map to
+     report**. The picture goes on the card and travels through the report, HTML,
+     JSON and Print/PDF exports like any other photo — and the **full layer list
+     goes to Appendix A** of the report rather than cluttering the picture or the
+     report body. (The ordinary **Open ↗** link still opens Queensland Globe itself
+     if you need its own tools or legend.)
 4. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Each section has an
    **✨ Insert suggested detail** button that drafts a paragraph from that
