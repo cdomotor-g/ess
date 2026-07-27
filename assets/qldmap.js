@@ -159,7 +159,7 @@
         { id: "veg-rvm-c",     name: "Regulated vegetation management map — category C (high-value regrowth)", svc: "vegmgt", match: /category c\b/i,        on: true },
         { id: "veg-rvm-r",     name: "Regulated vegetation management map — category R (regrowth watercourse)", svc: "vegmgt", match: /category r\b/i,       on: false },
         { id: "veg-watercourse", name: "Vegetation management watercourse & drainage",svc: "vegmgt", match: /watercourse|drainage/i,                         on: false },
-        { id: "re-status",     name: "Regional ecosystems — biodiversity status",     svc: "remap",  match: /biodiversity status/i,                          on: true },
+        { id: "re-status",     name: "Regional ecosystems — biodiversity status",     svc: "remap",  match: /biodiversity status/i,                          on: false },
         { id: "re-vmstatus",   name: "Regional ecosystems — vegetation management status", svc: "remap", match: /vegetation management (act )?status/i,      on: false },
         { id: "re-bvg",        name: "Broad vegetation groups",                       svc: "remap",  match: /broad vegetation group/i,                       on: false },
         { id: "esa-a",         name: "Environmentally sensitive areas — category A",  svc: "esa",    match: /environmentally sensitive|category a/i,         on: false },
@@ -341,9 +341,15 @@
           window.require([
             "esri/Map", "esri/views/MapView", "esri/layers/ImageryTileLayer", "esri/layers/ImageryLayer",
             "esri/layers/MapImageLayer", "esri/Graphic", "esri/geometry/SpatialReference",
-            "esri/core/reactiveUtils", "esri/widgets/ScaleBar",
-          ], (Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, reactiveUtils, ScaleBar) => {
-            M.esri = { Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, reactiveUtils, ScaleBar };
+            "esri/geometry/projection", "esri/core/reactiveUtils", "esri/widgets/ScaleBar",
+          ], (Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, projection, reactiveUtils, ScaleBar) => {
+            M.esri = { Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, projection, reactiveUtils, ScaleBar };
+            // Kicked off now, not awaited here: by the time the view is built and
+            // the operator can press Capture, this has long since resolved. Used
+            // by pinInView() to compare the pin against the extent in the SAME
+            // spatial reference — the view's extent is in the service's projected
+            // CRS (metres), never bare lat/lon degrees.
+            M.projectionReady = projection.load().catch(() => {});
             resolve(M.esri);
           }, reject);
         };
@@ -634,11 +640,29 @@
   // Is the pin actually inside what the capture will grab? A map framed away
   // from the site is the single most likely way this tool produces a wrong
   // report, so it is checked before every capture and stated on the card.
+  //
+  // The view's extent is in the SERVICE'S spatial reference (a projected CRS in
+  // metres — Web Mercator in practice), never bare lat/lon degrees. Comparing
+  // it against a raw {longitude, latitude} point declared as wkid 4326 WITHOUT
+  // reprojecting is a coordinate-space mismatch: extent.contains() does not
+  // reproject its argument, so a point whose numbers are a couple of hundred
+  // (degrees) is checked against an extent whose numbers are in the millions
+  // (metres) and is reported outside almost regardless of where it actually is.
+  // Project the pin into the extent's spatial reference first so the two are
+  // finally in the same units.
   function pinInView() {
     const view = M.view;
     if (!view || !view.extent || !M.site) return true;
     try {
-      return view.extent.contains({ type: "point", longitude: +M.site.lon, latitude: +M.site.lat, spatialReference: { wkid: 4326 } });
+      const geoPoint = { type: "point", longitude: +M.site.lon, latitude: +M.site.lat, spatialReference: { wkid: 4326 } };
+      const sr = view.extent.spatialReference;
+      let pt = geoPoint;
+      const proj = M.esri && M.esri.projection;
+      if (sr && sr.wkid !== 4326 && proj && proj.isLoaded && proj.isLoaded()) {
+        const projected = proj.project(geoPoint, sr);
+        if (projected) pt = projected;
+      }
+      return view.extent.contains(pt);
     } catch (_) { return true; }
   }
 
