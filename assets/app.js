@@ -215,6 +215,56 @@
   };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  // ------------------------------------------------------------- source monograms
+  // A generated 2-letter tile per source — recognisable at a glance, no network, no
+  // external assets, no licensing questions. Deliberately NOT favicons: hotlinking
+  // each source's site would break the offline promise and leak which jurisdictions
+  // are being assessed.
+  const MONO_STOP = new Set(["the", "of", "and", "a", "an", "for", "on", "in", "&"]);
+  // Leading jurisdiction tokens are redundant — the dashboard is already filtered to
+  // one state, and the tag chip on the card says National/State.
+  const MONO_JUR = /^(qld|queensland|nsw|vic|victoria|victorian|tas|tasmania|tasmanian|act|wa|nt|sa|south|western|northern|australian|australia)$/i;
+
+  function monogramWords(name) {
+    return String(name || "")
+      .split("(")[0]                          // drop parentheticals: "… (ACHIS)"
+      .replace(/[^A-Za-z0-9]+/g, " ")
+      .trim().split(/\s+/)
+      .filter((w) => w && !MONO_STOP.has(w.toLowerCase()));
+  }
+
+  // Case boundaries inside one word, used only when a name is a single word:
+  // WetlandMaps -> Wetland Maps, LISTmap -> LIST map. Applying this up front would
+  // wreck names where the spaced words are the distinguishing ones ("WildNet species
+  // search" wants WS, not WN).
+  function monogramSplitCase(word) {
+    return word
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/([A-Z]{2,})([a-z])/g, "$1 $2")
+      .split(/\s+/).filter(Boolean);
+  }
+
+  function iconMonogram(src) {
+    let words = monogramWords(src.name);
+    // Strip leading jurisdiction tokens, but never strip the name away entirely.
+    let i = 0;
+    while (i < words.length - 1 && MONO_JUR.test(words[i])) i++;
+    if (i < words.length) words = words.slice(i);
+    if (words.length === 1) words = monogramSplitCase(words[0]);
+    if (!words.length) return "??";
+    if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+    const w = words[0];
+    return (w.length >= 2 ? w.slice(0, 2) : w).toUpperCase();
+  }
+
+  function renderSourceIcon(src) {
+    return el("span", {
+      class: `src-icon jur-${src.jurisdiction === "national" ? "national" : "state"}`,
+      title: src.name,
+      "aria-hidden": "true",      // the card name is right beside it — don't double-announce
+    }, iconMonogram(src));
+  }
+
   // ---------------------------------------------------------------- images
   // Station/evidence photos are downscaled client-side (canvas) before being kept
   // as JPEG data URLs — keeps localStorage + exported JSON/HTML a sane size while
@@ -1634,17 +1684,21 @@
     if (state.filterUnreviewed)
       list = list.filter((s) => !(state.findings[s.id] || {}).reviewed);
     for (const id of Object.keys(cardNumbers)) delete cardNumbers[id];
+    dashboardCats.length = 0; // rebuilt below, in render order, for the nav rail
     let n = 0;
     for (const cat of cats) {
       const inCat = list.filter((s) => s.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
       if (!inCat.length) continue;
-      const group = el("div", { class: "group" });
+      // id + --cat are what the nav rail jumps to and colours itself with.
+      const group = el("div", { class: "group", "data-cat": cat.id, id: `group-${cat.id}` });
+      group.style.setProperty("--cat", `var(--cat-${cat.id})`);
       group.append(el("div", { class: "group-head" },
         el("h3", {}, cat.label),
         el("span", { class: "g-count" }, `${inCat.length}`),
         el("span", { class: "g-line" })));
       inCat.forEach((src) => { cardNumbers[src.id] = ++n; group.append(renderSourceCard(src)); });
       wrap.append(group);
+      dashboardCats.push(cat.id);
     }
     if (!wrap.children.length)
       wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" },
@@ -1653,12 +1707,165 @@
         state.filterUnreviewed ? "✓ Everything has been reviewed." : "No sources for this site."));
     syncStatusFilterBar();
     syncUnreviewedFilterButton();
+    renderRailNav(); // tracks the groups that survived the filters above
+  }
+
+  // ---------------------------------------------------------------- nav rail
+  // The narrow jump rail on the left edge of the split: the three numbered steps,
+  // then one button per visible dashboard group, each carrying a count of the
+  // sources in that category a human still owns. It answers "where am I / what's
+  // left" without scrolling, which is the whole reason it earns its 44px.
+  //
+  // The glyphs live here rather than in sources.json because they're presentation
+  // only, and sources.json is shared with the ess-collect skill.
+  const CAT_GLYPH = {
+    permits: "🔑", biosecurity: "🛡", threatened: "🦎", indigenous_heritage: "🏛",
+    invasive_plants: "🌾", invasive_animals: "🐗", disease: "🦠", additional: "📎",
+  };
+  const RAIL_STEPS = [
+    { id: "site-picker", step: "1", label: "Choose a site" },
+    { id: "site-summary", step: "2", label: "Site summary" },
+    { id: "dashboard", step: "3", label: "Collect location metadata" },
+  ];
+  const dashboardCats = []; // category ids currently on the dashboard, in render order
+  let railObserver = null;
+
+  function railScrollTo(id) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    // #col-left is the scroll container on the wide layout, so this scrolls the
+    // column rather than the page.
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+
+  function renderRailNav() {
+    const rail = $("#railnav");
+    if (!rail) return;
+    if (railObserver) { railObserver.disconnect(); railObserver = null; }
+    rail.innerHTML = "";
+    // Matches #workspace — there's nothing to jump to until a site is loaded.
+    const live = !!state.site && !$("#workspace").hidden;
+    rail.hidden = !live;
+    if (!live) return;
+
+    const catById = {};
+    for (const c of (DATA.sourcesMeta && DATA.sourcesMeta.categories) || []) catById[c.id] = c;
+    const attention = railAttentionCounts();
+
+    const targets = [];
+    const railBtn = (id, label, body) => {
+      const btn = el("button", {
+        type: "button", class: "rail-btn", "data-target": id,
+        title: label, "aria-label": label,
+        onclick: () => railScrollTo(id),
+      }, body);
+      targets.push(id);
+      return btn;
+    };
+
+    for (const s of RAIL_STEPS)
+      rail.append(railBtn(s.id, `${s.step}. ${s.label}`, el("span", { class: "step", "aria-hidden": "true" }, s.step)));
+
+    if (dashboardCats.length) rail.append(el("div", { class: "rail-sep" }));
+    for (const id of dashboardCats) {
+      const cat = catById[id];
+      if (!cat) continue;
+      const btn = railBtn(`group-${id}`, cat.label, el("span", { "aria-hidden": "true" }, CAT_GLYPH[id] || "•"));
+      btn.dataset.cat = id;
+      btn.style.setProperty("--cat", `var(--cat-${id})`);
+      setRailBadge(btn, cat.label, attention[id] || 0);
+      rail.append(btn);
+    }
+
+    wireRailSpy(rail, targets);
+  }
+
+  // Attention counts come from the site's whole source list, not the filtered view,
+  // so a badge keeps answering "what's left in this category" while a filter is on.
+  function railAttentionCounts() {
+    const counts = {};
+    for (const src of sourcesForSite())
+      if (ATTENTION.includes((state.findings[src.id] || {}).status || "unset"))
+        counts[src.category] = (counts[src.category] || 0) + 1;
+    return counts;
+  }
+
+  // A rail of bare emoji is unusable, so the label carries the category name and the
+  // count for the tooltip and for screen readers — the badge itself is decoration.
+  function setRailBadge(btn, label, n) {
+    const old = btn.querySelector(".rail-badge");
+    if (old) old.remove();
+    if (n) btn.append(el("span", { class: "rail-badge", "aria-hidden": "true" }, `${n}`));
+    const full = label + (n ? ` — ${n} needing attention` : "");
+    btn.title = full;
+    btn.setAttribute("aria-label", full);
+  }
+
+  // Badge-only refresh, run from renderProgress() so every path that changes a
+  // result (a click, an auto-check, an agent run, an import) keeps the counts live
+  // without rebuilding the rail or its observer.
+  function refreshRailBadges() {
+    const rail = $("#railnav");
+    if (!rail || rail.hidden || !state.site) return;
+    const counts = railAttentionCounts();
+    const catById = {};
+    for (const c of (DATA.sourcesMeta && DATA.sourcesMeta.categories) || []) catById[c.id] = c;
+    rail.querySelectorAll(".rail-btn[data-cat]").forEach((btn) => {
+      const cat = catById[btn.dataset.cat];
+      if (cat) setRailBadge(btn, cat.label, counts[btn.dataset.cat] || 0);
+    });
+  }
+
+  // Scroll-spy: one observer over the three fixed sections + every group, watching a
+  // band across the TOP of the scrolling column — the same place the sticky group
+  // header pins, so the rail always agrees with the heading on screen. (A mid-column
+  // band reads badly here: sections shorter than half a screen never reach it, so
+  // clicking a rail button could leave the button below it marked.)
+  function wireRailSpy(rail, targets) {
+    if (!("IntersectionObserver" in window)) return;
+    const nodes = targets.map((id) => document.getElementById(id)).filter(Boolean);
+    if (!nodes.length) return;
+
+    const setActive = (id) => {
+      rail.querySelectorAll(".rail-btn").forEach((b) => {
+        const on = b.dataset.target === id;
+        b.classList.toggle("is-active", on);
+        if (on) b.setAttribute("aria-current", "true");
+        else b.removeAttribute("aria-current");
+      });
+    };
+
+    // How deeply each target nests inside the others: the groups live inside
+    // #dashboard, so when both are in the band the group is the more specific — and
+    // more useful — answer to "where am I".
+    const depth = {};
+    for (const node of nodes) depth[node.id] = nodes.filter((o) => o !== node && o.contains(node)).length;
+
+    const inBand = new Set();
+    railObserver = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) inBand.add(e.target.id);
+        else inBand.delete(e.target.id);
+      }
+      // Deepest wins; among equals the first in document order wins, so a short
+      // section doesn't hand the marker to the one below it. Nothing in the band
+      // (mid-jump) keeps the previous marker rather than flickering off.
+      let pick = null, pickDepth = -1;
+      for (const id of targets) {
+        if (!inBand.has(id) || depth[id] <= pickDepth) continue;
+        pick = id; pickDepth = depth[id];
+      }
+      if (pick) setActive(pick);
+    }, { root: $("#col-left"), rootMargin: "0px 0px -85% 0px", threshold: 0 });
+    nodes.forEach((node) => railObserver.observe(node));
   }
 
   function renderSourceCard(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
     if (!f.images) f.images = [];
     const card = el("div", { class: `src status-${f.status}${f.reviewed ? " is-reviewed" : ""}`, id: `src-${src.id}` });
+    card.style.setProperty("--cat", `var(--cat-${src.category})`); // picked up by the monogram tile
     const num = cardNumbers[src.id];
 
     // "checked" is a boolean HTML attribute — setAttribute("checked", false) would
@@ -1755,7 +1962,10 @@
     // a null argument to the literal text "null" instead of skipping it — filter first.
     card.append(...[
       el("div", { class: "src-top" },
-        el("div", { class: "src-name" }, el("span", { class: "src-num" }, num ? `${num}` : ""), src.name, ...tags),
+        el("div", { class: "src-name" },
+          el("span", { class: "src-num" }, num ? `${num}` : ""),
+          renderSourceIcon(src),
+          src.name, ...tags),
         el("div", { class: "src-top-right" },
           reviewToggle,
           el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status]))),
@@ -2044,6 +2254,7 @@
       `<span class="chip manual">${counts.manual} manual</span>` +
       `<span class="chip reviewed">${reviewed}/${list.length} reviewed</span>`;
     renderAttention();
+    refreshRailBadges(); // same counts, shown per category on the nav rail
   }
 
   // Banner drawing the eye to sources a human still owns (shown after an import
@@ -3705,6 +3916,7 @@
       $("#workspace").hidden = true;
       const wr = $("#workspace-right"); if (wr) wr.hidden = true;
       const ph = $("#report-placeholder"); if (ph) ph.hidden = false;
+      renderRailNav(); // nothing to jump to with the workspace closed
       $("#site-picker").scrollIntoView({ behavior: "smooth" });
       $("#station-search").focus();
     });
