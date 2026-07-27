@@ -69,11 +69,12 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      flora, animals + migratory → fauna), so the report body reads like a
      hand-written one — without overwriting anything you've already typed.
    * At Queensland sites, the **Queensland Globe** card has a **Prepare map
-     capture** workspace. It embeds the actual interactive Queensland Globe,
-     aims it at the site and requests the complete ESS environmental layer stack
-     automatically. Pan, zoom or adjust the live layers, then capture the map
-     viewport through the browser's tab-capture prompt—there is no screenshot
-     paste/upload step. The searchable layer legend, crop controls, report title
+     capture** workspace. It opens the actual interactive Queensland Globe, aims
+     it at the site and requests the complete ESS environmental layer stack in a
+     separate tab (the government portal blocks embedded maps). Pan, zoom or
+     adjust the live layers, then capture that tab through the browser's tab-capture
+     prompt, paste a screenshot, or upload one. The searchable layer legend, crop
+     controls, report title
      and live preview prepare the final image; saving attaches it to the card and
      carries it through the report, HTML, JSON and Print/PDF exports.
 4. The **ESS report** section fills with the standardized proforma wording,

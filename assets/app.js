@@ -1873,11 +1873,9 @@
     nodes.forEach((node) => railObserver.observe(node));
   }
 
-  // Keep the real Queensland Globe interactive inside the modal and ask it to load
-  // the site + ESS layer stack through its share URL. Browser same-origin security
-  // correctly prevents JS from scraping the government portal's pixels, so the
-  // standards-based Screen Capture API captures only the iframe's on-screen bounds
-  // after explicit user approval. The prepared JPEG then follows the card's normal
+  // Queensland Globe blocks cross-origin embedding, so open the aimed map in its
+  // own tab. The operator can capture that tab with the Screen Capture API or paste
+  // / upload a screenshot; the prepared JPEG then follows the card's normal
   // persistence, report-preview and export paths.
   function openQldGlobeCapture(src) {
     if (!state.site || state.site.state !== "QLD") return;
@@ -1896,7 +1894,7 @@
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
 
     const canvas = el("canvas", { class: "qg-canvas", "aria-label": "Prepared Queensland Globe map preview" });
-    const empty = el("div", { class: "qg-empty" }, "Adjust the live Queensland Globe map above, then capture its current view.");
+    const empty = el("div", { class: "qg-empty" }, "Open Queensland Globe, adjust the map, then capture its tab or add a screenshot.");
     const preview = el("div", { class: "qg-preview" }, empty, canvas);
     const legendList = el("div", { class: "qg-layer-list" });
     const search = el("input", { type: "search", class: "qg-search", placeholder: "Filter layers…", "aria-label": "Filter Queensland Globe layers" });
@@ -1943,31 +1941,39 @@
       ctx.fillText("Source: Queensland Globe — verify layer currency and authoritative symbology in the portal.", 20, headerH + mapH + 26);
     }
 
-    // The portal remains the real, interactive Queensland Globe (not a replica).
-    // Its supported share parameters aim the map and request the complete layer
-    // stack up front. Browsers prohibit reading pixels from a cross-origin iframe,
-    // so capture uses the standard Screen Capture API: the user approves this tab,
-    // then we crop precisely to the iframe bounds and stop the stream immediately.
-    const globeFrame = el("iframe", { class: "qg-globe-frame", src: globeUrl,
-      title: "Interactive Queensland Globe map", allow: "clipboard-read; clipboard-write; fullscreen" });
+    function useImageFile(file) {
+      if (!file || !file.type.startsWith("image/")) { toast("Choose an image screenshot"); return; }
+      const reader = new FileReader();
+      reader.onload = () => { const img = new Image(); img.onload = () => { sourceImage = img; redraw(); }; img.src = reader.result; };
+      reader.readAsDataURL(file);
+    }
+    const screenshotInput = el("input", { type: "file", accept: "image/*", hidden: "" });
+    screenshotInput.addEventListener("change", () => useImageFile(screenshotInput.files[0]));
+
+    // The browser chooser lets the operator select the already-open Queensland
+    // Globe tab. Capture its complete visible viewport; fine-crop controls below
+    // remove browser chrome or unwanted map furniture if present.
     async function captureGlobe() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        toast("This browser does not support tab capture. Use a current Chrome, Edge or Firefox browser."); return;
+        toast("This browser does not support tab capture. Paste or upload a screenshot instead."); return;
       }
       let stream;
       try {
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "browser" }, audio: false, preferCurrentTab: true });
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "browser" }, audio: false });
         const video = document.createElement("video"); video.srcObject = stream; video.muted = true; await video.play();
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const rect = globeFrame.getBoundingClientRect();
-        const sxScale = video.videoWidth / window.innerWidth, syScale = video.videoHeight / window.innerHeight;
-        const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(rect.width * sxScale)); c.height = Math.max(1, Math.round(rect.height * syScale));
-        c.getContext("2d").drawImage(video, Math.round(rect.left * sxScale), Math.round(rect.top * syScale), c.width, c.height, 0, 0, c.width, c.height);
+        const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight;
+        c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
         const img = new Image(); img.onload = () => { sourceImage = img; redraw(); }; img.src = c.toDataURL("image/jpeg", .92);
       } catch (err) { if (err && err.name !== "NotAllowedError") toast(`Could not capture the map: ${err.message}`); }
       finally { if (stream) stream.getTracks().forEach((track) => track.stop()); }
     }
-    const captureBtn = el("button", { type: "button", class: "btn primary", onclick: captureGlobe }, "📷 Capture current map view");
+    const captureBtn = el("button", { type: "button", class: "btn primary", onclick: captureGlobe }, "📷 Capture Queensland Globe tab");
+    const pasteScreenshot = (e) => {
+      const file = Array.from((e.clipboardData && e.clipboardData.files) || []).find((x) => x.type.startsWith("image/"));
+      if (file) { e.preventDefault(); useImageFile(file); }
+    };
+    dialog.addEventListener("paste", pasteScreenshot);
 
     for (const [group, color, layers] of QLD_GLOBE_LAYERS) {
       const section = el("section", { class: "qg-layer-group" }, el("h4", {}, el("i", { style: `--swatch:${color}` }), group));
@@ -1984,7 +1990,7 @@
     for (const side of ["top", "right", "bottom", "left"]) { const inp = el("input", { type: "number", min: "0", max: "40", value: "0", "aria-label": `Crop ${side} percent` }); cropInputs[side] = inp; inp.addEventListener("input", redraw); cropRow.append(el("label", {}, side[0].toUpperCase() + side.slice(1), inp, "%")); }
 
     const saveBtn = el("button", { type: "button", class: "btn primary", onclick: () => {
-      if (!sourceImage) { toast("Capture the current Queensland Globe view first"); globeFrame.focus(); return; }
+      if (!sourceImage) { toast("Capture, paste or upload a Queensland Globe screenshot first"); return; }
       redraw();
       const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
       if (!f.images) f.images = [];
@@ -1995,12 +2001,14 @@
 
     dialog.append(
       el("div", { class: "qg-head" }, el("div", {}, el("h2", { id: "qg-title" }, "Queensland Globe map capture"), el("p", {}, "Prepare a labelled, report-ready map image for this site.")), el("button", { type: "button", class: "qg-close", "aria-label": "Close", onclick: close }, "×")),
-      el("div", { class: "qg-workflow" }, el("b", {}, "Interactive Queensland Globe"), el("span", {}, "The site and ESS layer stack are loaded automatically. Pan, zoom and adjust layers in the live map; use Open in new tab only if your browser blocks the embedded portal."), el("a", { href: globeUrl, target: "_blank", rel: "noopener", class: "btn", onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied") }, "Open in new tab ↗")),
+      el("div", { class: "qg-workflow" }, el("b", {}, "Interactive Queensland Globe"), el("span", {}, "Queensland Globe does not allow embedded maps. Open the aimed map in a new tab, adjust it there, then return here to capture or add its screenshot."), el("a", { href: globeUrl, target: "_blank", rel: "noopener", class: "btn primary", onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied") }, "Open Queensland Globe ↗")),
       el("div", { class: "qg-grid" },
         el("aside", { class: "qg-layers" }, el("h3", {}, "Layer legend"), el("p", {}, "Tick the layers visible in your capture. Search names in Queensland Globe; always confirm its live legend and currency."), search, legendList),
-        el("main", { class: "qg-editor" }, el("h3", {}, "Live map"), globeFrame, el("div", { class: "qg-capture-row" }, captureBtn, el("span", {}, "When prompted, choose This Tab. Only the live map viewport is retained.")), el("label", { class: "field-label" }, "Map title", titleInput), el("div", { class: "qg-crop-head" }, el("b", {}, "Fine crop captured map"), el("span", {}, "percentage of each edge")), cropRow, el("label", { class: "inline-check" }, legendToggle, " Add selected-layer legend beside the map"), preview)),
+        el("main", { class: "qg-editor" }, el("h3", {}, "Map screenshot"),
+          el("div", { class: "qg-open-panel" }, el("div", {}, el("strong", {}, "Work in Queensland Globe in a separate tab"), el("p", {}, "After arranging the map, return here and select that tab in the capture chooser. You can also paste a screenshot (Ctrl/Cmd+V) or upload one."), el("div", { class: "qg-open-actions" }, captureBtn, el("button", { type: "button", class: "btn", onclick: () => screenshotInput.click() }, "Upload screenshot"), screenshotInput))),
+          el("div", { class: "qg-capture-row" }, el("span", {}, "Tip: choose the Queensland Globe tab—not this ESS tab—when your browser asks what to share.")), el("label", { class: "field-label" }, "Map title", titleInput), el("div", { class: "qg-crop-head" }, el("b", {}, "Fine crop captured map"), el("span", {}, "percentage of each edge")), cropRow, el("label", { class: "inline-check" }, legendToggle, " Add selected-layer legend beside the map"), preview)),
       el("div", { class: "qg-foot" }, el("span", {}, "The prepared image will be attached to this card and included in the ESS report and exports."), el("button", { type: "button", class: "btn ghost", onclick: close }, "Cancel"), saveBtn));
-    overlay.append(dialog); document.body.append(overlay); globeFrame.focus(); redraw();
+    overlay.append(dialog); document.body.append(overlay); redraw();
   }
 
   function renderSourceCard(src) {
