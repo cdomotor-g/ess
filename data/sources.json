@@ -275,7 +275,9 @@
    "method": "manual",
    "cors": false,
    "url": "https://qldglobe.information.qld.gov.au/",
-   "what_to_find": "State environmental, vegetation, wetland and cadastral layers around the site.",
+   "what_to_find": "State environmental, vegetation, habitat, wetland and protected-area layers around the site. Use Prepare map capture to paste a Queensland Globe screenshot, crop it, add a selected-layer legend and carry the finished image into the report.",
+   "instructions": "Open Queensland Globe from the map-capture assistant (the site coordinates are copied), search for and enable the relevant layers, frame the site, then take a screenshot. Paste or upload the screenshot in the assistant, record the visible layers, crop the edges and add the prepared map to the ESS report.",
+   "report_section": "threatened_habitat",
    "qrg_section": "State Based Searches",
    "priority": 10
   },
