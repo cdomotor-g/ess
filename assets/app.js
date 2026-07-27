@@ -215,6 +215,56 @@
   };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  // ------------------------------------------------------------- source monograms
+  // A generated 2-letter tile per source — recognisable at a glance, no network, no
+  // external assets, no licensing questions. Deliberately NOT favicons: hotlinking
+  // each source's site would break the offline promise and leak which jurisdictions
+  // are being assessed.
+  const MONO_STOP = new Set(["the", "of", "and", "a", "an", "for", "on", "in", "&"]);
+  // Leading jurisdiction tokens are redundant — the dashboard is already filtered to
+  // one state, and the tag chip on the card says National/State.
+  const MONO_JUR = /^(qld|queensland|nsw|vic|victoria|victorian|tas|tasmania|tasmanian|act|wa|nt|sa|south|western|northern|australian|australia)$/i;
+
+  function monogramWords(name) {
+    return String(name || "")
+      .split("(")[0]                          // drop parentheticals: "… (ACHIS)"
+      .replace(/[^A-Za-z0-9]+/g, " ")
+      .trim().split(/\s+/)
+      .filter((w) => w && !MONO_STOP.has(w.toLowerCase()));
+  }
+
+  // Case boundaries inside one word, used only when a name is a single word:
+  // WetlandMaps -> Wetland Maps, LISTmap -> LIST map. Applying this up front would
+  // wreck names where the spaced words are the distinguishing ones ("WildNet species
+  // search" wants WS, not WN).
+  function monogramSplitCase(word) {
+    return word
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/([A-Z]{2,})([a-z])/g, "$1 $2")
+      .split(/\s+/).filter(Boolean);
+  }
+
+  function iconMonogram(src) {
+    let words = monogramWords(src.name);
+    // Strip leading jurisdiction tokens, but never strip the name away entirely.
+    let i = 0;
+    while (i < words.length - 1 && MONO_JUR.test(words[i])) i++;
+    if (i < words.length) words = words.slice(i);
+    if (words.length === 1) words = monogramSplitCase(words[0]);
+    if (!words.length) return "??";
+    if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+    const w = words[0];
+    return (w.length >= 2 ? w.slice(0, 2) : w).toUpperCase();
+  }
+
+  function renderSourceIcon(src) {
+    return el("span", {
+      class: `src-icon jur-${src.jurisdiction === "national" ? "national" : "state"}`,
+      title: src.name,
+      "aria-hidden": "true",      // the card name is right beside it — don't double-announce
+    }, iconMonogram(src));
+  }
+
   // ---------------------------------------------------------------- images
   // Station/evidence photos are downscaled client-side (canvas) before being kept
   // as JPEG data URLs — keeps localStorage + exported JSON/HTML a sane size while
@@ -1815,6 +1865,7 @@
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
     if (!f.images) f.images = [];
     const card = el("div", { class: `src status-${f.status}${f.reviewed ? " is-reviewed" : ""}`, id: `src-${src.id}` });
+    card.style.setProperty("--cat", `var(--cat-${src.category})`); // picked up by the monogram tile
     const num = cardNumbers[src.id];
 
     // "checked" is a boolean HTML attribute — setAttribute("checked", false) would
@@ -1911,7 +1962,10 @@
     // a null argument to the literal text "null" instead of skipping it — filter first.
     card.append(...[
       el("div", { class: "src-top" },
-        el("div", { class: "src-name" }, el("span", { class: "src-num" }, num ? `${num}` : ""), src.name, ...tags),
+        el("div", { class: "src-name" },
+          el("span", { class: "src-num" }, num ? `${num}` : ""),
+          renderSourceIcon(src),
+          src.name, ...tags),
         el("div", { class: "src-top-right" },
           reviewToggle,
           el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status]))),
