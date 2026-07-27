@@ -320,63 +320,6 @@ textarea { resize: vertical; min-height: 62px; }
 .bb-chip .bb-chip-x:hover { color: var(--failed); background: var(--failed-bg); }
 .bb-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
-/* ---------- Queensland Globe report-map capture ---------- */
-.qg-overlay { position: fixed; inset: 0; z-index: 150; display: none; align-items: flex-start;
-  justify-content: center; overflow-y: auto; padding: 3vh 18px; background: rgba(8,14,18,.72); }
-.qg-overlay.show { display: flex; }
-.qg-dialog { width: min(1180px, 100%); max-height: 94vh; overflow: hidden; display: flex;
-  flex-direction: column; color: var(--ink); background: var(--surface); border: 1px solid var(--line);
-  border-radius: 14px; box-shadow: 0 18px 64px rgba(0,0,0,.45); }
-.qg-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
-  padding: 18px 22px 14px; border-bottom: 1px solid var(--line); }
-.qg-head h2 { margin: 0 0 4px; font-size: 21px; }
-.qg-head p, .qg-layers p { margin: 0; color: var(--ink-soft); font-size: 12.5px; line-height: 1.45; }
-.qg-close { flex: 0 0 auto; width: 34px; height: 34px; border: 0; border-radius: 8px;
-  color: var(--ink-soft); background: var(--surface-2); cursor: pointer; font-size: 22px; }
-.qg-workflow { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
-  padding: 10px 22px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 13px; }
-.qg-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(280px, 34%) 1fr; }
-.qg-layers, .qg-editor { min-height: 0; overflow-y: auto; padding: 16px 20px; }
-.qg-layers { border-right: 1px solid var(--line); }
-.qg-layers h3, .qg-editor h3 { margin: 0 0 5px; font-size: 15px; }
-.qg-search { width: 100%; margin: 12px 0 8px; padding: 8px 10px; }
-.qg-layer-group { margin: 0 0 13px; }
-.qg-layer-group h4 { display: flex; align-items: center; gap: 7px; margin: 7px 0 4px;
-  font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; }
-.qg-layer-group h4 i, .qg-layer-group label i { flex: 0 0 auto; display: inline-block; width: 13px;
-  height: 13px; border-radius: 3px; background: var(--swatch); box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
-.qg-layer-group label { display: grid; grid-template-columns: 16px 13px 1fr; align-items: start; gap: 7px;
-  padding: 4px 3px; border-radius: 5px; font-size: 12px; line-height: 1.3; cursor: pointer; }
-.qg-layer-group label:hover { background: var(--surface-2); }
-.qg-layer-group input { margin: 1px 0 0; accent-color: var(--brand); }
-.qg-drop { margin: 10px 0 12px; }
-.qg-editor > .field-label { display: grid; gap: 5px; }
-.qg-editor > .field-label input { width: 100%; }
-.qg-crop-head { display: flex; justify-content: space-between; margin: 12px 0 5px; font-size: 12px; }
-.qg-crop-head span { color: var(--ink-soft); }
-.qg-crops { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-.qg-crops label { display: grid; grid-template-columns: 1fr 48px auto; align-items: center; gap: 4px;
-  color: var(--ink-soft); font-size: 11px; }
-.qg-crops input { min-width: 0; width: 48px; padding: 5px; }
-.qg-preview { display: grid; place-items: center; min-height: 180px; margin-top: 12px; padding: 10px;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; }
-.qg-empty { color: var(--ink-soft); font-size: 13px; text-align: center; }
-.qg-canvas { display: block; max-width: 100%; max-height: 46vh; background: white; box-shadow: 0 2px 9px rgba(0,0,0,.2); }
-.qg-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 22px;
-  border-top: 1px solid var(--line); background: var(--surface); }
-.qg-foot > span { margin-right: auto; color: var(--ink-soft); font-size: 12px; }
-@media (max-width: 760px) {
-  .qg-overlay { padding: 0; }
-  .qg-dialog { max-height: none; min-height: 100vh; border-radius: 0; overflow: visible; }
-  .qg-workflow { grid-template-columns: 1fr; }
-  .qg-grid { grid-template-columns: 1fr; }
-  .qg-layers { max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line); }
-  .qg-editor { overflow: visible; }
-  .qg-crops { grid-template-columns: repeat(2, 1fr); }
-  .qg-foot { position: sticky; bottom: 0; flex-wrap: wrap; }
-  .qg-foot > span { flex-basis: 100%; }
-}
-
 /* ---------- summary grid ---------- */
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 26px; background: var(--surface-2); border-radius: 10px; padding: 14px 16px; }
 .summary-item { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
