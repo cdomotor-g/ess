@@ -37,6 +37,11 @@
 
   <main id="app">
    <div class="split">
+    <!-- Narrow jump rail — the three numbered steps, then one button per visible
+         dashboard group. Sits outside #col-left so it never scrolls away and never
+         eats into card width. Filled by JS: renderRailNav(). -->
+    <nav class="railnav" id="railnav" aria-label="Jump to section" hidden></nav>
+
     <!-- LEFT column — site pick, summary, collection dashboard (independently scrolls) -->
     <div class="col col-left" id="col-left">
     <!-- Load / error banner -->

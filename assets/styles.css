@@ -127,6 +127,42 @@ main { max-width: none; margin: 0 auto; padding: 22px 24px 60px; }
   .col-right { margin-top: 4px; }
 }
 
+/* ---------- section rail ---------- */
+/* A narrow fixed column of jump buttons pinned to the split, not to the scrolling
+   column, so it stays put while the left column scrolls under it. 44px is the whole
+   budget — horizontal space in the left column belongs to the cards. */
+.railnav { flex: 0 0 44px; width: 44px; display: flex; flex-direction: column; gap: 4px;
+  padding: 20px 0 0; align-self: stretch; }
+.railnav[hidden] { display: none; }
+.rail-btn {
+  position: relative; width: 36px; height: 34px; margin: 0 4px;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--ink-soft);
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer; padding: 0;
+}
+.rail-btn:hover { background: var(--surface-2); color: var(--ink); }
+.rail-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.rail-btn.is-active { background: var(--surface); border-color: var(--line); color: var(--ink); box-shadow: var(--shadow); }
+/* Left edge marker in the category colour — the "you are here" cue. */
+.rail-btn.is-active::before {
+  content: ""; position: absolute; left: -4px; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 2px; background: var(--cat, var(--brand));
+}
+/* The step buttons reuse the numbered badge from the card headings, so the rail
+   speaks the same language as the sections it jumps to. */
+.rail-btn .step { width: 22px; height: 22px; font-size: 12px; }
+/* Attention count — mirrors the ⚠ Needs attention filter. */
+.rail-badge {
+  position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px;
+  border-radius: 7px; padding: 0 3px;
+  background: var(--found-edge); color: var(--cat-ink, #fff);
+  font-size: 9px; font-weight: 800; display: grid; place-items: center;
+}
+.rail-sep { height: 1px; margin: 6px 10px; background: var(--line); }
+/* No room for it in the stacked layout — the column is normal page scroll there. */
+@media (max-width: 980px) { .railnav { display: none; } }
+
 /* Right-column placeholder shown until a site is loaded. The explicit display
    here would otherwise beat the [hidden] user-agent rule, so re-assert it. */
 .report-placeholder { display: grid; place-items: center; min-height: 260px; height: 100%; }
@@ -600,7 +636,7 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 /* ---------- print ---------- */
 #print-root { display: none; }
 @media print {
-  .topbar, #site-picker, #dashboard, #progress, .head-actions, .foot, #app > .banner { display: none !important; }
+  .topbar, .railnav, #site-picker, #dashboard, #progress, .head-actions, .foot, #app > .banner { display: none !important; }
   body { background: #fff; color: #000; }
   main { max-width: none; padding: 0; }
   #print-root { display: block; }

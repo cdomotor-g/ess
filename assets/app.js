@@ -1634,6 +1634,7 @@
     if (state.filterUnreviewed)
       list = list.filter((s) => !(state.findings[s.id] || {}).reviewed);
     for (const id of Object.keys(cardNumbers)) delete cardNumbers[id];
+    dashboardCats.length = 0; // rebuilt below, in render order, for the nav rail
     let n = 0;
     for (const cat of cats) {
       const inCat = list.filter((s) => s.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
@@ -1647,6 +1648,7 @@
         el("span", { class: "g-line" })));
       inCat.forEach((src) => { cardNumbers[src.id] = ++n; group.append(renderSourceCard(src)); });
       wrap.append(group);
+      dashboardCats.push(cat.id);
     }
     if (!wrap.children.length)
       wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" },
@@ -1655,6 +1657,158 @@
         state.filterUnreviewed ? "✓ Everything has been reviewed." : "No sources for this site."));
     syncStatusFilterBar();
     syncUnreviewedFilterButton();
+    renderRailNav(); // tracks the groups that survived the filters above
+  }
+
+  // ---------------------------------------------------------------- nav rail
+  // The narrow jump rail on the left edge of the split: the three numbered steps,
+  // then one button per visible dashboard group, each carrying a count of the
+  // sources in that category a human still owns. It answers "where am I / what's
+  // left" without scrolling, which is the whole reason it earns its 44px.
+  //
+  // The glyphs live here rather than in sources.json because they're presentation
+  // only, and sources.json is shared with the ess-collect skill.
+  const CAT_GLYPH = {
+    permits: "🔑", biosecurity: "🛡", threatened: "🦎", indigenous_heritage: "🏛",
+    invasive_plants: "🌾", invasive_animals: "🐗", disease: "🦠", additional: "📎",
+  };
+  const RAIL_STEPS = [
+    { id: "site-picker", step: "1", label: "Choose a site" },
+    { id: "site-summary", step: "2", label: "Site summary" },
+    { id: "dashboard", step: "3", label: "Collect location metadata" },
+  ];
+  const dashboardCats = []; // category ids currently on the dashboard, in render order
+  let railObserver = null;
+
+  function railScrollTo(id) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    // #col-left is the scroll container on the wide layout, so this scrolls the
+    // column rather than the page.
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+
+  function renderRailNav() {
+    const rail = $("#railnav");
+    if (!rail) return;
+    if (railObserver) { railObserver.disconnect(); railObserver = null; }
+    rail.innerHTML = "";
+    // Matches #workspace — there's nothing to jump to until a site is loaded.
+    const live = !!state.site && !$("#workspace").hidden;
+    rail.hidden = !live;
+    if (!live) return;
+
+    const catById = {};
+    for (const c of (DATA.sourcesMeta && DATA.sourcesMeta.categories) || []) catById[c.id] = c;
+    const attention = railAttentionCounts();
+
+    const targets = [];
+    const railBtn = (id, label, body) => {
+      const btn = el("button", {
+        type: "button", class: "rail-btn", "data-target": id,
+        title: label, "aria-label": label,
+        onclick: () => railScrollTo(id),
+      }, body);
+      targets.push(id);
+      return btn;
+    };
+
+    for (const s of RAIL_STEPS)
+      rail.append(railBtn(s.id, `${s.step}. ${s.label}`, el("span", { class: "step", "aria-hidden": "true" }, s.step)));
+
+    if (dashboardCats.length) rail.append(el("div", { class: "rail-sep" }));
+    for (const id of dashboardCats) {
+      const cat = catById[id];
+      if (!cat) continue;
+      const btn = railBtn(`group-${id}`, cat.label, el("span", { "aria-hidden": "true" }, CAT_GLYPH[id] || "•"));
+      btn.dataset.cat = id;
+      btn.style.setProperty("--cat", `var(--cat-${id})`);
+      setRailBadge(btn, cat.label, attention[id] || 0);
+      rail.append(btn);
+    }
+
+    wireRailSpy(rail, targets);
+  }
+
+  // Attention counts come from the site's whole source list, not the filtered view,
+  // so a badge keeps answering "what's left in this category" while a filter is on.
+  function railAttentionCounts() {
+    const counts = {};
+    for (const src of sourcesForSite())
+      if (ATTENTION.includes((state.findings[src.id] || {}).status || "unset"))
+        counts[src.category] = (counts[src.category] || 0) + 1;
+    return counts;
+  }
+
+  // A rail of bare emoji is unusable, so the label carries the category name and the
+  // count for the tooltip and for screen readers — the badge itself is decoration.
+  function setRailBadge(btn, label, n) {
+    const old = btn.querySelector(".rail-badge");
+    if (old) old.remove();
+    if (n) btn.append(el("span", { class: "rail-badge", "aria-hidden": "true" }, `${n}`));
+    const full = label + (n ? ` — ${n} needing attention` : "");
+    btn.title = full;
+    btn.setAttribute("aria-label", full);
+  }
+
+  // Badge-only refresh, run from renderProgress() so every path that changes a
+  // result (a click, an auto-check, an agent run, an import) keeps the counts live
+  // without rebuilding the rail or its observer.
+  function refreshRailBadges() {
+    const rail = $("#railnav");
+    if (!rail || rail.hidden || !state.site) return;
+    const counts = railAttentionCounts();
+    const catById = {};
+    for (const c of (DATA.sourcesMeta && DATA.sourcesMeta.categories) || []) catById[c.id] = c;
+    rail.querySelectorAll(".rail-btn[data-cat]").forEach((btn) => {
+      const cat = catById[btn.dataset.cat];
+      if (cat) setRailBadge(btn, cat.label, counts[btn.dataset.cat] || 0);
+    });
+  }
+
+  // Scroll-spy: one observer over the three fixed sections + every group, watching a
+  // band across the TOP of the scrolling column — the same place the sticky group
+  // header pins, so the rail always agrees with the heading on screen. (A mid-column
+  // band reads badly here: sections shorter than half a screen never reach it, so
+  // clicking a rail button could leave the button below it marked.)
+  function wireRailSpy(rail, targets) {
+    if (!("IntersectionObserver" in window)) return;
+    const nodes = targets.map((id) => document.getElementById(id)).filter(Boolean);
+    if (!nodes.length) return;
+
+    const setActive = (id) => {
+      rail.querySelectorAll(".rail-btn").forEach((b) => {
+        const on = b.dataset.target === id;
+        b.classList.toggle("is-active", on);
+        if (on) b.setAttribute("aria-current", "true");
+        else b.removeAttribute("aria-current");
+      });
+    };
+
+    // How deeply each target nests inside the others: the groups live inside
+    // #dashboard, so when both are in the band the group is the more specific — and
+    // more useful — answer to "where am I".
+    const depth = {};
+    for (const node of nodes) depth[node.id] = nodes.filter((o) => o !== node && o.contains(node)).length;
+
+    const inBand = new Set();
+    railObserver = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) inBand.add(e.target.id);
+        else inBand.delete(e.target.id);
+      }
+      // Deepest wins; among equals the first in document order wins, so a short
+      // section doesn't hand the marker to the one below it. Nothing in the band
+      // (mid-jump) keeps the previous marker rather than flickering off.
+      let pick = null, pickDepth = -1;
+      for (const id of targets) {
+        if (!inBand.has(id) || depth[id] <= pickDepth) continue;
+        pick = id; pickDepth = depth[id];
+      }
+      if (pick) setActive(pick);
+    }, { root: $("#col-left"), rootMargin: "0px 0px -85% 0px", threshold: 0 });
+    nodes.forEach((node) => railObserver.observe(node));
   }
 
   function renderSourceCard(src) {
@@ -2046,6 +2200,7 @@
       `<span class="chip manual">${counts.manual} manual</span>` +
       `<span class="chip reviewed">${reviewed}/${list.length} reviewed</span>`;
     renderAttention();
+    refreshRailBadges(); // same counts, shown per category on the nav rail
   }
 
   // Banner drawing the eye to sources a human still owns (shown after an import
@@ -3707,6 +3862,7 @@
       $("#workspace").hidden = true;
       const wr = $("#workspace-right"); if (wr) wr.hidden = true;
       const ph = $("#report-placeholder"); if (ph) ph.hidden = false;
+      renderRailNav(); // nothing to jump to with the workspace closed
       $("#site-picker").scrollIntoView({ behavior: "smooth" });
       $("#station-search").focus();
     });
