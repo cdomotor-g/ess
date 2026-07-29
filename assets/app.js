@@ -283,6 +283,14 @@
   let imgSeq = 0;
   const newImgId = () => `img${Date.now()}_${imgSeq++}`;
 
+  // The captured Queensland Globe map is not an evidence thumbnail — it is THE
+  // map of the site, and the report renders it full width and clickable rather
+  // than as a 90px crop among the photos. In live state that is carried by the
+  // image id (openQldGlobeMap mints "qldmap-…"); `kind` carries it through an
+  // export so a re-imported findings file still renders it as the map.
+  const QLD_MAP_KIND = "qld_globe_map";
+  const isQldMapImage = (im) => !!im && (im.kind === QLD_MAP_KIND || String(im.id || "").startsWith("qldmap-"));
+
   function fileToResizedDataUrl(file) {
     return new Promise((resolve, reject) => {
       if (!file || !file.type || !file.type.startsWith("image/")) { reject(new Error("not an image file")); return; }
@@ -667,6 +675,18 @@
       onRemove ? el("button", { type: "button", class: "photo-remove", title: "Remove this photo from the report", onclick: onRemove }, "×") : null,
       (cap || im.credit) ? el("figcaption", {}, cap, im.credit ? creditNode(im) : null) : null);
   }
+  // The captured Queensland Globe map, on screen. Full width of whatever it is
+  // dropped into, height following the width, and a click opens the same
+  // pan/zoom lightbox every other picture uses.
+  function qldMapFigure(im, onRemove) {
+    const cap = im.caption || "Queensland Globe — site map";
+    return el("figure", { class: "report-globe" },
+      el("img", { src: im.dataUrl, alt: cap, loading: "lazy", decoding: "async",
+        title: "Open the full-screen map — scroll to zoom, drag to pan",
+        onclick: () => openLightbox(im.dataUrl, cap) }),
+      onRemove ? el("button", { type: "button", class: "photo-remove", title: "Remove this map from the report", onclick: onRemove }, "×") : null,
+      el("figcaption", {}, cap, " — click to open full screen; the layer legend is in Appendix A."));
+  }
   // Small attribution line ("Wikipedia · <artist> · <licence>"), linking to the
   // source page where one is recorded. Shared by the picker + report thumbnails.
   function creditNode(im) {
@@ -677,19 +697,56 @@
   }
   // Static HTML string version — used by the print view / HTML export / JSON export inputs.
   // `large` renders the bigger, uncropped layout used for the site photographs.
-  function photosHtml(images, large) {
+  // `interactive` allows the click-to-enlarge markup, which is meaningless on
+  // paper — the print view passes false.
+  // The Queensland Globe map is pulled OUT of the thumbnail grid and rendered
+  // full width by qldMapFigureHtml: at 150px it was a coloured smudge nobody
+  // could read the site off.
+  function photosHtml(images, large, interactive) {
     if (!images || !images.length) return "";
+    const maps = images.filter(isQldMapImage);
+    const photos = images.filter((im) => !isQldMapImage(im));
     // esc() the data URL too, not just the caption — this string is injected via
     // innerHTML (print view) / a raw <script> template (HTML export), so an
     // unescaped value could break out of the src="" attribute (stored XSS) if it
     // ever originated from an imported findings file rather than our own canvas.
-    return `<div class="pr-photos${large ? " pr-photos-large" : ""}">${images.map((im) => {
+    const grid = photos.length ? `<div class="pr-photos${large ? " pr-photos-large" : ""}">${photos.map((im) => {
       const credit = im.credit
         ? `<span class="credit">${im.source_url ? `<a href="${esc(im.source_url)}">${esc(im.credit)}</a>` : esc(im.credit)}</span>` : "";
       const cap = (im.caption || im.credit)
         ? `<figcaption>${esc(im.caption || "")}${credit}</figcaption>` : "";
       return `<figure><img src="${esc(im.data_url)}" alt="${esc(im.caption || "")}">${cap}</figure>`;
-    }).join("")}</div>`;
+    }).join("")}</div>` : "";
+    return maps.map((im) => qldMapFigureHtml(im, interactive)).join("") + grid;
+  }
+
+  /* The Queensland Globe map in an exported report. Two things it must do that a
+     photo thumbnail does not:
+       • fill the width of the section it sits in, with the height following the
+         width (aspect-ratio), so the site is actually legible on the page;
+       • open full screen on a click, the way it does in the workbench.
+     The exported HTML is a single self-contained file with NO script, so the
+     full-screen view is done with a `:target` overlay — an anchor to a hidden
+     div that CSS reveals when it is the URL fragment. No JavaScript, works from
+     a file:// copy, and degrades to a plain picture when printed. */
+  let prMapSeq = 0;
+  function qldMapFigureHtml(im, interactive) {
+    const src = esc(im.data_url);
+    const cap = esc(im.caption || "Queensland Globe — site map");
+    const img = `<img class="pr-globe-img" src="${src}" alt="${cap}">`;
+    if (!interactive)
+      return `<figure class="pr-globe">${img}
+        <figcaption class="pr-globe-cap">${cap} — layer legend in Appendix A.</figcaption></figure>`;
+    const id = `pr-globe-full-${++prMapSeq}`;
+    return `<figure class="pr-globe">
+      <a class="pr-globe-link" href="#${id}" title="Open the full-screen map">${img}</a>
+      <figcaption class="pr-globe-cap">${cap} — click the map to open it full screen; layer legend in Appendix A.</figcaption>
+    </figure>
+    <div class="pr-lightbox" id="${id}" role="dialog" aria-label="${cap}">
+      <a class="pr-lightbox-bg" href="#" aria-label="Close the full-screen map"></a>
+      <img class="pr-lightbox-img" src="${src}" alt="${cap}">
+      <a class="pr-lightbox-x" href="#">✕ Close</a>
+    </div>`;
   }
 
   // A data: URL is the only form these images should ever take (our own canvas
@@ -711,6 +768,9 @@
     return list.map((im) => ({
       id: newImgId(), dataUrl: (im && (im.data_url || im.dataUrl)) || "",
       caption: (im && im.caption) || "", credit: (im && im.credit) || "",
+      // Only the one value is ever accepted — an imported file must not be able
+      // to invent image kinds the renderer has never heard of.
+      kind: (im && im.kind === QLD_MAP_KIND) ? QLD_MAP_KIND : "",
       source_url: safeHttpUrl(im && (im.source_url || im.sourceUrl)), ts: Date.now(),
     })).filter((im) => DATA_IMG_RE.test(im.dataUrl));
   }
@@ -1004,9 +1064,9 @@
       // Prefer the file's own layer descriptions. A file that recorded only the
       // ticked ids (hand-written, or an older export) still gets a real appendix
       // by resolving those ids against the map module's catalogue.
-      let layers = Array.isArray(qg.layers) && qg.layers.length ? qg.layers : null;
+      let layers = Array.isArray(qg.layers) && qg.layers.length ? qg.layers.map(normalizeQldLayer) : null;
       if (!layers && selection && selection.length && window.ESSQldMap)
-        layers = window.ESSQldMap.describe(selection);
+        layers = window.ESSQldMap.describe(selection).map(normalizeQldLayer);
       state.qldMap = {
         selection,
         capture: (layers && layers.length)
@@ -1021,6 +1081,19 @@
     state.filterStatus = null;
     state.filterUnreviewed = false;
     state.showAttention = true; // surface what the agent left for the human
+  }
+
+  // One appendix layer row out of an untrusted findings file, trimmed to the
+  // fields the report actually renders — and with its legend swatches validated
+  // as data: images, since they end up in an <img src> in exported HTML.
+  function normalizeQldLayer(l) {
+    const legend = safeLegend(l && l.legend);
+    return {
+      id: String((l && l.id) || ""), name: String((l && l.name) || ""), group: String((l && l.group) || ""),
+      service: String((l && l.service) || ""), url: safeHttpUrl(l && l.url),
+      sublayer: (l && l.sublayer) != null ? l.sublayer : null,
+      legend, legend_more: Math.max(0, +((l && l.legend_more) || 0)),
+    };
   }
 
   // Load a completed (or partial) ess-findings/1 object — from the agent skill
@@ -2832,9 +2905,15 @@
           const item = el("div", { class: "r-inc-item status-" + st }, head);
           if (f.note && f.note.trim()) item.append(el("div", { class: "r-inc-note" }, f.note.trim()));
           const imgs = (f.images || []).filter((im) => { const k = im.dataUrl || im.id; if (seenImg.has(k)) return false; seenImg.add(k); return true; });
-          if (imgs.length) {
+          // The Queensland Globe map is the one picture in the report that has
+          // to be READ, not glanced at — it gets the full width of the section,
+          // exactly as the exported report renders it.
+          imgs.filter(isQldMapImage).forEach((im) =>
+            item.append(qldMapFigure(im, () => removeFindingImage(src.id, im.id))));
+          const photos = imgs.filter((im) => !isQldMapImage(im));
+          if (photos.length) {
             const grid = el("div", { class: "photo-grid small" });
-            imgs.forEach((im) => grid.append(photoFigure(im, src.name, () => removeFindingImage(src.id, im.id))));
+            photos.forEach((im) => grid.append(photoFigure(im, src.name, () => removeFindingImage(src.id, im.id))));
             item.append(grid);
           }
           if ((!f.note || !f.note.trim()) && !imgs.length)
@@ -2856,7 +2935,7 @@
         list.append(el("div", { class: "r-appendix-group" },
           el("h4", {}, g.title),
           g.source ? el("p", { class: "r-appendix-src r-appendix-gsrc" }, g.source) : null,
-          el("ul", {}, g.layers.map((l) => el("li", {}, l.name, l.service ? el("span", { class: "r-appendix-src" }, l.service) : null)))));
+          el("ul", {}, g.layers.map(appendixItem))));
       });
       box.append(list);
       wrap.append(box);
@@ -2878,7 +2957,10 @@
     cap.layers.forEach((l) => {
       const title = l.group || "Layers";
       if (!byTitle.has(title)) { const g = { title, layers: [] }; byTitle.set(title, g); groups.push(g); }
-      byTitle.get(title).layers.push({ name: l.name || l.id, service: l.service || "", url: l.url || "" });
+      byTitle.get(title).layers.push({
+        name: l.name || l.id, service: l.service || "", url: l.url || "",
+        legend: safeLegend(l.legend), legendMore: Math.max(0, +l.legend_more || 0),
+      });
     });
     // Where a whole group comes from one service, name it ONCE under the group
     // heading. Repeating "Matters of State Environmental Significance" under all
@@ -2890,14 +2972,72 @@
     });
     const when = cap.at ? new Date(cap.at).toLocaleString("en-AU") : "";
     const where = (cap.lat != null && cap.lon != null) ? `${cap.lat}, ${cap.lon}` : `${state.site.lat}, ${state.site.lon}`;
+    const withKeys = groups.some((g) => g.layers.some((l) => l.legend.length));
     return {
       title: "Appendix A — Queensland Globe map layers",
       blurb: `The site map in this report was drawn over the ${cap.layers.length} Queensland Government spatial layer${cap.layers.length === 1 ? "" : "s"} listed below, `
         + `centred on ${where}${cap.scale ? ` at approximately 1:${(+cap.scale).toLocaleString()}` : ""}${when ? `, captured ${when}` : ""}. `
+        // Without this the appendix is a list of names beside a map full of
+        // unexplained colour — the swatches ARE the legend, so say so.
+        + (withKeys ? "The swatch beside each layer is the symbol that layer is drawn with on the map, as published by the service itself. " : "")
         + "Layer currency and authoritative symbology remain those published by the Queensland Government.",
       count: cap.layers.length,
+      hasKeys: withKeys,
       groups,
     };
+  }
+
+  // A layer's legend swatches, taken from the capture record (or an imported
+  // findings file) and made safe to interpolate into exported HTML: every
+  // swatch must be a data: image the same way every photo must be.
+  // Matches CFG.legendMaxPerLayer in qldmap.js — the cap is re-applied here so
+  // an imported (or hand-written) findings file can't make the appendix
+  // hundreds of swatches long.
+  const MAX_LEGEND_KEYS = 8;
+  function safeLegend(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((k) => ({ label: String((k && k.label) || "").trim(), swatch: (k && k.swatch) || "" }))
+      .filter((k) => DATA_IMG_RE.test(k.swatch))
+      .slice(0, MAX_LEGEND_KEYS);
+  }
+
+  /* One appendix entry: the layer name and its legend box — the colour and
+     pattern the map actually draws that layer with. A single unlabelled swatch
+     (a simple renderer: one symbol for the whole layer) sits inline against the
+     name; a classified layer gets its classes listed underneath, because THAT
+     is the case where the reader cannot otherwise tell which shade meant what.
+     Shared shape with appendixItemHtml below — keep the two in step. */
+  function appendixItem(l) {
+    const inline = l.legend.length === 1 && !l.legend[0].label;
+    const li = el("li", { class: "r-appendix-item" },
+      el("span", { class: "r-appendix-lname" },
+        inline ? el("img", { class: "r-legend-swatch", src: l.legend[0].swatch, alt: "", loading: "lazy" }) : null,
+        l.name),
+      l.service ? el("span", { class: "r-appendix-src" }, l.service) : null);
+    if (!inline && l.legend.length)
+      li.append(el("div", { class: "r-legend" }, l.legend.map((k) =>
+        el("span", { class: "r-legend-key" },
+          el("img", { class: "r-legend-swatch", src: k.swatch, alt: "", loading: "lazy" }),
+          el("span", { class: "r-legend-label" }, k.label)))));
+    if (l.legendMore)
+      li.append(el("span", { class: "r-legend-more" }, `+${l.legendMore} further class${l.legendMore === 1 ? "" : "es"} in this layer's published legend`));
+    if (!l.legend.length)
+      li.append(el("span", { class: "r-legend-more" }, "symbology not published by the service"));
+    return li;
+  }
+  // The same entry as an HTML string, for the printed / exported report.
+  function appendixItemHtml(l) {
+    const inline = l.legend.length === 1 && !l.legend[0].label;
+    const swatch = (k) => `<img class="pr-legend-swatch" src="${esc(k.swatch)}" alt="">`;
+    const keys = !inline && l.legend.length
+      ? `<span class="pr-legend">${l.legend.map((k) =>
+        `<span class="pr-legend-key">${swatch(k)}<span>${esc(k.label)}</span></span>`).join("")}</span>` : "";
+    const more = l.legendMore
+      ? `<span class="pr-legend-more">+${l.legendMore} further class${l.legendMore === 1 ? "" : "es"} in this layer's published legend</span>`
+      : (l.legend.length ? "" : `<span class="pr-legend-more">symbology not published by the service</span>`);
+    return `<li>${inline ? swatch(l.legend[0]) : ""}${esc(l.name)}`
+      + `${l.service ? `<span class="pr-appendix-src">${esc(l.service)}</span>` : ""}${keys}${more}</li>`;
   }
 
   function syncBioDetail(section, box) {
@@ -2981,8 +3121,9 @@
       v: 2, site: state.site, findings: findingsText, report: state.report,
       maps: mapsMeta,
       // Small (layer ids + one capture record, no picture) so it rides in the
-      // text payload; the map image itself lives in the card's images.
-      qldMap: state.qldMap,
+      // text payload; the map image itself lives in the card's images, and so
+      // do the legend swatches — see qldMapTextState.
+      qldMap: qldMapTextState(),
       date: state.date,
       maintenance: state.maintenance,
     };
@@ -3007,10 +3148,11 @@
       const persistMaps = !(state.batch && state.batch.keys && state.batch.keys.length);
       const mapImages = {};
       if (persistMaps) for (const [k, ms] of Object.entries(state.maps || {})) if (ms.image) mapImages[k] = ms.image;
-      const hasAny = state.siteImages.length || Object.keys(mapImages).length || Object.keys(findingImages).length;
+      const qldMapLegend = qldMapLegendState();
+      const hasAny = state.siteImages.length || Object.keys(mapImages).length || Object.keys(findingImages).length || qldMapLegend;
       try {
         if (hasAny)
-          localStorage.setItem(key + IMG_SUFFIX, JSON.stringify({ siteImages: state.siteImages, mapImages, findingImages }));
+          localStorage.setItem(key + IMG_SUFFIX, JSON.stringify({ siteImages: state.siteImages, mapImages, findingImages, qldMapLegend }));
         else
           localStorage.removeItem(key + IMG_SUFFIX);
         imagesDirty = false;
@@ -3025,6 +3167,35 @@
       }
     }
   }
+  /* ---- Queensland Globe map: what is persisted where ---------------------
+     The capture record is small (layer ids and names) and rides in the text
+     payload, which is rewritten on every keystroke. Its LEGEND SWATCHES are
+     not small — they are base64 PNGs published by the services — so they are
+     split out and stored with the images, which are only rewritten when an
+     image actually changes. restore() puts them back together. */
+  function qldMapTextState() {
+    const qm = state.qldMap || { selection: null, capture: null };
+    if (!qm.capture || !Array.isArray(qm.capture.layers)) return qm;
+    return {
+      selection: qm.selection || null,
+      capture: Object.assign({}, qm.capture, {
+        layers: qm.capture.layers.map(({ legend, ...rest }) => rest),
+      }),
+    };
+  }
+  function qldMapLegendState() {
+    const cap = state.qldMap && state.qldMap.capture;
+    if (!cap || !Array.isArray(cap.layers)) return null;
+    const out = {};
+    cap.layers.forEach((l) => { if (l && l.id && Array.isArray(l.legend) && l.legend.length) out[l.id] = l.legend; });
+    return Object.keys(out).length ? out : null;
+  }
+  function applyQldMapLegend(byId) {
+    const cap = state.qldMap && state.qldMap.capture;
+    if (!cap || !Array.isArray(cap.layers) || !byId || typeof byId !== "object") return;
+    cap.layers.forEach((l) => { if (l && byId[l.id]) l.legend = byId[l.id]; });
+  }
+
   function restore() {
     try {
       const key = LS_PREFIX + siteKey(state.site);
@@ -3070,6 +3241,7 @@
         const di = JSON.parse(imgRaw) || {};
         state.siteImages = di.siteImages || [];
         applyMapImages(di.mapImages, di.mapImage);
+        applyQldMapLegend(di.qldMapLegend);
         const fi = di.findingImages || {};
         for (const [id, imgs] of Object.entries(fi)) {
           if (!state.findings[id]) state.findings[id] = { status: STATUS.UNSET, note: "", result: null };
@@ -3109,6 +3281,7 @@
     const o = { caption: im.caption || "", data_url: im.dataUrl };
     if (im.credit) o.credit = im.credit;
     if (im.source_url) o.source_url = im.source_url;
+    if (isQldMapImage(im)) o.kind = QLD_MAP_KIND;
     return o;
   }
 
@@ -3181,13 +3354,26 @@
       pin_in_view: cap.pin_in_view !== false,
       source: "Queensland Government spatial services (Queensland Globe layers)",
       selection: (state.qldMap.selection || cap.layers.map((l) => l.id)).filter(Boolean),
-      layers: cap.layers.map((l) => ({ id: l.id, name: l.name, group: l.group, service: l.service, url: l.url, sublayer: l.sublayer })),
+      // `legend` carries the service's own swatches, so a report exported to
+      // JSON and re-imported still has a legend the map can be read against.
+      layers: cap.layers.map((l) => {
+        const row = { id: l.id, name: l.name, group: l.group, service: l.service, url: l.url, sublayer: l.sublayer };
+        const legend = safeLegend(l.legend);
+        if (legend.length) row.legend = legend;
+        if (l.legend_more) row.legend_more = Math.max(0, +l.legend_more || 0);
+        return row;
+      }),
     };
   }
 
   function buildReportHtml(forPrint) {
     const r = reportObject();
     const s = r.site;
+    // Click-to-enlarge is for the on-screen HTML export only; on paper the
+    // overlay would be a second copy of the same picture. Reset per build so
+    // repeated exports don't drift the fragment ids.
+    const interactive = !forPrint;
+    prMapSeq = 0;
     // esc() the data URL (not just captions) — this string is injected via innerHTML
     // (print) / a raw <script>-free template (HTML export), so an unescaped value
     // could otherwise break out of src="" if a crafted findings file supplied it.
@@ -3205,7 +3391,7 @@
           </figure>`).join("")}</div></div>`
       : "";
     const siteShots = s.images && s.images.length
-      ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images, true)}</div>` : "";
+      ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images, true, interactive)}</div>` : "";
     const nl2br = (x) => esc(x).replace(/\n/g, "<br>");
     const evNotesHtml = (sec) => (sec.evidence_notes && sec.evidence_notes.length)
       ? `<div class="pr-ev">${sec.evidence_notes.map((e) =>
@@ -3217,7 +3403,7 @@
       ${sec.note ? `<p>${nl2br(sec.note)}</p>` : ""}
       ${(sec.warnings || []).map((wn) => `<p class="pr-warn">⚠ Review: ${esc(wn)}</p>`).join("")}
       ${evNotesHtml(sec)}
-      ${photosHtml(sec.images)}</div>`).join("");
+      ${photosHtml(sec.images, false, interactive)}</div>`).join("");
     // Internal / login-only sources are operator working items — keep their
     // "check internal system X" instructions out of the exported report entirely.
     const logRows = r.collection_log.filter((c) => !c.internal).map((c) => `<tr>
@@ -3257,7 +3443,7 @@
       <div class="pr-appendix-cols">${a.groups.map((g) => `<div class="pr-appendix-group">
         <h3>${esc(g.title)}</h3>
         ${g.source ? `<p class="pr-appendix-src pr-appendix-gsrc">${esc(g.source)}</p>` : ""}
-        <ul>${g.layers.map((l) => `<li>${esc(l.name)}${l.service ? `<span class="pr-appendix-src">${esc(l.service)}</span>` : ""}</li>`).join("")}</ul>
+        <ul>${g.layers.map(appendixItemHtml).join("")}</ul>
       </div>`).join("")}</div></div>`;
   }
 
@@ -3300,7 +3486,33 @@
       .pr-appendix-group ul{margin:0;padding-left:16px}
       .pr-appendix-group li{font-size:11px;line-height:1.45;margin:0 0 3px}
       .pr-appendix-src{display:block;font-size:9.5px;color:#777}
-      .pr-appendix-gsrc{margin:0 0 4px;font-style:italic}</style>
+      .pr-appendix-gsrc{margin:0 0 4px;font-style:italic}
+      .pr-appendix-cols li{margin:0 0 6px}
+      /* Legend box per layer — the swatch is the service's own symbol, so a
+         colour on the map can be traced back to the layer that drew it. */
+      .pr-legend{display:block;margin:2px 0 0}
+      .pr-legend-key{display:flex;align-items:center;gap:5px;font-size:10px;color:#444}
+      .pr-legend-swatch{width:14px;height:14px;flex:0 0 auto;object-fit:contain;border:1px solid #bbb;
+        border-radius:2px;background:#fff;vertical-align:-3px;margin-right:5px}
+      .pr-legend-more{display:block;font-size:9.5px;color:#888;font-style:italic}
+      /* The Queensland Globe map fills its section and its height follows the
+         width — it is the one picture in the report that has to be read. */
+      .pr-globe{margin:8px 0 0}
+      .pr-globe-link{display:block;cursor:zoom-in}
+      .pr-globe-img{display:block;width:100%;height:auto;border:1px solid #bbb;border-radius:6px;background:#fff}
+      .pr-globe-cap{font-size:10.5px;color:#444;margin:4px 0 0}
+      /* Click-to-enlarge with no JavaScript: the link targets the overlay and
+         :target reveals it, so a saved copy of this file still works offline. */
+      .pr-lightbox{display:none}
+      .pr-lightbox:target{display:flex;position:fixed;inset:0;z-index:99;align-items:center;
+        justify-content:center;padding:2vh 2vw;background:rgba(8,14,18,.92)}
+      .pr-lightbox-bg{position:absolute;inset:0}
+      .pr-lightbox-img{position:relative;max-width:100%;max-height:96vh;object-fit:contain;
+        border-radius:6px;background:#fff}
+      .pr-lightbox-x{position:absolute;top:12px;right:16px;z-index:1;color:#fff;font-size:13px;
+        text-decoration:none;background:rgba(0,0,0,.55);border-radius:6px;padding:6px 12px}
+      @media print{.pr-lightbox,.pr-lightbox:target{display:none !important}
+        .pr-globe-link{cursor:default}}</style>
       </head><body>${buildReportHtml(false)}</body></html>`;
     download(`ESS_${slug(state.site.name)}_${state.date || "draft"}.html`, "text/html", html);
   }

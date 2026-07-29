@@ -93,11 +93,20 @@
     // `viewReady` is deliberately LONGER than `layer`: the view takes its
     // projection from the imagery layer, so it must not be declared wedged
     // while that layer's own bound is still running (see readyView).
-    timeouts: { esri: 15000, meta: 9000, layer: 12000, view: 9000, viewReady: 14000 },
+    timeouts: { esri: 15000, meta: 9000, layer: 12000, view: 9000, viewReady: 14000, identify: 11000, legend: 9000 },
     // The projection these Queensland basemap/tile services publish in, named
     // outright only when the imagery has failed to hand the view one.
     fallbackWkid: 102100,
     thematicOpacity: 0.62,
+    // Click-to-identify: how many screen pixels either side of the click still
+    // count as "at this point", and how much of one feature's attribute table
+    // the popup may show before it stops being readable.
+    identifyTolerance: 4,
+    identifyMaxAttrs: 6,
+    // A published legend can carry hundreds of classes (broad vegetation
+    // groups). The appendix only has to explain what the map actually shows, so
+    // the swatches per layer are capped — and the appendix says when it capped.
+    legendMaxPerLayer: 8,
     // Draw order (lower = further down the stack). Pins live in view.graphics
     // and are always above every layer here.
     z: { imagery: 0, thematic: 10, cadastre: 60, contour: 65, rail: 70, labels: 90 },
@@ -284,6 +293,8 @@
   const M = {
     esri: null, esriPromise: null,
     serviceCache: {},          // svcKey -> { layers:[{id,name,group}], error } | Promise
+    legendCache: {},           // svcKey -> Promise of the /legend read
+    legend: {},                // svcKey -> { sublayerId: [{label, values, swatch}] } (resolved)
     overlay: null, view: null, esriMap: null,
     hosts: {},                 // cached DOM references inside the overlay
     site: null,
@@ -291,6 +302,9 @@
     resolved: {},              // layerId -> { sublayer, via, status, note }
     svcLayers: {},             // svcKey -> the MapImageLayer on the map
     pinGraphic: null,
+    probe: null,               // the open "what's here?" answer (see runProbe)
+    probeToken: 0,             // only the newest click's answers are rendered
+    probeGraphic: null,        // the ring marking the point that was asked about
     userFramed: false,         // the operator has panned/zoomed — stop auto-fitting
     shot: { dataUrl: null, valid: false, at: null, meta: null },
     capture: null,             // the record handed back to app.js on "add to report"
@@ -305,7 +319,7 @@
      outcome here in words, and the panel's Copy button hands the whole thing
      over as plain text. Nothing is console-only. */
   function freshDiag() {
-    return { esri: { status: "pending" }, imagery: { status: "pending" }, services: {}, layers: {}, screenshot: { status: "idle" }, log: [] };
+    return { esri: { status: "pending" }, imagery: { status: "pending" }, services: {}, legends: {}, layers: {}, screenshot: { status: "idle" }, identify: { status: "idle" }, log: [] };
   }
   function dlog(msg) {
     if (!M.diag) M.diag = freshDiag();
@@ -400,6 +414,88 @@
       });
     M.serviceCache[key] = p;
     return p;
+  }
+
+  /* ---- published symbology (the legend) ---------------------------------
+     Every ArcGIS MapServer publishes the symbols it draws with at
+     `/legend?f=json`, as the very PNG swatches the server paints into the map
+     image. Reading them is what lets the click popup and the report appendix
+     show the operator the actual colour and pattern on the picture instead of
+     a colour we invented in the panel — the mismatch between our group colours
+     and the map's own shading is exactly what made the map unreadable.
+
+     Failure here is survivable and deliberately quiet: a layer with no legend
+     still identifies, still draws and still reaches the appendix; it just does
+     so as a name without a swatch. */
+  function loadLegend(key) {
+    if (M.legendCache[key]) return M.legendCache[key];
+    const svc = SERVICES[key];
+    const p = fetchJson(`${svc.url}/legend?f=json`, `${svc.label} legend`, CFG.timeouts.legend)
+      .then(({ json, ms }) => {
+        const byLayer = {};
+        (json.layers || []).forEach((l) => {
+          const rows = (l.legend || []).map((e) => ({
+            label: String(e.label == null ? "" : e.label),
+            // Unique-value renderers publish the attribute value(s) each swatch
+            // stands for — the only reliable way to pick the RIGHT swatch for
+            // an identified feature rather than the layer's first one.
+            values: Array.isArray(e.values) && e.values.length ? e.values.map((v) => String(v)) : null,
+            swatch: e.imageData ? `data:${e.contentType || "image/png"};base64,${e.imageData}` : "",
+          })).filter((e) => e.swatch);
+          if (rows.length) byLayer[l.layerId] = rows;
+        });
+        M.legend[key] = byLayer;
+        setDiag("legends", { [key]: { status: "read", ms, count: Object.keys(byLayer).length } },
+          `${svc.label}: read symbology for ${Object.keys(byLayer).length} sublayers.`);
+        return byLayer;
+      })
+      .catch((e) => {
+        delete M.legendCache[key];  // a blip must not withhold the symbology forever
+        setDiag("legends", { [key]: { status: e.isTimeout ? "timed out" : "failed", note: e.message } },
+          `${svc.label}: symbology unavailable — ${e.message}. Its layers appear without a swatch.`);
+        return {};
+      });
+    M.legendCache[key] = p;
+    return p;
+  }
+
+  // Read the legend of every service with a ticked, resolved layer. Started
+  // (not awaited) as the map draws, and awaited — bounded — before a capture,
+  // so the appendix gets swatches without ever making the map wait for them.
+  function ensureLegends() {
+    const keys = [...new Set(Object.keys(LAYER_INDEX)
+      .filter((id) => M.selection.has(id) && M.resolved[id] && M.resolved[id].status === "ok")
+      .map((id) => LAYER_INDEX[id].layer.svc))];
+    return Promise.all(keys.map((k) => loadLegend(k).catch(() => ({}))));
+  }
+
+  // The swatches for one catalogue layer, as published by its service. Empty
+  // for a whole-service or group-layer entry: those have no single sublayer to
+  // key on, and inventing one would put the wrong colour in the report.
+  function legendEntries(id) {
+    const hit = LAYER_INDEX[id], r = M.resolved[id];
+    if (!hit || !r || r.status !== "ok" || r.sublayer == null) return [];
+    const byLayer = M.legend[hit.layer.svc];
+    return (byLayer && byLayer[r.sublayer]) || [];
+  }
+
+  // The single swatch that matches ONE identified feature. Returns null when it
+  // cannot be certain — a wrong colour beside a layer name is worse than none.
+  function swatchForFeature(id, result) {
+    const entries = legendEntries(id);
+    if (!entries.length) return null;
+    if (entries.length === 1) return entries[0];
+    const candidates = [String((result && result.value) || "")]
+      .concat(Object.values((result && result.attributes) || {}).map((v) => String(v == null ? "" : v)))
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean);
+    for (const c of candidates) {
+      const byValue = entries.find((e) => e.values && e.values.some((v) => v.trim().toLowerCase() === c));
+      if (byValue) return byValue;
+      const byLabel = entries.find((e) => e.label.trim().toLowerCase() === c);
+      if (byLabel) return byLabel;
+    }
+    return null;
   }
 
   // Match one catalogue entry against a service's live sublayer names. Returns
@@ -620,6 +716,7 @@
     const view = M.view;
     if (!view || !M.site) return;
     view.graphics.removeAll();
+    M.probeGraphic = null;   // removeAll took it with the old pin
     const label = M.site.station_num ? `${M.site.name} (${M.site.station_num})` : M.site.name;
     const g = new M.esri.Graphic({
       geometry: { type: "point", longitude: +M.site.lon, latitude: +M.site.lat },
@@ -744,9 +841,19 @@
       if (!M.userFramed) { M.userFramed = true; renderPanel(); }
       invalidateShot();
     });
-    E.reactiveUtils.watch(() => view.stationary, (s) => { if (s) { invalidateShot(); updateScaleHint(); renderDiagnostics(); } });
+    E.reactiveUtils.watch(() => view.stationary, (s) => { if (s) { invalidateShot(); updateScaleHint(); repositionProbe(); renderDiagnostics(); } });
     E.reactiveUtils.watch(() => view.updating, (u) => { if (!u) settleProgress(); });
     E.reactiveUtils.watch(() => view.scale, updateScaleHint);
+
+    // A click asks every ticked service what covers that point (runProbe). The
+    // BUILT-IN popup is switched off first: leaving it on means two popups
+    // fighting over the same click, and the station pin's own bubble opening
+    // over the answer the operator actually asked for.
+    view.popupEnabled = false;
+    view.on("click", (e) => {
+      if (!e || !e.mapPoint) return;
+      runProbe(e.mapPoint, { x: e.x, y: e.y }).catch((err) => dlog(`Identify failed: ${err && err.message}`));
+    });
 
     // The imagery is left to finish in the background: it reports its own
     // outcome, and insertOrdered keys off z-order rather than arrival order, so
@@ -807,6 +914,9 @@
     renderFurniture();
     invalidateShot();
     setProgress(1, "Map ready");
+    // Started, never awaited: the symbology is for the click popup and the
+    // report appendix, and the map must not wait on it to finish drawing.
+    ensureLegends().then(() => { if (M.probe) renderProbe(); }).catch(() => {});
   }
 
   // ------------------------------------------------------------------ chrome
@@ -883,16 +993,326 @@
 
   // The layers actually contributing to the picture: ticked AND resolved. This
   // is what the appendix cites — never the raw tick list, which could include a
-  // layer that was withheld.
+  // layer that was withheld. Each row carries the service's OWN legend swatches
+  // (capped — see CFG.legendMaxPerLayer) so the report can print a legend box
+  // per layer and the picture stays readable once it leaves this screen.
   function activeLayerRows() {
     const rows = [];
     LAYER_GROUPS.forEach((g) => g.layers.forEach((l) => {
       if (!M.selection.has(l.id)) return;
       const r = M.resolved[l.id];
       if (!r || r.status !== "ok") return;
-      rows.push({ id: l.id, name: l.name, group: g.title, service: SERVICES[l.svc].label, url: SERVICES[l.svc].url, sublayer: r.sublayer, via: r.via });
+      const all = legendEntries(l.id);
+      rows.push({
+        id: l.id, name: l.name, group: g.title, colour: g.colour,
+        service: SERVICES[l.svc].label, url: SERVICES[l.svc].url, sublayer: r.sublayer, via: r.via,
+        legend: all.slice(0, CFG.legendMaxPerLayer).map((e) => ({ label: e.label, swatch: e.swatch })),
+        legendMore: Math.max(0, all.length - CFG.legendMaxPerLayer),
+      });
     }));
     return rows;
+  }
+
+  /* ---- "what is at this point?" -----------------------------------------
+     Forty translucent layers stack on one map, and the panel's group colours
+     are OURS, not the services' — so a shaded patch cannot be read back to a
+     layer by eye, which is the whole problem this answers. A click asks the
+     services themselves: one `identify` call per MapServer, restricted to the
+     sublayers actually ticked, and every layer covering that point is named in
+     a popup beside the service's own legend swatch.
+
+     One call per SERVICE, not per layer — the same reason the map draws one
+     MapImageLayer per service: forty round-trips per click would be unusable.
+     Each call is bounded and reports itself, and a service that fails is NAMED
+     in the popup rather than dropped, because "nothing is here" and "we could
+     not ask" are very different answers to give an assessor. */
+
+  // Label-only services have nothing to say about what is at a point.
+  const IDENTIFY_SKIP = new Set(["labels"]);
+  // Housekeeping columns every ArcGIS table carries; they tell the operator
+  // nothing and would push the real attributes out of the popup.
+  const ATTR_SKIP = /^(objectid|fid|globalid|shape|shape[._ ]|st_area|st_length|se_anno|created_|last_edit|editor_|esri)/i;
+  // Only the server's own placeholders for "no value" — deliberately NOT "0" or
+  // "None", which are real answers to questions like a buffer width or a
+  // protection status, and hiding them would misreport the site.
+  const ATTR_EMPTY = /^(null|<null>|<all other values>)$/i;
+
+  // The resolved sublayer ids of one service that are currently ticked.
+  function identifiableSublayers(key) {
+    const ids = [];
+    for (const id of Object.keys(LAYER_INDEX)) {
+      const { layer } = LAYER_INDEX[id];
+      if (layer.svc !== key || layer.whole || !M.selection.has(id)) continue;
+      const r = M.resolved[id];
+      if (!r || r.status !== "ok" || r.sublayer == null) continue;
+      if (!ids.includes(r.sublayer)) ids.push(r.sublayer);
+    }
+    return ids;
+  }
+
+  // Which catalogue entry a returned sublayer id belongs to. One sublayer can
+  // back two catalogue entries; the ticked one is the one the operator means.
+  function catalogueEntryFor(svcKey, sublayerId) {
+    for (const id of Object.keys(LAYER_INDEX)) {
+      const { layer, group } = LAYER_INDEX[id];
+      if (layer.svc !== svcKey || !M.selection.has(id)) continue;
+      const r = M.resolved[id];
+      if (r && r.status === "ok" && r.sublayer === sublayerId) return { id, layer, group };
+    }
+    return null;
+  }
+
+  // `returnFieldName=false` means the server hands back field ALIASES, which
+  // are already human-readable — so this only has to drop the housekeeping and
+  // the empties, and stop before the popup turns into a database dump.
+  function tidyAttributes(attrs) {
+    const out = [];
+    if (!attrs || typeof attrs !== "object") return out;
+    for (const [k, v] of Object.entries(attrs)) {
+      if (out.length >= CFG.identifyMaxAttrs) break;
+      if (ATTR_SKIP.test(k)) continue;
+      const val = v == null ? "" : String(v).trim();
+      if (!val || ATTR_EMPTY.test(val)) continue;
+      out.push({ k: String(k).trim(), v: val });
+    }
+    return out;
+  }
+  const cleanValue = (v) => {
+    const s = v == null ? "" : String(v).trim();
+    return ATTR_EMPTY.test(s) ? "" : s;
+  };
+
+  // One service's answer. Never throws: a failure becomes `error`, which the
+  // popup shows as "could not ask this service".
+  async function identifyService(key, point, wkid, extent, size) {
+    const svc = SERVICES[key];
+    const ids = identifiableSublayers(key);
+    if (!ids.length) return { key, rows: [], error: null };
+    const params = new URLSearchParams({
+      f: "json",
+      geometry: JSON.stringify({ x: point.x, y: point.y, spatialReference: { wkid } }),
+      geometryType: "esriGeometryPoint",
+      sr: String(wkid),
+      // `all:` rather than `visible:` — a layer suppressed by the zoom scale is
+      // still ticked, and the operator asking what is here deserves the answer.
+      layers: `all:${ids.join(",")}`,
+      tolerance: String(CFG.identifyTolerance),
+      mapExtent: `${extent.xmin},${extent.ymin},${extent.xmax},${extent.ymax}`,
+      imageDisplay: `${Math.round(size.w) || 800},${Math.round(size.h) || 600},96`,
+      returnGeometry: "false",
+      returnFieldName: "false",
+    });
+    try {
+      const { json } = await fetchJson(`${svc.url}/identify?${params.toString()}`, `${svc.label} identify`, CFG.timeouts.identify);
+      if (json && json.error) throw new Error(json.error.message || "the service refused the request");
+      const rows = (json.results || []).map((res) => {
+        const hit = catalogueEntryFor(key, res.layerId);
+        return {
+          service: svc.label,
+          name: hit ? hit.layer.name : String(res.layerName || `Sublayer ${res.layerId}`),
+          groupTitle: hit ? hit.group.title : svc.label,
+          colour: hit ? hit.group.colour : "#546e7a",
+          value: cleanValue(res.value),
+          attrs: tidyAttributes(res.attributes),
+          swatch: hit ? swatchForFeature(hit.id, res) : null,
+        };
+      });
+      return { key, rows, error: null };
+    } catch (e) {
+      return { key, rows: [], error: e.message || "the request failed" };
+    }
+  }
+
+  // The ring marking the asked-about point. It lives in view.graphics, so it
+  // WOULD be captured — closeProbe() runs before every screenshot.
+  function drawProbeMarker(point) {
+    clearProbeMarker();
+    if (!M.view || !M.esri) return;
+    try {
+      const g = new M.esri.Graphic({
+        geometry: point,
+        symbol: { type: "simple-marker", style: "circle", size: 15, color: [255, 255, 255, 0.18],
+          outline: { color: [17, 24, 39], width: 2 } },
+      });
+      M.view.graphics.add(g);
+      M.probeGraphic = g;
+    } catch (_) {}
+  }
+  function clearProbeMarker() {
+    if (M.probeGraphic && M.view) { try { M.view.graphics.remove(M.probeGraphic); } catch (_) {} }
+    M.probeGraphic = null;
+  }
+  function closeProbe() {
+    M.probeToken++;      // any answer still in flight is now stale
+    M.probe = null;
+    clearProbeMarker();
+    renderProbe();
+  }
+
+  // Was the click on the station pin? Measured in screen pixels via the view's
+  // own transform, for the same reason pinInView() does (no projection engine,
+  // no assumption about the map's CRS).
+  function clickedThePin(screen) {
+    try {
+      const geom = M.pinGraphic && M.pinGraphic.geometry;
+      if (!geom || !M.view || !screen) return false;
+      const s = M.view.toScreen(geom);
+      if (!s || !isFinite(s.x) || !isFinite(s.y)) return false;
+      return Math.hypot(s.x - screen.x, s.y - screen.y) <= 16;
+    } catch (_) { return false; }
+  }
+
+  async function runProbe(mapPoint, screen) {
+    const view = M.view;
+    if (!view || !view.ready || !mapPoint) return;
+    const token = ++M.probeToken;
+    const sr = view.spatialReference || {};
+    const wkid = sr.wkid || sr.latestWkid || CFG.fallbackWkid;
+    const extent = view.extent;
+    if (!extent) return;
+    const keys = Object.keys(SERVICES).filter((k) => !IDENTIFY_SKIP.has(k) && identifiableSublayers(k).length);
+    const lat = typeof mapPoint.latitude === "number" ? mapPoint.latitude : null;
+    const lon = typeof mapPoint.longitude === "number" ? mapPoint.longitude : null;
+    drawProbeMarker(mapPoint);
+    M.probe = {
+      token, point: mapPoint, screen,
+      coord: lat != null && lon != null ? fmtCoord(lat, lon) : `${Math.round(mapPoint.x)}, ${Math.round(mapPoint.y)} (map units)`,
+      onPin: clickedThePin(screen),
+      asked: keys.length, pending: keys.length,
+      groups: [], failures: [], done: !keys.length,
+      // Layers the zoom level is currently suppressing: the answer can name a
+      // layer that is not being drawn, and saying so is better than leaving the
+      // operator hunting for a colour that is not on screen.
+      suppressed: view.scale > CFG.thematicMinScale,
+    };
+    renderProbe();
+    setDiag("identify", { status: "asking", services: keys.length }, `Asked ${keys.length} service${keys.length === 1 ? "" : "s"} what is at ${M.probe.coord}.`);
+    if (!keys.length) return;
+
+    await Promise.all(keys.map(async (k) => {
+      const out = await identifyService(k, mapPoint, wkid, extent, { w: view.width, h: view.height });
+      if (M.probeToken !== token || !M.probe) return;   // a newer click has taken over
+      M.probe.pending--;
+      if (out.error) M.probe.failures.push({ service: SERVICES[k].label, note: out.error });
+      out.rows.forEach((row) => addProbeRow(row));
+      renderProbe();
+    }));
+    if (M.probeToken !== token || !M.probe) return;
+    M.probe.done = true;
+    const found = M.probe.groups.reduce((n, g) => n + g.rows.length, 0);
+    setDiag("identify", { status: "done", found, failed: M.probe.failures.length },
+      `${found} feature${found === 1 ? "" : "s"} reported at that point${M.probe.failures.length ? `; ${M.probe.failures.length} service(s) could not be asked` : ""}.`);
+    renderProbe();
+  }
+
+  // Group the answers the way the panel groups the catalogue, so the popup and
+  // the layer list read the same way round. Identical repeats of one feature
+  // (a service can return the same polygon twice) are collapsed.
+  function addProbeRow(row) {
+    const p = M.probe;
+    if (!p) return;
+    let g = p.groups.find((x) => x.title === row.groupTitle);
+    if (!g) { g = { title: row.groupTitle, colour: row.colour, rows: [] }; p.groups.push(g); }
+    const key = `${row.name}|${row.value}|${row.attrs.map((a) => `${a.k}=${a.v}`).join(";")}`;
+    if (g.rows.some((r) => r.__key === key)) return;
+    row.__key = key;
+    g.rows.push(row);
+  }
+
+  function renderProbe() {
+    const host = M.hosts.pop;
+    if (!host) return;
+    const p = M.probe;
+    host.innerHTML = "";
+    if (!p) { host.hidden = true; return; }
+    host.hidden = false;
+
+    host.append(el("div", { class: "qm-pop-head" },
+      el("div", { class: "qm-pop-titles" },
+        el("b", {}, "What is at this point"),
+        el("span", { class: "qm-pop-coord" }, p.coord)),
+      el("button", { type: "button", class: "qm-pop-x", "aria-label": "Close", title: "Close", onclick: closeProbe }, "✕")));
+
+    const body = el("div", { class: "qm-pop-body" });
+    if (p.onPin)
+      body.append(el("div", { class: "qm-pop-pin" }, "📍 ",
+        M.site.station_num ? `${M.site.name} (${M.site.station_num})` : M.site.name,
+        " — the station pin is at this point."));
+
+    const found = p.groups.reduce((n, g) => n + g.rows.length, 0);
+    p.groups.forEach((g) => {
+      const sec = el("div", { class: "qm-pop-group" },
+        el("div", { class: "qm-pop-group-head" }, el("i", { class: "qm-swatch", style: `--sw:${g.colour}` }), g.title));
+      g.rows.forEach((row) => {
+        const head = el("div", { class: "qm-pop-row-head" },
+          // The service's own symbol where it could be matched with certainty,
+          // otherwise the panel's group colour — never a guessed swatch.
+          row.swatch
+            ? el("img", { class: "qm-pop-swatch", src: row.swatch, alt: "" })
+            : el("i", { class: "qm-swatch qm-pop-swatch-fallback", style: `--sw:${row.colour}` }),
+          el("b", {}, row.name));
+        const item = el("div", { class: "qm-pop-row" }, head);
+        if (row.value) item.append(el("div", { class: "qm-pop-value" }, row.value));
+        if (row.attrs.length)
+          item.append(el("dl", { class: "qm-pop-attrs" },
+            row.attrs.flatMap((a) => [el("dt", {}, a.k), el("dd", {}, a.v)])));
+        item.append(el("div", { class: "qm-pop-src" }, row.service));
+        sec.append(item);
+      });
+      body.append(sec);
+    });
+
+    if (p.pending > 0)
+      body.append(el("div", { class: "qm-pop-wait" }, el("span", { class: "qm-spin", "aria-hidden": "true" }),
+        `Asking ${p.pending} of ${p.asked} service${p.asked === 1 ? "" : "s"}…`));
+    else if (!found && !p.onPin)
+      body.append(el("p", { class: "qm-pop-empty" }, p.asked
+        ? "None of the ticked layers cover this point."
+        : "No layers are ticked, so there is nothing to ask about. Tick some layers in the panel and click the map again."));
+
+    if (found && p.suppressed)
+      body.append(el("p", { class: "qm-pop-note" }, "Some of these layers are hidden at this zoom level — zoom in to see them drawn."));
+
+    p.failures.forEach((f) =>
+      body.append(el("p", { class: "qm-pop-fail" }, `⚠ ${f.service} could not be asked (${f.note}) — it may still cover this point.`)));
+
+    // Counted as FEATURES and LAYERS separately: one layer can return several
+    // overlapping polygons at a point, so "n of the m layers" was able to
+    // report more layers than the map has.
+    if (p.done && (found || p.failures.length)) {
+      const names = new Set();
+      p.groups.forEach((g) => g.rows.forEach((r) => names.add(r.name)));
+      body.append(el("p", { class: "qm-pop-foot" },
+        `${found} feature${found === 1 ? "" : "s"} from ${names.size} layer${names.size === 1 ? "" : "s"} · ${activeLayerRows().length} layers on the map.`));
+    }
+
+    host.append(body);
+    positionProbe();
+  }
+
+  // Placed beside the click and clamped inside the map, so the popup can never
+  // open half off-screen or under the panel.
+  function positionProbe() {
+    const host = M.hosts.pop, mapEl = M.hosts.map, p = M.probe;
+    if (!host || !mapEl || !p || !p.screen) return;
+    const mw = mapEl.clientWidth, mh = mapEl.clientHeight;
+    const w = host.offsetWidth || 330, h = host.offsetHeight || 220;
+    const pad = 10, gap = 16;
+    let left = p.screen.x + gap;
+    if (left + w + pad > mw) left = p.screen.x - w - gap;
+    host.style.left = `${Math.round(Math.max(pad, Math.min(left, Math.max(pad, mw - w - pad))))}px`;
+    host.style.top = `${Math.round(Math.max(pad, Math.min(p.screen.y - Math.round(h / 3), Math.max(pad, mh - h - pad))))}px`;
+  }
+
+  // Keep the popup with its point as the map moves, rather than leaving it
+  // pointing at wherever that patch of screen now happens to be.
+  function repositionProbe() {
+    const p = M.probe;
+    if (!p || !M.view || !p.point) return;
+    try {
+      const s = M.view.toScreen(p.point);
+      if (s && isFinite(s.x) && isFinite(s.y)) { p.screen = { x: s.x, y: s.y }; positionProbe(); }
+    } catch (_) {}
   }
 
   // ------------------------------------------------------------------- panel
@@ -1125,6 +1545,11 @@
   // asked for. The thumbnail below is the receipt, and pressing again replaces
   // the picture already in the report.
   async function captureForReport(btn) {
+    // The appendix's legend boxes are only as good as the symbology we have
+    // read, so give the outstanding /legend calls their bounded moment before
+    // the picture is recorded. Bounded, and a failure is not fatal: a layer
+    // without a swatch still reaches the appendix by name.
+    await Promise.race([ensureLegends(), new Promise((r) => setTimeout(r, CFG.timeouts.legend))]).catch(() => {});
     const dataUrl = await captureVisible(btn);
     if (!dataUrl) return null;
     addToReport(btn);
@@ -1139,6 +1564,10 @@
     const restore = btn ? btn.textContent : null;
     if (btn) { btn.disabled = true; btn.textContent = "Capturing…"; }
     renderCaptureCard("Waiting for the map to finish drawing…");
+    // The "what is here?" ring is a Graphic, so takeScreenshot would put it in
+    // the report. Take it off the map (and close its popup) first, so the
+    // picture is the map — not the map plus the last thing that was clicked.
+    closeProbe();
     try {
       await whenCaptureReady(M.view);
       // Recorded as provenance only. It is NOT turned into a warning: the check
@@ -1211,7 +1640,13 @@
       caption: `Queensland Globe — ${M.site.name}${M.site.station_num ? ` (${M.site.station_num})` : ""}`,
       at: M.shot.at,
       meta: M.shot.meta,
-      layers: rows.map((r) => ({ id: r.id, name: r.name, group: r.group, service: r.service, url: r.url, sublayer: r.sublayer })),
+      // `legend` is the service's OWN swatches for that layer — what makes the
+      // report appendix a legend the picture can actually be read against,
+      // rather than a list of names beside a map full of unexplained colour.
+      layers: rows.map((r) => ({
+        id: r.id, name: r.name, group: r.group, service: r.service, url: r.url, sublayer: r.sublayer,
+        legend: r.legend, legend_more: r.legendMore,
+      })),
     };
     M.capture = record;
     if (M.hooks.onAdd) { try { M.hooks.onAdd(record); } catch (e) { console.error("ESS map: onAdd failed", e); } }
@@ -1241,8 +1676,15 @@
     Object.keys(SERVICES).forEach((k) => {
       const s = (d.services || {})[k];
       if (!s) return;
+      const lg = (d.legends || {})[k];
       L.push(`  ${SERVICES[k].label}: ${s.status}${s.ms != null ? ` (${(s.ms / 1000).toFixed(1)} s)` : ""}${s.count != null ? `, ${s.count} sublayers` : ""}${s.sublayers ? `, drawing ${s.sublayers}` : ""}${s.note ? ` — ${s.note}` : ""}`);
+      // Symbology is what puts a legend box in the report appendix, so a
+      // service whose legend never read has to be visible here too.
+      if (lg) L.push(`      symbology: ${lg.status}${lg.count != null ? `, ${lg.count} sublayers` : ""}${lg.note ? ` — ${lg.note}` : ""}`);
     });
+    L.push("");
+    const idf = d.identify || {};
+    L.push(`Click-to-identify: ${idf.status || "idle"}${idf.services != null ? ` — asked ${idf.services} service(s)` : ""}${idf.found != null ? `, ${idf.found} feature(s) at the point` : ""}${idf.failed ? `, ${idf.failed} could not be asked` : ""}`);
     L.push("");
     L.push("Layers ticked:");
     LAYER_GROUPS.forEach((g) => g.layers.forEach((l) => {
@@ -1287,7 +1729,7 @@
         <div class="qm-head">
           <div class="qm-head-titles">
             <h2 id="qm-title">Queensland Globe — site map</h2>
-            <p class="qm-sub">Check the station pin is where it should be, choose the layers, then capture the map for the report.</p>
+            <p class="qm-sub">Check the station pin is where it should be, choose the layers, then capture the map for the report. <b>Click anywhere on the map</b> to see which layers cover that point.</p>
           </div>
           <div class="qm-head-actions">
             <button type="button" class="btn ghost qm-recentre" title="Re-frame the map on the station coordinate">🎯 Centre on station</button>
@@ -1328,6 +1770,7 @@
           <div class="qm-map">
             <div class="qm-onmap qm-onmap-left" aria-hidden="true"></div>
             <div class="qm-onmap qm-onmap-right" aria-hidden="true"></div>
+            <div class="qm-pop" role="dialog" aria-label="Layers at the clicked point" hidden></div>
             <div class="qm-status"></div>
             <div class="qm-scalehint" hidden></div>
             <div class="qm-progress" hidden role="progressbar" aria-label="Map build progress" aria-valuemin="0" aria-valuemax="100">
@@ -1346,6 +1789,7 @@
       captureCard: q(".qm-cap-card"), diagText: q(".qm-diag-text"), scaleHint: q(".qm-scalehint"),
       progress: q(".qm-progress"), progressBar: q(".qm-progress-bar"), progressNote: q(".qm-progress-note"),
       furnitureL: q(".qm-onmap-left"), furnitureR: q(".qm-onmap-right"), resetView: q(".qm-recentre"),
+      pop: q(".qm-pop"),
     };
     q(".qm-close").addEventListener("click", close);
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
@@ -1371,7 +1815,10 @@
     return overlay;
   }
   function onKey(e) {
-    if (e.key === "Escape" && M.open && M.overlay && !M.overlay.hidden) close();
+    if (e.key !== "Escape" || !M.open || !M.overlay || M.overlay.hidden) return;
+    // Escape dismisses the innermost thing first: the "what is here?" answer
+    // before the whole map, so one stray key press cannot throw away the map.
+    if (M.probe) closeProbe(); else close();
   }
 
   async function open(opts) {
@@ -1440,6 +1887,7 @@
 
   function close() {
     if (!M.overlay) return;
+    closeProbe();   // a stale answer must not be sitting there on the next open
     M.open = false;
     M.overlay.hidden = true;
     document.body.classList.remove("qm-open");
