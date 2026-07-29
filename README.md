@@ -44,9 +44,14 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
    (on by default). Add **station photos** here — paste from the clipboard, drag
    a file, or use the file picker. The map and photos travel with the report and
    every export.
-3. Work down the **collection dashboard**. Each source opens aimed at the site.
-   Hit **Check live** on the Atlas of Living Australia card; set a result on the
-   rest: Found / Nothing found / Search failed / Manual. Sources for weeds,
+3. Work down the **collection dashboard**. It opens with a short **order of work**
+   guide — automated passes first (**⚡ Run auto-checks**, or the agent), then the
+   sources still owned by a human, then results, then **Include**, then
+   **Reviewed** last — which you can collapse once you know it. Each source opens
+   aimed at the site. Hit **Check live** on the Atlas of Living Australia card;
+   set a result on the rest: Found / Nothing found / Search failed / Manual. The
+   **Show only** row filters the list by result, or down to
+   **⚠ Needs attention** (Manual / Failed / Not checked) and **☐ Needs review**. Sources for weeds,
    pests, disease, threatened species and biosecurity get their own photo
    dropzone — attach evidence when a check comes back **Found**. On the species
    cards (weeds, feral animals, disease, threatened species) you can also type a
@@ -112,6 +117,13 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
 
 Your work is saved in the browser (localStorage) per site, so you can come back
 to it.
+
+**The two panes.** Collection is on the left, the report on the right, each
+scrolling on its own. The **progress bar pins to the top of the left pane** as you
+scroll, so how far through you are is always on screen — the report's export
+buttons do the same on the right. The two small handles on the seam between the
+panes **collapse one side and give the other the full width** (one at a time);
+click the highlighted handle to bring the pane back. The choice is remembered.
 
 ### Let the agent do the collection
 

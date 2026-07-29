@@ -109,10 +109,22 @@
   function openPanel() { const p = $("#agent-panel"); if (p) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "center" }); } }
   function setStatus(msg, err) { const s = $("#agent-status"); if (s) { s.textContent = msg; s.className = "agent-status" + (err ? " err" : ""); } }
 
+  // The dashboard no longer carries a run button — the panel's own button starts a
+  // run, and the topbar key button (the one control that's always on screen) is
+  // where a run in progress has to show up.
   function reflectRunning() {
-    const b1 = $("#btn-run-agent"), b2 = $("#agent-run-2");
-    [b1, b2].forEach((b) => { if (b) { b.disabled = running; } });
-    if (b1) b1.innerHTML = running ? '<span class="spin"></span> Agent running…' : "🤖 Run agent";
+    const runBtn = $("#agent-run-2");
+    if (runBtn) {
+      runBtn.disabled = running;
+      runBtn.innerHTML = running ? '<span class="spin"></span> Assessing…' : "⚡ Run full assessment";
+    }
+    const key = $("#btn-agent-settings");
+    if (key) {
+      key.textContent = running ? "⏳ Agent running…" : "🔑 Agent";
+      key.title = running
+        ? "Claude is working through the sources — open this panel for progress"
+        : "Run assessments with Claude using your own API key";
+    }
   }
 
   // ---------------------------------------------------------------- the run
@@ -367,9 +379,7 @@
   // ---------------------------------------------------------------- wire-up
   function activate() {
     const settingsBtn = $("#btn-agent-settings");
-    const runBtn = $("#btn-run-agent");
     if (settingsBtn) { settingsBtn.hidden = false; settingsBtn.addEventListener("click", () => { const p = $("#agent-panel"); if (p.hidden) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "center" }); } else { p.hidden = true; } }); }
-    if (runBtn) { runBtn.hidden = false; runBtn.addEventListener("click", runAgent); }
     buildPanel();
   }
 

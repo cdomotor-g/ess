@@ -179,28 +179,49 @@
           <div class="head-actions">
             <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
             <label class="inline-check" title="Off by default (keeps the browser light). When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings on import / agent / API runs. Editing a card's notes never triggers a search — use the buttons on a species card to fetch reference images on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images</label>
-            <button class="btn ghost" id="btn-filter-attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
-            <button class="btn ghost" id="btn-filter-unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
             <button class="btn ghost" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant (ChatGPT, Gemini, Claude, Copilot…) to run this assessment and hand back JSON you can import here">📋 Copy prompt</button>
-            <button class="btn ghost" id="btn-run-agent" hidden title="Run the whole desktop assessment with Claude (uses your API key)">🤖 Run agent</button>
             <button class="btn ghost" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
           </div>
         </div>
-        <p class="dash-note">
-          Each source opens pre-aimed at this location where the site supports it. Set a result for every source:
-          <span class="chip found">Found</span>
-          <span class="chip none">Nothing found</span>
-          <span class="chip failed">Search failed</span>
-          <span class="chip manual">Needs manual check</span>.
-          Sources marked <b>API</b> can be checked live in your browser.
-          Once you're satisfied with a card, tick <b>Reviewed</b> — the card turns green so you can track your own progress separately from the result itself (a <em>Found</em> result isn't always good news, e.g. a protected species that requires caution on site).
-        </p>
+        <!-- Recommended order of work. Open by default (the order is the whole
+             point of the section); collapsing it is remembered per browser. -->
+        <details class="dash-guide" id="dash-guide" open>
+          <summary>How to work this section — the order that leaves you the least to do by hand</summary>
+          <ol class="dash-steps">
+            <li><b>Let the machines go first.</b> <b>⚡ Run auto-checks</b> (above) answers every source marked
+              <b>API</b> live in your browser. For the whole assessment researched end to end, use
+              <b>🔑 Agent</b> in the top bar with your own API key, or <b>📋 Copy prompt</b> → paste into any
+              assistant → bring its JSON back through <b>Choose a site → Import JSON</b>. Doing this first means
+              the list below is mostly filled in before you touch it.</li>
+            <li><b>Then take what's left, in order.</b> Switch on <b>⚠ Needs attention</b> to show only the
+              sources still owned by a human (Manual / Failed / Not checked), and work down the categories from
+              the top — the nav rail on the far left carries the count still outstanding per category. Each
+              source opens pre-aimed at this location where the site supports it.</li>
+            <li><b>Set a result on every card</b> —
+              <span class="chip found">Found</span>
+              <span class="chip none">Nothing found</span>
+              <span class="chip failed">Search failed</span>
+              <span class="chip manual">Needs manual check</span> — and put what you saw in the card's notes
+              while it's in front of you. Add evidence photos on the cards that take them.</li>
+            <li><b>Press Include</b> on a card to push its notes and photos into the matching report section on
+              the right. The report is built from what you include, so do it as you go rather than at the end.</li>
+            <li><b>Tick Reviewed last</b>, once you're happy with a card — it turns green, and <b>☐ Needs
+              review</b> lists the ones you haven't. Review is tracked separately from the result on purpose: a
+              <em>Found</em> result isn't always good news (a protected species means caution on site, not a
+              clean bill of health).</li>
+          </ol>
+          <p class="dash-note">Finish the left-hand side before exporting: step 4 in the report pane only shows
+            what you've included here.</p>
+        </details>
         <div class="status-filter-bar" id="status-filter-bar">
           <span class="sfb-label">Show only:</span>
           <button class="btn tiny sfb-btn" data-status="found" title="Show only sources marked Found">Found</button>
           <button class="btn tiny sfb-btn" data-status="none" title="Show only sources marked Nothing found">Nothing</button>
           <button class="btn tiny sfb-btn" data-status="failed" title="Show only sources marked Search failed">Failed</button>
           <button class="btn tiny sfb-btn" data-status="manual" title="Show only sources marked Manual">Manual</button>
+          <span class="sfb-sep" aria-hidden="true"></span>
+          <button class="btn tiny sfb-btn" id="btn-filter-attention" data-flag="attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
+          <button class="btn tiny sfb-btn" id="btn-filter-unreviewed" data-flag="unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
         </div>
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
@@ -216,6 +237,19 @@
       </p>
     </footer>
     </div><!-- /col-left -->
+
+    <!-- Pane handles — sit on the seam between the two columns. Each button hides
+         its own side and hands the width to the other; only one side can be
+         collapsed at a time, so the pair reads as a three-state control
+         (split / collection only / report only). Wide layout only. -->
+    <div class="pane-divider" id="pane-divider">
+      <div class="pane-btns">
+        <button class="pane-btn" id="btn-pane-left" type="button" aria-controls="col-left" aria-expanded="true"
+                title="Hide the collection pane — give the report the full width">&#9664;</button>
+        <button class="pane-btn" id="btn-pane-right" type="button" aria-controls="col-right" aria-expanded="true"
+                title="Hide the report pane — give collection the full width">&#9654;</button>
+      </div>
+    </div>
 
     <!-- RIGHT column — the ESS report (independently scrolls) -->
     <div class="col col-right" id="col-right">
