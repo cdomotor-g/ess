@@ -73,7 +73,10 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      Queensland aerial imagery drawn from the same government spatial services
      Queensland Globe itself uses, with the ESS environmental layer stack over it
      and **the station pinned**. Use it to sanity-check the position: pan and zoom
-     around the pin and see what the layers actually show there. The left panel
+     around the pin and see what the layers actually show there. **Click anywhere
+     on the map** and a popup lists every layer covering that exact point — with
+     the feature's own details and the colour/pattern that layer is drawn with —
+     so a shaded patch can be identified instead of guessed at. The left panel
      leads with **Picture for the report**, and below it lists ~60 layers in seven
      searchable groups (MSES, vegetation & habitat,
      protected places, wildlife habitat, water & wetlands, biodiversity
@@ -85,10 +88,14 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      right press **📸 Capture map for the report** — one press takes the picture
      *and* puts it in the report, and the thumbnail below the button is your
      receipt. The picture goes on the card and travels through the report, HTML,
-     JSON and Print/PDF exports like any other photo — and the **full layer list
-     goes to Appendix A** of the report rather than cluttering the picture or the
-     report body. (The ordinary **Open ↗** link still opens Queensland Globe itself
-     if you need its own tools or legend.)
+     JSON and Print/PDF exports — rendered **full width** and **clickable for a
+     full-screen view**, on screen and in the exported HTML alike — and the **full
+     layer list goes to Appendix A** of the report rather than cluttering the
+     picture or the report body. Appendix A gives each layer a **legend box**
+     showing the colour and pattern that layer was drawn with, taken from the
+     service's own published symbology, so the map can still be read once the
+     report is all anyone has. (The ordinary **Open ↗** link still opens Queensland
+     Globe itself if you need its own tools or legend.)
 4. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Each section has an
    **✨ Insert suggested detail** button that drafts a paragraph from that

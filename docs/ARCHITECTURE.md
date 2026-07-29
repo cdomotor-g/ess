@@ -166,12 +166,41 @@ collection card.
   **Appendix A** of the report (see below). `state.qldMap` holds the ticked
   selection (persisted, so re-opening restores the stack) and the capture record
   that the appendix renders from.
+- **Click the map to ask what is under that point.** Forty translucent layers
+  stack on one picture and the panel's group colours are *ours*, not the
+  services' — so a shaded patch cannot be read back to a layer by eye. A click
+  runs one ArcGIS `identify` per MapServer (restricted to the ticked sublayers,
+  `all:` so a scale-suppressed layer still answers) and names every layer
+  covering the point in a popup, with the feature's own attributes and the
+  service's legend swatch. One call per *service* for the same reason the map
+  draws one `MapImageLayer` per service. A service that cannot be asked is
+  **named** in the popup — "nothing is here" and "we could not ask" are very
+  different answers. The built-in Esri popup is disabled (`popupEnabled=false`)
+  so two popups never fight over one click, and the ring marking the asked-about
+  point is removed before every screenshot so it can't reach the report.
+- **Symbology comes from `/legend?f=json`, never invented.** Each service
+  publishes the exact PNG swatches it paints with. They feed both the click
+  popup and the per-layer **legend boxes in Appendix A**, so a colour on an
+  exported map can be traced to the layer that drew it. A swatch is only shown
+  against an identified feature when it can be matched with certainty (by the
+  renderer's `values`, then its label) — a wrong colour beside a layer name is
+  worse than none. Legends are read in the background as the map draws and
+  awaited (bounded) before a capture; a layer without one still reaches the
+  appendix by name.
 
 `app.js` owns all persistence and passes two callbacks in — `onChange` (ticks
 changed) and `onAdd` (a captured map). The picture follows the ordinary card-image
 path into the report and every export; the layer list is exported as a top-level
 `qld_globe_map` object in the JSON findings, so a re-imported report rebuilds its
 appendix even without the picture.
+
+The capture record's **legend swatches are base64 PNGs**, so they are split out
+of the per-site *text* payload (rewritten on every keystroke) and stored with the
+images, which are only rewritten when an image changes; `restore()` reunites them.
+In the report the captured map is not treated as an evidence thumbnail: it is
+rendered full width with the height following the width, and clicking it opens it
+full screen — via the existing lightbox on screen, and via a script-free
+`:target` overlay in the exported HTML, so a saved copy still works offline.
 
 ### Agent skill (`.claude/skills/ess-collect/`)
 `resolve.py` does the deterministic half (resolve station, filter sources, fill
@@ -219,11 +248,17 @@ tool-side toggle (default on) and never overwrites existing photos.
 
 An optional top-level `qld_globe_map` carries the provenance of the Queensland
 Globe site map: `{ captured_at, lat, lon, scale, pin_in_view, selection[],
-layers: [{ id, name, group, service, url, sublayer }] }`. It is deliberately
-**not** nested under `site` — the report's Appendix A is built from it directly,
-so a re-imported file lists the layers the map was drawn from even when the
-picture itself didn't survive the round trip. Agents don't produce it; only the
-browser tool's map modal does.
+layers: [{ id, name, group, service, url, sublayer, legend?, legend_more? }] }`,
+where `legend` is `[{ label, swatch }]` — the service's own symbol for that layer
+as a `data:` image, capped per layer with `legend_more` counting the rest. It is
+deliberately **not** nested under `site` — the report's Appendix A is built from
+it directly, so a re-imported file lists the layers the map was drawn from, *and
+what each one looks like on it*, even when the picture itself didn't survive the
+round trip. Every swatch is re-validated as a `data:` image on import, the same
+way photos are. Agents don't produce any of this; only the browser tool's map
+modal does. The captured map itself travels as an ordinary card image marked
+`kind: "qld_globe_map"`, which is what tells the report to render it full width
+and clickable rather than as a thumbnail.
 
 **Integration seam.** `app.js` exposes a tiny `window.ESS` (`site()`,
 `sources()`, `setResult()`, `queryAla()`, `beginRun()`/`endRun()`). The optional
