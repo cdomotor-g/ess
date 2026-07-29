@@ -146,6 +146,20 @@ collection card.
   fill is painted over it: a mostly-transparent, few-colour frame means the map
   never rendered (typically a suspended view), and it is refused with an
   explanation rather than exported as a plausible-looking blank.
+- **One press captures AND adds.** Capturing and adding were separate buttons;
+  the second press decided nothing and was mostly forgotten, leaving a captured
+  map that never reached the report. `captureForReport()` does both, from either
+  the header button or the one in the capture card, and the thumbnail is the
+  receipt. The card is the FIRST thing in the panel — taking the picture is what
+  the modal is for, so it does not sit below sixty layer checkboxes.
+- **"Is the pin in shot?" is provenance, not a warning.** `pinInView()` asks the
+  view where the pin lands in screen pixels (`view.toScreen`), which needs no
+  projection engine and assumes nothing about the map's CRS — unlike an
+  `extent.contains()` test, which compares degrees against a projected extent in
+  metres and calls a well-framed map "outside". The answer is recorded with the
+  capture and printed in the diagnostics, but it no longer raises an alarm on the
+  card: the check was wrong often enough that the warning trained operators to
+  ignore the one place the capture reports itself.
 - **Layers go to an appendix, not onto the picture.** A ticked stack is far too
   long for an on-map legend or a report section, so the picture carries only the
   site, coordinate, scale and layer *count*, and the full list travels into

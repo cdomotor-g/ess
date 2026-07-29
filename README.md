@@ -74,15 +74,17 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      Queensland Globe itself uses, with the ESS environmental layer stack over it
      and **the station pinned**. Use it to sanity-check the position: pan and zoom
      around the pin and see what the layers actually show there. The left panel
-     lists ~60 layers in seven searchable groups (MSES, vegetation & habitat,
+     leads with **Picture for the report**, and below it lists ~60 layers in seven
+     searchable groups (MSES, vegetation & habitat,
      protected places, wildlife habitat, water & wetlands, biodiversity
      assessments, reference & terrain) with per-group *All/None* toggles and three
      presets; your selection is remembered per site. Sublayer IDs are resolved
      against each service's live layer list at open time, so a layer that can't be
      found is struck through and named rather than silently missing, and a **Map
      diagnostics** panel says exactly which service worked. When the map looks
-     right press **📸 Capture map**, check the thumbnail, then **Add map to
-     report**. The picture goes on the card and travels through the report, HTML,
+     right press **📸 Capture map for the report** — one press takes the picture
+     *and* puts it in the report, and the thumbnail below the button is your
+     receipt. The picture goes on the card and travels through the report, HTML,
      JSON and Print/PDF exports like any other photo — and the **full layer list
      goes to Appendix A** of the report rather than cluttering the picture or the
      report body. (The ordinary **Open ↗** link still opens Queensland Globe itself
