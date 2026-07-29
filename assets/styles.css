@@ -321,8 +321,8 @@ textarea { resize: vertical; min-height: 62px; }
 .bb-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 /* ---------- Queensland Globe site map modal ----------
-   A full-height modal: a live ArcGIS map on the right, the layer catalogue and
-   the capture card on the left. The map area is deliberately the largest thing
+   A full-height modal: a live ArcGIS map on the right, the capture card and the
+   layer catalogue on the left. The map area is deliberately the largest thing
    on screen — the whole point of the modal is to LOOK at the site. */
 .qm-overlay { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center;
   justify-content: center; padding: 2.5vh 2vw; background: rgba(8,14,18,.74); }
@@ -381,8 +381,10 @@ body.qm-open { overflow: hidden; }
 .qm-lstate--guess { color: var(--none); background: var(--none-bg); }
 .qm-empty { color: var(--ink-soft); font-size: 12px; }
 
-.qm-cap-card { display: flex; flex-direction: column; gap: 8px; padding-top: 12px;
-  border-top: 1px solid var(--line); }
+/* First thing in the panel: taking the picture is what the modal is FOR, so it
+   is not left below sixty layer checkboxes where it has to be scrolled to. */
+.qm-cap-card { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--line); }
 .qm-cap-how { margin: 0; color: var(--ink-soft); font-size: 11.5px; line-height: 1.5; }
 .qm-cap-state { font-size: 12px; line-height: 1.45; border-radius: 7px; padding: 7px 9px;
   background: var(--surface-2); }

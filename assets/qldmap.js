@@ -344,12 +344,10 @@
             "esri/geometry/projection", "esri/core/reactiveUtils", "esri/widgets/ScaleBar",
           ], (Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, projection, reactiveUtils, ScaleBar) => {
             M.esri = { Map, MapView, ImageryTileLayer, ImageryLayer, MapImageLayer, Graphic, SpatialReference, projection, reactiveUtils, ScaleBar };
-            // Kicked off now, not awaited here: by the time the view is built and
-            // the operator can press Capture, this has long since resolved. Used
-            // by pinInView() to compare the pin against the extent in the SAME
-            // spatial reference — the view's extent is in the service's projected
-            // CRS (metres), never bare lat/lon degrees.
-            M.projectionReady = projection.load().catch(() => {});
+            // Kicked off now, not awaited here: it primes Esri's projection
+            // engine so the view can place — and locate on screen — a lat/lon pin
+            // even when a service hands the map a CRS that isn't Web Mercator.
+            projection.load().catch(() => {});
             resolve(M.esri);
           }, reject);
         };
@@ -637,32 +635,31 @@
     dlog(`Station pin drawn at ${fmtCoord(M.site.lat, M.site.lon)}.`);
   }
 
-  // Is the pin actually inside what the capture will grab? A map framed away
-  // from the site is the single most likely way this tool produces a wrong
-  // report, so it is checked before every capture and stated on the card.
+  // Is the pin actually inside what the capture will grab? Recorded with every
+  // capture as provenance and printed in the diagnostics, so it has to be right
+  // — but it is deliberately NOT used to warn the operator off a capture (see
+  // captureVisible): every version of this test has been wrong often enough
+  // that the warning cried wolf on perfectly well-framed maps.
   //
-  // The view's extent is in the SERVICE'S spatial reference (a projected CRS in
-  // metres — Web Mercator in practice), never bare lat/lon degrees. Comparing
-  // it against a raw {longitude, latitude} point declared as wkid 4326 WITHOUT
-  // reprojecting is a coordinate-space mismatch: extent.contains() does not
-  // reproject its argument, so a point whose numbers are a couple of hundred
-  // (degrees) is checked against an extent whose numbers are in the millions
-  // (metres) and is reported outside almost regardless of where it actually is.
-  // Project the pin into the extent's spatial reference first so the two are
-  // finally in the same units.
+  // Ask the VIEW where the pin lands on screen rather than comparing geometry
+  // against view.extent. The extent is in the service's spatial reference (a
+  // projected CRS in metres — Web Mercator in practice), so an extent.contains()
+  // against a lat/lon point is a units mismatch that reads "outside" almost
+  // regardless of where the pin is; reprojecting first only moves the problem to
+  // whether the projection engine happens to be loaded and whether the plain
+  // object autocast to a real geometry. view.toScreen() does the view's own
+  // transform, in pixels, with no projection engine and no assumption about the
+  // map's CRS. The pin graphic's geometry is used because Graphic autocast it
+  // into a genuine Point when the pin was drawn.
   function pinInView() {
     const view = M.view;
-    if (!view || !view.extent || !M.site) return true;
+    if (!view || !M.site) return true;
     try {
-      const geoPoint = { type: "point", longitude: +M.site.lon, latitude: +M.site.lat, spatialReference: { wkid: 4326 } };
-      const sr = view.extent.spatialReference;
-      let pt = geoPoint;
-      const proj = M.esri && M.esri.projection;
-      if (sr && sr.wkid !== 4326 && proj && proj.isLoaded && proj.isLoaded()) {
-        const projected = proj.project(geoPoint, sr);
-        if (projected) pt = projected;
-      }
-      return view.extent.contains(pt);
+      const geom = M.pinGraphic && M.pinGraphic.geometry;
+      if (!geom || !view.ready || !(view.width > 0) || !(view.height > 0)) return true;
+      const s = view.toScreen(geom);
+      if (!s || !isFinite(s.x) || !isFinite(s.y)) return true;
+      return s.x >= 0 && s.y >= 0 && s.x <= view.width && s.y <= view.height;
     } catch (_) { return true; }
   }
 
@@ -1122,6 +1119,21 @@
     return canvas.toDataURL("image/jpeg", 0.9);
   }
 
+  // One press does the whole job: take the picture AND put it in the report.
+  // Capture and add used to be two buttons, which mostly produced captures that
+  // were never added — the second press decided nothing, so it is no longer
+  // asked for. The thumbnail below is the receipt, and pressing again replaces
+  // the picture already in the report.
+  async function captureForReport(btn) {
+    const dataUrl = await captureVisible(btn);
+    if (!dataUrl) return null;
+    addToReport(btn);
+    return dataUrl;
+  }
+
+  // Deliberately renders no message on success: its caller adds the picture to
+  // the report straight afterwards and says so, and a "captured, now press…"
+  // line in between would describe a step that no longer exists.
   async function captureVisible(btn) {
     if (!M.view) { renderCaptureCard("The map hasn't loaded yet — wait for it to appear, then press the button again.", "err"); return null; }
     const restore = btn ? btn.textContent : null;
@@ -1129,6 +1141,9 @@
     renderCaptureCard("Waiting for the map to finish drawing…");
     try {
       await whenCaptureReady(M.view);
+      // Recorded as provenance only. It is NOT turned into a warning: the check
+      // has a long history of calling a well-framed map "outside", and a false
+      // alarm on every capture teaches the operator to ignore the card.
       const inView = pinInView();
       const shot = await M.view.takeScreenshot();
       const dataUrl = await composite(shot);
@@ -1141,9 +1156,6 @@
           layerCount: activeLayerRows().length,
         },
       };
-      renderCaptureCard(inView
-        ? "✓ Captured. Check it below, then press “Add map to report”."
-        : "Captured — but the station pin is OUTSIDE this view. Press “Centre on station” and capture again unless you meant to frame it this way.", inView ? "ok" : "warn");
       renderDiagnostics();
       return dataUrl;
     } catch (err) {
@@ -1163,13 +1175,15 @@
     if (!card) return;
     const stateEl = card.querySelector(".qm-cap-state");
     const thumb = card.querySelector(".qm-cap-thumb");
-    const addBtn = card.querySelector(".qm-cap-add");
     const ready = !!(M.shot.valid && M.shot.dataUrl);
     let text = msg, tone = kind || "";
     if (!text) {
-      if (ready) { text = `✓ Captured ${clock(M.shot.at)} — ready to add to the report.`; tone = "ok"; }
-      else if (M.shot.at) { text = "The map has changed since you captured it. Capture again so the picture matches what you see."; tone = "warn"; }
-      else if (M.capture) { text = `A map from ${clock(M.capture.at)} is already in the report. Capture again to replace it.`; }
+      // The button captures AND adds, so "captured but not in the report" is no
+      // longer a state the operator can be left sitting in — only a stale one is.
+      if (ready && M.capture && M.capture.at === M.shot.at) { text = `✓ In the report — captured ${clock(M.shot.at)}.`; tone = "ok"; }
+      else if (ready) { text = `✓ Captured ${clock(M.shot.at)}.`; tone = "ok"; }
+      else if (M.capture) { text = `The map has moved since the picture from ${clock(M.capture.at)} that is in the report. Capture again to replace it with what you see now.`; }
+      else if (M.shot.at) { text = "The map has moved since the last picture. Capture again so the report matches what you see."; tone = "warn"; }
       else { text = "Nothing captured yet."; }
     }
     if (stateEl) {
@@ -1177,10 +1191,16 @@
       stateEl.className = `qm-cap-state${tone ? ` qm-cap-state--${tone}` : ""}`;
     }
     if (thumb) {
-      if (ready) { thumb.src = M.shot.dataUrl; thumb.hidden = false; }
+      // Falls back to the picture already in the report: panning the map
+      // invalidates the pending shot, and blanking the thumbnail then reads as
+      // "the report has no map" when it plainly does.
+      const shown = ready ? M.shot.dataUrl : (M.capture && M.capture.dataUrl) || null;
+      if (shown) { thumb.src = shown; thumb.hidden = false; }
       else { thumb.removeAttribute("src"); thumb.hidden = true; }
     }
-    if (addBtn) addBtn.disabled = !ready;
+    // The capture button's enabled state is owned by the capture itself (it
+    // disables while the picture is being taken), so it is not touched here —
+    // this can be called mid-capture and would switch it back on.
   }
 
   function addToReport(btn) {
@@ -1195,8 +1215,8 @@
     };
     M.capture = record;
     if (M.hooks.onAdd) { try { M.hooks.onAdd(record); } catch (e) { console.error("ESS map: onAdd failed", e); } }
-    if (btn) { const t = btn.textContent; btn.textContent = "Added ✓"; setTimeout(() => { btn.textContent = t; }, 1800); }
-    renderCaptureCard(`Added to the report — ${rows.length} layer${rows.length === 1 ? "" : "s"} recorded in the appendix.`, "ok");
+    if (btn) { const t = btn.textContent; btn.textContent = "Added to the report ✓"; setTimeout(() => { btn.textContent = t; }, 1800); }
+    renderCaptureCard(`✓ Captured and added to the report — ${rows.length} layer${rows.length === 1 ? "" : "s"} recorded in the appendix.`, "ok");
   }
 
   // ------------------------------------------------------------- diagnostics
@@ -1271,13 +1291,21 @@
           </div>
           <div class="qm-head-actions">
             <button type="button" class="btn ghost qm-recentre" title="Re-frame the map on the station coordinate">🎯 Centre on station</button>
-            <button type="button" class="btn primary qm-capture" title="Take a picture of the map exactly as you see it here">📸 Capture map</button>
+            <button type="button" class="btn primary qm-capture" title="Take a picture of the map exactly as you see it here and put it straight into the report">📸 Capture map for the report</button>
             <button type="button" class="qm-close" aria-label="Close">✕</button>
           </div>
         </div>
         <div class="qm-banners"></div>
         <div class="qm-body">
           <aside class="qm-panel">
+            <div class="qm-cap-card">
+              <div class="qm-panel-head">Picture for the report</div>
+              <p class="qm-cap-how">The map itself <em>is</em> the picture — frame it, wait for the bar at its bottom to finish, then press the button below. One press captures the view and puts it in the report.</p>
+              <button type="button" class="btn primary qm-cap-go" title="Take a picture of the map exactly as you see it here and put it straight into the report">📸 Capture map for the report</button>
+              <div class="qm-cap-state">Nothing captured yet.</div>
+              <img class="qm-cap-thumb" alt="Preview of the captured map" hidden>
+              <p class="qm-cap-note">The layer list travels with it into the report appendix — it is deliberately kept off the picture and out of the report body.</p>
+            </div>
             <div class="qm-panel-block">
               <div class="qm-panel-head">Layers <span class="qm-layer-summary"></span></div>
               <input type="search" class="qm-search" placeholder="Filter layers…" aria-label="Filter layers">
@@ -1287,14 +1315,6 @@
                 <button type="button" class="btn tiny qm-preset" data-preset="all">Select all</button>
               </div>
               <div class="qm-layer-list"></div>
-            </div>
-            <div class="qm-cap-card">
-              <div class="qm-panel-head">Picture for the report</div>
-              <p class="qm-cap-how">The map area on the left <em>is</em> the picture — frame it, wait for the bar at its bottom to finish, then press <strong>📸 Capture map</strong>.</p>
-              <div class="qm-cap-state">Nothing captured yet.</div>
-              <img class="qm-cap-thumb" alt="Preview of the captured map" hidden>
-              <button type="button" class="btn primary qm-cap-add" disabled>Add map to report</button>
-              <p class="qm-cap-note">The layer list travels with it into the report appendix — it is deliberately kept off the picture and out of the report body.</p>
             </div>
             <details class="qm-diag">
               <summary>Map diagnostics</summary>
@@ -1329,8 +1349,8 @@
     };
     q(".qm-close").addEventListener("click", close);
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
-    q(".qm-capture").addEventListener("click", (e) => captureVisible(e.currentTarget));
-    q(".qm-cap-add").addEventListener("click", (e) => addToReport(e.currentTarget));
+    q(".qm-capture").addEventListener("click", (e) => captureForReport(e.currentTarget));
+    q(".qm-cap-go").addEventListener("click", (e) => captureForReport(e.currentTarget));
     q(".qm-recentre").addEventListener("click", async () => { M.userFramed = false; clearBanners(); renderPanel(); await fitView(true); });
     M.hosts.search.addEventListener("input", renderPanel);
     overlay.querySelectorAll(".qm-preset").forEach((b) => b.addEventListener("click", () => {
