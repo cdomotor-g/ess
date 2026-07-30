@@ -41,6 +41,9 @@
   // display info live here; each site's full findings stay under its own per-site
   // key (siteKey), so a batch is just an index over storage that already exists.
   const LS_BATCH = "ess-workbench:v1:batch";
+  // Whether the "order of work" guide above the dashboard is left open (default) or
+  // collapsed — it's read a few times and then just takes up room.
+  const LS_GUIDE = "ess-workbench:v1:dash-guide";
   // Default OFF: auto-fetching reference photos fires a burst of Wikipedia requests
   // + canvas re-encoding, which was bogging the browser down. It now runs only when
   // the operator opts in via the dashboard toggle (and even then only on import /
@@ -2417,6 +2420,9 @@
       `<span class="chip reviewed">${reviewed}/${list.length} reviewed</span>`;
     renderAttention();
     refreshRailBadges(); // same counts, shown per category on the nav rail
+    // The legend just changed width/wrap, and the card is what the sticky group
+    // headers pin under (covers browsers without ResizeObserver too).
+    measureProgressBar();
   }
 
   // Banner drawing the eye to sources a human still owns (shown after an import
@@ -2457,8 +2463,10 @@
     if (btn) btn.classList.toggle("on", state.filterUnreviewed);
   }
 
+  // Only the four result buttons follow filterStatus — the two flag buttons that
+  // share the bar (Needs attention / Needs review) keep their own state.
   function syncStatusFilterBar() {
-    $$(".sfb-btn").forEach((btn) => btn.classList.toggle("on", btn.dataset.status === state.filterStatus));
+    $$(".sfb-btn[data-status]").forEach((btn) => btn.classList.toggle("on", btn.dataset.status === state.filterStatus));
   }
 
   // ---------------------------------------------------------------- report
@@ -4195,6 +4203,67 @@
     if (tb) document.documentElement.style.setProperty("--topbar-h", tb.offsetHeight + "px");
   }
 
+  // The progress card pins to the top of the left column, so its height is what
+  // the sticky group headers (and scroll-to-section) have to clear. It changes
+  // whenever the legend rewraps, so it's measured rather than assumed; 0 while no
+  // site is loaded, which parks the group headers back at the top of the column.
+  function measureProgressBar() {
+    const card = $("#progress");
+    const h = card && card.offsetParent ? card.offsetHeight : 0;
+    document.documentElement.style.setProperty("--progress-h", h + "px");
+  }
+
+  // Square off the pinned progress card against the topbar once it's actually
+  // stuck (CSS alone can't tell). Cheap enough to run per scroll frame.
+  function syncProgressPinned() {
+    const col = $("#col-left"), card = $("#progress");
+    if (!col || !card || !card.offsetParent) return;
+    const stuck = card.getBoundingClientRect().top <= col.getBoundingClientRect().top + 0.5;
+    card.classList.toggle("is-pinned", stuck);
+  }
+
+  // ---------------------------------------------------------------- pane focus
+  // Either column can be collapsed so the other takes the full width — for reading
+  // a long report, or for working the dashboard without the report alongside. Only
+  // one at a time: collapsing the second would leave nothing on screen, so asking
+  // for it just moves the collapse to that side.
+  const LS_PANE = LS_PREFIX + "pane";
+  // Single chevron = collapse this side (pointing the way it folds away); double
+  // chevron = bring it back. The two glyphs have to differ at a glance, since a
+  // collapsed pane leaves its own handle sitting right beside the other one.
+  const PANE_SIDES = [
+    { btn: "#btn-pane-left", mode: "hide-left", name: "collection", hide: "◀", show: "»" },
+    { btn: "#btn-pane-right", mode: "hide-right", name: "report", hide: "▶", show: "«" },
+  ];
+  let paneMode = "split"; // "split" | "hide-left" | "hide-right"
+
+  function setPaneMode(mode, persist = true) {
+    paneMode = mode === "hide-left" || mode === "hide-right" ? mode : "split";
+    const split = $(".split");
+    if (split) {
+      split.classList.toggle("pane-hide-left", paneMode === "hide-left");
+      split.classList.toggle("pane-hide-right", paneMode === "hide-right");
+    }
+    for (const side of PANE_SIDES) {
+      const btn = $(side.btn);
+      if (!btn) continue;
+      const collapsed = paneMode === side.mode;
+      btn.textContent = collapsed ? side.show : side.hide;
+      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      const label = collapsed
+        ? `Show the ${side.name} pane again`
+        : `Hide the ${side.name} pane — give the other side the full width`;
+      btn.title = label;
+      btn.setAttribute("aria-label", label);
+    }
+    if (persist) { try { localStorage.setItem(LS_PANE, paneMode); } catch (_) {} }
+  }
+
+  // Anything that lives in the left column and can be summoned from outside it
+  // (the agent panel, from the topbar key button) has to bring the column back
+  // first, or it opens into a hidden pane.
+  function revealLeftPane() { if (paneMode === "hide-left") setPaneMode("split"); }
+
   // ---------------------------------------------------------------- lightbox
   // One reusable full-screen overlay for viewing an image — a site/evidence photo
   // or the satellite locator map — with wheel/box-button zoom and drag to pan.
@@ -4323,6 +4392,7 @@
       const wr = $("#workspace-right"); if (wr) wr.hidden = true;
       const ph = $("#report-placeholder"); if (ph) ph.hidden = false;
       renderRailNav(); // nothing to jump to with the workspace closed
+      measureProgressBar(); // the progress card went with it — release the pin offset
       $("#site-picker").scrollIntoView({ behavior: "smooth" });
       $("#station-search").focus();
     });
@@ -4344,7 +4414,7 @@
       state.filterUnreviewed = !state.filterUnreviewed;
       renderDashboard();
     });
-    $$(".sfb-btn").forEach((btn) => btn.addEventListener("click", () => {
+    $$(".sfb-btn[data-status]").forEach((btn) => btn.addEventListener("click", () => {
       const s = btn.dataset.status;
       state.filterStatus = state.filterStatus === s ? null : s;
       if (state.filterStatus) state.filterAttention = false;
@@ -4371,6 +4441,27 @@
     });
     wireBatchBuilder();
 
+    // Remember whether the "order of work" guide is left open or collapsed.
+    const guide = $("#dash-guide");
+    if (guide) {
+      try { if (localStorage.getItem(LS_GUIDE) === "0") guide.open = false; } catch (_) {}
+      guide.addEventListener("toggle", () => {
+        try { localStorage.setItem(LS_GUIDE, guide.open ? "1" : "0"); } catch (_) {}
+      });
+    }
+
+    // pane focus (collapse one column, expand the other)
+    for (const side of PANE_SIDES) {
+      const btn = $(side.btn);
+      if (btn) btn.addEventListener("click", () => setPaneMode(paneMode === side.mode ? "split" : side.mode));
+    }
+    let savedPane = null;
+    try { savedPane = localStorage.getItem(LS_PANE); } catch (_) {}
+    setPaneMode(savedPane || "split", false);
+    // agent.js opens its panel from the topbar; the panel is in the left column.
+    const agentBtn = $("#btn-agent-settings");
+    if (agentBtn) agentBtn.addEventListener("click", revealLeftPane);
+
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");
     if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
@@ -4379,7 +4470,21 @@
       try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeButton); } catch (_) {}
     }
     measureTopbar();
-    window.addEventListener("resize", measureTopbar);
+    measureProgressBar();
+    window.addEventListener("resize", () => { measureTopbar(); measureProgressBar(); });
+    // Keep the pinned-progress metrics honest: its height drives where the group
+    // headers pin, and its position drives the pinned styling.
+    const progressCard = $("#progress");
+    if (progressCard && "ResizeObserver" in window) new ResizeObserver(measureProgressBar).observe(progressCard);
+    const colLeft = $("#col-left");
+    if (colLeft) {
+      let queued = false;
+      colLeft.addEventListener("scroll", () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; syncProgressPinned(); });
+      }, { passive: true });
+    }
   }
 
   // ---------------------------------------------------------------- init

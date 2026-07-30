@@ -97,6 +97,15 @@ Vanilla JS, no dependencies, no build. It:
   host/CORS as the imagery, so the result stays a self-contained, exportable
   JPEG. The chosen span (km) and the labels toggle persist per site and travel
   into the report + exports;
+- lays the workspace out as **two independently scrolling columns** (collection
+  left, report right) sized to the viewport below the topbar. Each column pins
+  what has to stay reachable while the other content scrolls: the progress card on
+  the left, the report's export toolbar on the right, and the dashboard's category
+  headings under the progress card. The pinned offsets are measured into CSS
+  variables by `app.js` (`--topbar-h`, `--progress-h`) rather than hard-coded,
+  because both boxes change height with content and window width. The handles on
+  the seam collapse either column so the other takes the full width — one at a
+  time, remembered in `localStorage`;
 - persists per-site state in `localStorage`, split across two keys per site: a
   small **text** key (findings text, report, prefs — rewritten on every keystroke)
   and a larger `…:img` key holding the photos + satellite map data URLs (rewritten
