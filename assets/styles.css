@@ -576,6 +576,81 @@ body.qm-open { overflow: hidden; }
 .progress-legend { display: flex; gap: 10px; font-size: 12.5px; flex-wrap: wrap; }
 .progress-legend b { font-variant-numeric: tabular-nums; }
 
+/* ---------- step 3 — run the checks ---------- */
+/* Three sub-steps in one card: auto-check, copy the prompt, paste the reply back.
+   They are numbered and stacked so the round trip out to an assistant and back
+   reads as one continuous move — no scrolling between the copy button and the box
+   the answer goes into. */
+.flow { list-style: none; counter-reset: flow; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px; }
+.flow-step { counter-increment: flow; position: relative;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px 18px;
+  flex-wrap: wrap; padding: 12px 0 14px 34px; border-bottom: 1px dashed var(--line); }
+.flow-step:last-child { border-bottom: none; padding-bottom: 2px; }
+/* The sub-step marker — a quieter sibling of the numbered .step badge on the card
+   headings, so 3A/3B/3C never compete with the four main steps. */
+.flow-step::before {
+  content: counter(flow, upper-alpha);
+  position: absolute; left: 0; top: 13px;
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--surface-2); color: var(--ink-soft);
+  border: 1px solid var(--line);
+  font-size: 11px; font-weight: 800;
+}
+.flow-text { flex: 1 1 260px; min-width: 0; }
+.flow-text b { display: block; font-size: 13.5px; line-height: 1.4; }
+.flow-text span { display: block; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); margin-top: 3px; }
+.flow-do { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
+/* The paste sub-step needs the whole width — a textarea alongside its own prose
+   would leave both too narrow to use. */
+.flow-do-block { flex: 1 1 100%; display: block; padding-top: 8px; }
+.flow-do-block textarea { min-height: 76px; font-size: 12.5px;
+  font-family: ui-monospace, Consolas, "Courier New", monospace; }
+.flow-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.flow-status { font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
+.flow-status:empty { display: none; }
+.flow-status.is-ok { color: var(--reviewed); font-weight: 600; }
+.flow-status.is-warn { color: var(--none); font-weight: 600; }
+.flow-status.is-err { color: var(--failed); font-weight: 600; }
+
+/* ---------- advanced options ---------- */
+/* Everything that isn't the four numbered steps — batching, file imports, agent
+   mode, display preferences — folded away at the foot of the column so a
+   first-time operator only ever sees the one workflow. */
+.adv { padding: 0; }
+.adv > .adv-summary { list-style: none; cursor: pointer; padding: 14px 20px;
+  border-radius: var(--radius); display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.adv > .adv-summary::-webkit-details-marker { display: none; }
+.adv > .adv-summary:hover .adv-title { color: var(--brand); }
+.adv > .adv-summary:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.adv-title { font-weight: 650; font-size: 14px; }
+/* The disclosure triangle, drawn here so it sits tight against the title. */
+.adv-title::before { content: "▸"; display: inline-block; width: 14px; color: var(--ink-soft); }
+.adv[open] > .adv-summary .adv-title::before { content: "▾"; }
+.adv-sub { font-size: 12px; color: var(--ink-soft); }
+.adv[open] > .adv-summary { border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
+.adv-body { padding: 4px 20px 18px; }
+.adv-block { padding: 14px 0; border-bottom: 1px dashed var(--line); }
+.adv-block h3 { font-size: 13.5px; margin-bottom: 4px; }
+.adv-block .hint { margin: 0 0 10px; }
+.adv-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.adv-checks { display: flex; gap: 8px 20px; flex-wrap: wrap; }
+/* The agent panel is a card in its own right elsewhere; nested here it's a block
+   inside this one, so it drops the frame and keeps only the tint. */
+.adv-block .agent-panel { box-shadow: none; background: var(--surface-2); padding: 14px 16px;
+  margin: 12px 0 0; }
+.adv-instructions { padding-top: 14px; }
+.adv-instructions > summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--brand); }
+.adv-instructions-body { font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); }
+.adv-instructions-body p { margin: 10px 0 0; }
+.adv-instructions-body b { color: var(--ink); }
+.adv-instructions-body .chip { margin: 0 1px; }
+
+/* Visually hidden, still read out — for labels the layout already makes obvious. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
 /* ---------- dashboard ---------- */
 .dash-note { font-size: 13px; color: var(--ink-soft); margin: 0 0 14px; }
 /* Recommended order of work. Collapsible, because it's read a handful of times
@@ -893,6 +968,9 @@ a.photo-credit:hover { text-decoration: underline; }
 
 /* ---------- attention banner (import / agent run) ---------- */
 .attention { border: 1px solid var(--manual); background: var(--manual-bg); color: var(--manual); border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 13.5px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* display:flex above beats the UA [hidden] rule, which left an empty bar sitting
+   between the steps whenever there was nothing to draw attention to. */
+.attention[hidden] { display: none; }
 .attention.clear { border-color: var(--reviewed); background: var(--reviewed-bg); color: var(--reviewed); }
 .attention b { font-variant-numeric: tabular-nums; }
 .attention .btn { background: transparent; color: inherit; border-color: currentColor; }
@@ -922,7 +1000,8 @@ input[type=file] { font: inherit; font-size: 13px; padding: 6px 0; }
 /* ---------- print ---------- */
 #print-root { display: none; }
 @media print {
-  .topbar, .railnav, .pane-divider, #site-picker, #dashboard, #progress, .head-actions, .foot, #app > .banner { display: none !important; }
+  .topbar, .railnav, .pane-divider, #site-picker, #run-checks, #advanced, #dashboard, #progress,
+  .head-actions, .foot, #app > .banner { display: none !important; }
   /* A pane collapsed on screen must not go missing from the printout. */
   .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right { display: block !important; }
   body { background: #fff; color: #000; }

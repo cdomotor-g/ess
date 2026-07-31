@@ -41,9 +41,13 @@
   // display info live here; each site's full findings stay under its own per-site
   // key (siteKey), so a batch is just an index over storage that already exists.
   const LS_BATCH = "ess-workbench:v1:batch";
-  // Whether the "order of work" guide above the dashboard is left open (default) or
-  // collapsed — it's read a few times and then just takes up room.
+  // Whether the "how to work through the list" guide above the dashboard is left
+  // open (default) or collapsed — it's read a few times and then just takes up room.
   const LS_GUIDE = "ess-workbench:v1:dash-guide";
+  // Whether the Advanced options card at the foot of the left column is left open.
+  // Closed by default: the four numbered steps are the whole primary workflow, and
+  // everything in there belongs to a different way of working.
+  const LS_ADVANCED = "ess-workbench:v1:advanced-open";
   // Default OFF: auto-fetching reference photos fires a burst of Wikipedia requests
   // + canvas re-encoding, which was bogging the browser down. It now runs only when
   // the operator opts in via the dashboard toggle (and even then only on import /
@@ -986,6 +990,7 @@
     const wr = $("#workspace-right"); if (wr) wr.hidden = false;
     const ph = $("#report-placeholder"); if (ph) ph.hidden = true;
     measureTopbar();
+    resetRunChecks(); // step 3 talks about one site at a time
     renderSummary();
     renderSiteImages();
     renderMapsSections();
@@ -1008,6 +1013,12 @@
   // it once per site to populate + persist each without a full workspace render.
   function applyFindings(json) {
     const si = json.site;
+    // Remember what's already on screen: if this file is for the site currently
+    // open, results it doesn't carry are kept rather than wiped (see mergePrevious
+    // below). The primary workflow runs the auto-checks BEFORE the assistant's
+    // reply comes back, and an assistant that skips a source must not undo them.
+    const prevSite = state.site;
+    const prevFindings = state.findings || {};
     const lat = parseFloat(si.lat), lon = parseFloat(si.lon);
     if (isNaN(lat) || isNaN(lon)) throw new Error("The findings file has no valid site latitude/longitude.");
     const st = si.state || stateFromCoords(lat, lon);
@@ -1046,6 +1057,7 @@
         images: importImages(c.images),
       };
     });
+    if (isSameSite(prevSite, state.site)) mergePrevious(prevFindings);
     state.report = {};
     (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
     // Seed jurisdiction-specific section defaults (e.g. the QLD GBO text) where the
@@ -1084,6 +1096,45 @@
     state.filterStatus = null;
     state.filterUnreviewed = false;
     state.showAttention = true; // surface what the agent left for the human
+  }
+
+  // Is an imported findings file describing the site that's already open? siteKey
+  // equality is too brittle here — an assistant re-typing the site block can round
+  // the coordinates it echoes back — so match on the station number where there is
+  // one, and otherwise on a coordinate landing within ~100 m.
+  function isSameSite(a, b) {
+    if (!a || !b) return false;
+    if (a.station_num || b.station_num) return !!a.station_num && String(a.station_num) === String(b.station_num);
+    return Math.abs(a.lat - b.lat) < 0.001 && Math.abs(a.lon - b.lon) < 0.001;
+  }
+
+  // Does an imported collection_log entry actually say anything?
+  function entryHasContent(f) {
+    return !!(f && ((f.status && f.status !== STATUS.UNSET) || (f.note || "").trim() || f.result || (f.images || []).length));
+  }
+
+  // Fold the findings that were already on screen into the ones just imported, for
+  // a file describing the site that is already open. Two rules:
+  //   · an imported entry that says nothing leaves the existing result untouched
+  //     (this is what stops a pasted reply wiping the auto-checks, or a note the
+  //     operator typed before pasting);
+  //   · an imported entry that does say something wins on the finding itself, but
+  //     the operator's own bookkeeping — the review tick, which report section the
+  //     card feeds, whether it's included — carries over, since a findings file
+  //     doesn't carry any of it.
+  function mergePrevious(prevFindings) {
+    for (const [id, prev] of Object.entries(prevFindings || {})) {
+      const next = state.findings[id];
+      if (!entryHasContent(next)) {
+        if (entryHasContent(prev)) state.findings[id] = prev;
+        continue;
+      }
+      if (prev.reviewed && !next.reviewed) next.reviewed = true;
+      if (prev.targetSection && next.targetSection == null) next.targetSection = prev.targetSection;
+      if (typeof prev.included === "boolean" && typeof next.included !== "boolean") next.included = prev.included;
+      // Photos the operator added to the card aren't in the file — keep them.
+      if (!(next.images || []).length && (prev.images || []).length) next.images = prev.images;
+    }
   }
 
   // One appendix layer row out of an untrusted findings file, trimmed to the
@@ -1820,7 +1871,7 @@
   }
 
   // ---------------------------------------------------------------- nav rail
-  // The narrow jump rail on the left edge of the split: the three numbered steps,
+  // The narrow jump rail on the left edge of the split: the four numbered steps,
   // then one button per visible dashboard group, each carrying a count of the
   // sources in that category a human still owns. It answers "where am I / what's
   // left" without scrolling, which is the whole reason it earns its 44px.
@@ -1833,8 +1884,9 @@
   };
   const RAIL_STEPS = [
     { id: "site-picker", step: "1", label: "Choose a site" },
-    { id: "site-summary", step: "2", label: "Site summary" },
-    { id: "dashboard", step: "3", label: "Collect location metadata" },
+    { id: "site-summary", step: "2", label: "Check the site details" },
+    { id: "run-checks", step: "3", label: "Run the checks" },
+    { id: "dashboard", step: "4", label: "Finish & include each source" },
   ];
   const dashboardCats = []; // category ids currently on the dashboard, in render order
   let railObserver = null;
@@ -1926,7 +1978,7 @@
     });
   }
 
-  // Scroll-spy: one observer over the three fixed sections + every group, watching a
+  // Scroll-spy: one observer over the four fixed sections + every group, watching a
   // band across the TOP of the scrolling column — the same place the sticky group
   // header pins, so the rail always agrees with the heading on screen. (A mid-column
   // band reads badly here: sections shorter than half a screen never reach it, so
@@ -2287,12 +2339,14 @@
   }
 
   async function runAla(src) {
+    // Both may be absent: "Run auto-checks" works the whole source list, including
+    // cards a dashboard filter is currently hiding.
     const btn = $(`#run-${src.id}`);
     const res = $(`#res-${src.id}`);
     const s = state.site;
     const radius = (src.api && src.api.radius_km) || 10;
-    btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`;
-    res.className = "src-result show"; res.innerHTML = "Querying Atlas of Living Australia…";
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`; }
+    if (res) { res.className = "src-result show"; res.innerHTML = "Querying Atlas of Living Australia…"; }
     try {
       const r = await alaQuery(s.lat, s.lon, radius, src.api && src.api.endpoint);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
@@ -2360,8 +2414,8 @@
     const res = $(`#res-${src.id}`);
     const s = state.site;
     const radius = (src.api && src.api.radius_km) || 10;
-    btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`;
-    res.className = "src-result show"; res.innerHTML = "Querying Queensland WildNet…";
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`; }
+    if (res) { res.className = "src-result show"; res.innerHTML = "Querying Queensland WildNet…"; }
     try {
       const r = await wildnetQuery(s.lat, s.lon, radius, src.api);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
@@ -2392,11 +2446,131 @@
     return null;
   }
 
-  async function runAllAuto() {
-    for (const src of sourcesForSite()) {
-      const runner = apiRunnerFor(src);
-      if (runner) await runner(src);
+  // Step 3A. Runs every source with a live data API and reports the outcome next to
+  // the button — the operator needs to know how much of the list this actually
+  // answered before they move on to the prompt.
+  async function runAllAuto(e) {
+    const btn = (e && e.currentTarget) || $("#btn-run-auto");
+    const list = sourcesForSite().filter(apiRunnerFor);
+    if (!list.length) { setFlowStatus("#auto-status", "No live-data sources apply to this site — go straight to the prompt below.", "warn"); return; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking…'; }
+    let done = 0;
+    setFlowStatus("#auto-status", `Checking ${list.length} live source${list.length > 1 ? "s" : ""}…`);
+    for (const src of list) {
+      // Each runner records its own result (and its own failure) into state, so a
+      // source that throws must not stop the ones after it.
+      try { await apiRunnerFor(src)(src); } catch (_) {}
+      setFlowStatus("#auto-status", `Checked ${++done} of ${list.length}…`);
     }
+    if (btn) { btn.disabled = false; btn.innerHTML = "⚡ Run auto-checks"; }
+    const tally = { found: 0, none: 0, failed: 0, manual: 0, unset: 0 };
+    list.forEach((s) => tally[(state.findings[s.id] || {}).status || "unset"]++);
+    const bits = [];
+    if (tally.found) bits.push(`${tally.found} found`);
+    if (tally.none) bits.push(`${tally.none} nothing found`);
+    if (tally.failed) bits.push(`${tally.failed} couldn't be reached`);
+    setFlowStatus("#auto-status",
+      `✓ ${list.length} live source${list.length > 1 ? "s" : ""} checked${bits.length ? " — " + bits.join(", ") : ""}.`,
+      tally.failed ? "warn" : "ok");
+  }
+
+  // ------------------------------------------------------ step 3 (run the checks)
+  // Debounced "does this look right yet" check on the paste box. Held at this
+  // scope so applying (or switching site) can cancel a pending one — otherwise it
+  // lands a moment later against the now-empty box and wipes the confirmation
+  // that was just written there.
+  let pastePreviewTimer = null;
+
+  // The three sub-steps of step 3 each report next to their own button. `tone` is
+  // "" (working), "ok", "warn" or "err".
+  function setFlowStatus(sel, msg, tone) {
+    const n = $(sel);
+    if (!n) return;
+    n.textContent = msg || "";
+    n.className = "flow-status" + (tone ? " is-" + tone : "");
+  }
+
+  // Wipe step 3 back to its resting state — called whenever a different site is
+  // loaded, so one site's confirmation can't be read as another's.
+  function resetRunChecks() {
+    clearTimeout(pastePreviewTimer);
+    setFlowStatus("#auto-status", "");
+    setFlowStatus("#prompt-status", "");
+    setFlowStatus("#paste-status", "");
+    const box = $("#paste-json");
+    if (box) box.value = "";
+  }
+
+  // Assistants wrap their JSON in code fences, or top and tail it with prose. Dig
+  // the object out rather than making the operator tidy the reply up by hand.
+  function extractJsonPayload(raw) {
+    let text = String(raw == null ? "" : raw).trim();
+    if (!text) return null;
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) text = fenced[1].trim();
+    try { return JSON.parse(text); } catch (_) {}
+    // Last resort: the outermost {...} in whatever was pasted.
+    const open = text.indexOf("{"), close = text.lastIndexOf("}");
+    if (open >= 0 && close > open) { try { return JSON.parse(text.slice(open, close + 1)); } catch (_) {} }
+    return null;
+  }
+
+  // Single entry point for every path that brings findings in (the step-3 paste
+  // box, the Advanced file import): a batch envelope opens the batch tray, a
+  // single findings object loads straight into the workspace.
+  function routeImport(json) {
+    if (json && Array.isArray(json.sites)) { importBatch(json); return "batch"; }
+    importFindings(json);
+    return "site";
+  }
+
+  // How many sources the pasted reply actually answered — the one number that says
+  // whether the round trip worked.
+  function answeredCount(json) {
+    const log = (json && json.collection_log) || [];
+    return log.filter((c) => c && c.status && c.status !== STATUS.UNSET).length;
+  }
+
+  function applyPastedJson() {
+    clearTimeout(pastePreviewTimer);
+    const box = $("#paste-json");
+    const raw = box ? box.value : "";
+    if (!raw.trim()) { setFlowStatus("#paste-status", "Paste the assistant's reply into the box first.", "warn"); return; }
+    const json = extractJsonPayload(raw);
+    if (!json) {
+      setFlowStatus("#paste-status", "That isn't JSON. Copy the assistant's reply again — it ends with one JSON object.", "err");
+      return;
+    }
+    const answered = answeredCount(json);
+    try {
+      const kind = routeImport(json);
+      if (box) box.value = "";
+      setFlowStatus("#paste-status", kind === "batch"
+        ? "✓ Batch loaded — pick a site from the tray above."
+        : `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}. Anything left over is in step 4 below.`, "ok");
+      // renderWorkspace() parks at the top of the workspace; the operator's next
+      // move is the list of what's left, so land them there instead.
+      if (kind === "site") requestAnimationFrame(() => {
+        const d = $("#dashboard");
+        if (d) d.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } catch (err) {
+      setFlowStatus("#paste-status", "Couldn't apply that: " + err.message, "err");
+    }
+  }
+
+  // Cheap "does this look right yet" feedback while the box has something in it,
+  // so a half-copied reply is obvious before Apply is pressed.
+  function previewPastedJson() {
+    const box = $("#paste-json");
+    if (!box) return;
+    if (!box.value.trim()) { setFlowStatus("#paste-status", ""); return; }
+    const json = extractJsonPayload(box.value);
+    if (!json) { setFlowStatus("#paste-status", "Not valid JSON yet.", "warn"); return; }
+    if (Array.isArray(json.sites)) { setFlowStatus("#paste-status", `Batch of ${json.sites.length} sites — press Apply.`, "ok"); return; }
+    if (!isFindingsObject(json)) { setFlowStatus("#paste-status", "Valid JSON, but not an ESS findings object (needs `site` and `collection_log`).", "warn"); return; }
+    const answered = answeredCount(json);
+    setFlowStatus("#paste-status", `Findings for ${json.site.name || "this site"} — ${answered} source${answered === 1 ? "" : "s"} answered. Press Apply.`, "ok");
   }
 
   // ---------------------------------------------------------------- progress
@@ -3544,7 +3718,7 @@
   // site. It embeds every step, every applicable source aimed at the location,
   // the standardized report wording, and a ready-to-fill ess-findings/1
   // skeleton — so a user can paste it into ANY LLM/assistant, do the research
-  // externally, and hand the JSON straight back into "Import agent findings".
+  // externally, and paste the JSON straight back into the step 3 box it came from.
   // A short top note points Claude Code users at the packaged ess-collect skill
   // as a shortcut (it produces the same schema).
   function buildFullPrompt() {
@@ -3656,7 +3830,7 @@
     };
 
     L.push(`## What to return`);
-    L.push(`Fill in the JSON object below and return **only** that object — no commentary, no markdown fences — so it can be pasted directly into the tool at "Choose a site → Import agent findings".`);
+    L.push(`Fill in the JSON object below and return **only** that object — no commentary, no markdown fences — so it can be pasted straight into the tool at step 3, "Paste its reply back here".`);
     L.push(`Rules:`);
     L.push(`- Keep every \`id\` exactly as given; do not add, remove or rename entries in \`collection_log\` or \`sections\`.`);
     L.push(`- In \`collection_log\`, set \`status\` to one of: found, none, failed, manual. Put a one-line evidence summary in \`note\`, and any longer detail (counts, species names, distances, dates) in \`result_text\`.`);
@@ -3680,8 +3854,8 @@
   }
 
   function copyFullPrompt(e) {
-    copy(buildFullPrompt());
     flashButton((e && e.currentTarget) || $("#btn-copy-prompt"));
+    return copy(buildFullPrompt());
   }
 
   // Render a finished report as compact plain text for an external reviewer.
@@ -4132,33 +4306,80 @@
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
   }
 
-  function doImport() {
-    const text = $("#import-text").value.trim();
-    const file = $("#import-file").files && $("#import-file").files[0];
-    const parse = (raw) => {
-      try {
-        const json = JSON.parse(raw);
-        // A batch envelope (ess-findings-batch/1, or any object with a sites[] array)
-        // routes to importBatch; a single findings object to importFindings.
-        if (json && Array.isArray(json.sites)) importBatch(json);
-        else { importFindings(json); toast("Findings imported"); }
-      } catch (err) { alert("Import failed: " + err.message); }
-    };
-    if (file) {
-      const r = new FileReader();
-      r.onload = () => parse(String(r.result));
-      r.onerror = () => alert("Could not read the file.");
-      r.readAsText(file);
-    } else if (text) {
-      parse(text);
-    } else {
-      alert("Choose a findings file or paste the JSON first.");
+  // Step 3: run the auto-checks, copy the prompt, paste the reply back. The copy
+  // and the paste box sit in the same card on purpose — the round trip out to an
+  // assistant and back is the primary workflow, and it shouldn't need a scroll.
+  function wireStepThree() {
+    const run = $("#btn-run-auto");
+    if (run) run.addEventListener("click", runAllAuto);
+    const copyBtn = $("#btn-copy-prompt");
+    if (copyBtn) copyBtn.addEventListener("click", (e) => {
+      copyFullPrompt(e).then((ok) => setFlowStatus("#prompt-status", ok
+        ? "Copied — paste it into your assistant, then bring its reply back below."
+        : "The browser blocked the copy. Try again, or use ⬇ JSON export and work from that.", ok ? "ok" : "err"));
+    });
+    const apply = $("#btn-paste-apply");
+    if (apply) apply.addEventListener("click", applyPastedJson);
+    const clear = $("#btn-paste-clear");
+    if (clear) clear.addEventListener("click", () => {
+      clearTimeout(pastePreviewTimer);
+      const box = $("#paste-json");
+      if (box) { box.value = ""; box.focus(); }
+      setFlowStatus("#paste-status", "");
+    });
+    const box = $("#paste-json");
+    if (box) {
+      box.addEventListener("input", () => {
+        clearTimeout(pastePreviewTimer);
+        pastePreviewTimer = setTimeout(previewPastedJson, 250);
+      });
+      // Ctrl/Cmd+Enter applies, so a paste can be finished without reaching for the mouse.
+      box.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); applyPastedJson(); }
+      });
     }
   }
 
+  // The Advanced options disclosure at the foot of the left column — batching,
+  // file import, agent mode, display preferences. Closed by default so the four
+  // numbered steps are all a first-time operator sees; the choice is remembered.
+  function wireAdvancedPanel() {
+    const adv = $("#advanced");
+    if (!adv) return;
+    try { if (localStorage.getItem(LS_ADVANCED) === "1") adv.open = true; } catch (_) {}
+    adv.addEventListener("toggle", () => {
+      try { localStorage.setItem(LS_ADVANCED, adv.open ? "1" : "0"); } catch (_) {}
+    });
+  }
+
+  // Advanced options → "Import a findings file". The paste route lives in step 3
+  // (applyPastedJson); both meet at routeImport.
+  function doImport() {
+    const input = $("#import-file");
+    const file = input && input.files && input.files[0];
+    if (!file) { alert("Choose a findings file first."); return; }
+    const r = new FileReader();
+    r.onload = () => {
+      const json = extractJsonPayload(String(r.result));
+      if (!json) { alert("Import failed: that file isn't valid JSON."); return; }
+      try {
+        if (routeImport(json) === "site") toast("Findings imported");
+        input.value = ""; // so re-picking the same file fires a fresh change
+      } catch (err) { alert("Import failed: " + err.message); }
+    };
+    r.onerror = () => alert("Could not read the file.");
+    r.readAsText(file);
+  }
+
   const slug = (s) => s.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").slice(0, 40);
+  // Resolves true once the text is on the clipboard, false if the browser refused
+  // (no clipboard API, or permission denied on an insecure origin) — callers that
+  // report "copied" need to know which happened.
   function copy(text, msg) {
-    navigator.clipboard ? navigator.clipboard.writeText(text).then(() => toast(msg || "Copied")) : toast("Copy not available");
+    if (!navigator.clipboard) { toast("Copy not available"); return Promise.resolve(false); }
+    return navigator.clipboard.writeText(text)
+      .then(() => { toast(msg || "Copied"); return true; })
+      .catch(() => { toast("Couldn't copy — select the text and copy it by hand"); return false; });
   }
   let toastTimer;
   function toast(msg) {
@@ -4384,6 +4605,8 @@
       });
     });
     $("#import-load").addEventListener("click", doImport);
+    wireStepThree();
+    wireAdvancedPanel();
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
     // Map controls are built dynamically per slot in renderMapsSections() (each with
     // its own wired inputs), so there are no static map handlers to attach here.
@@ -4420,8 +4643,6 @@
       if (state.filterStatus) state.filterAttention = false;
       renderDashboard(); renderAttention(); syncFilterButton();
     }));
-    $("#btn-copy-prompt").addEventListener("click", copyFullPrompt);
-    $("#btn-run-auto").addEventListener("click", runAllAuto);
     // Mirror the two free-text header fields into `state` so state is the single
     // source of truth (saveNow / reportObject read state, not the DOM) — this lets
     // the batch flow persist and review sites whose DOM isn't currently shown.
@@ -4441,7 +4662,8 @@
     });
     wireBatchBuilder();
 
-    // Remember whether the "order of work" guide is left open or collapsed.
+    // Remember whether the "how to work through the list" guide is left open or
+    // collapsed.
     const guide = $("#dash-guide");
     if (guide) {
       try { if (localStorage.getItem(LS_GUIDE) === "0") guide.open = false; } catch (_) {}
