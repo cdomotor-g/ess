@@ -29,7 +29,6 @@
       <div class="topbar-meta" id="topbar-meta">
         <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">🌙 Dark</button>
         <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">🧨 Clear cache</button>
-        <button class="ghost-link" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">🔑 Agent</button>
         <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
       </div>
     </div>
@@ -37,31 +36,28 @@
 
   <main id="app">
    <div class="split">
-    <!-- Narrow jump rail — the three numbered steps, then one button per visible
+    <!-- Narrow jump rail — the four numbered steps, then one button per visible
          dashboard group. Sits outside #col-left so it never scrolls away and never
          eats into card width. Filled by JS: renderRailNav(). -->
     <nav class="railnav" id="railnav" aria-label="Jump to section" hidden></nav>
 
-    <!-- LEFT column — site pick, summary, collection dashboard (independently scrolls) -->
+    <!-- LEFT column — the collection workflow, in the order it is worked:
+         1 pick a site · 2 check the summary · 3 run the checks · 4 finish the list.
+         Everything that belongs to another way of working (batching, importing a
+         file, the BYOK agent, display preferences) lives in the Advanced options
+         card at the foot of the column. Scrolls independently on wide screens. -->
     <div class="col col-left" id="col-left">
     <!-- Load / error banner -->
     <div id="load-banner" class="banner" hidden></div>
-
-    <!-- Optional BYOK agent settings panel (filled + toggled by assets/agent.js) -->
-    <div id="agent-panel" class="agent-panel" hidden></div>
 
     <!-- STEP 1 — choose a site -->
     <section class="card" id="site-picker">
       <div class="card-head">
         <h2><span class="step">1</span> Choose a site</h2>
-        <div class="head-actions">
-          <button class="btn ghost" id="btn-open-batch" title="Pick several sites and assess them together as a batch">🗂 Batch multiple sites</button>
-        </div>
       </div>
       <div class="tabs" role="tablist">
         <button class="tab is-active" data-tab="by-name" role="tab">By station name</button>
         <button class="tab" data-tab="by-coords" role="tab">By coordinates</button>
-        <button class="tab" data-tab="import" role="tab">Import JSON</button>
       </div>
 
       <div class="tab-panel is-active" data-panel="by-name">
@@ -100,18 +96,10 @@
         <button class="btn primary" id="load-coords">Load site</button>
         <p class="hint">Paste a decimal lat/long (southern-hemisphere latitudes are negative).</p>
       </div>
-
-      <div class="tab-panel" data-panel="import">
-        <label class="field-label" for="import-file">Load an ESS findings file (JSON)</label>
-        <input id="import-file" type="file" accept="application/json,.json" />
-        <p class="hint" style="margin:12px 0 5px">…or paste the JSON:</p>
-        <textarea id="import-text" rows="4" placeholder='{"schema":"ess-findings/1", "site": {…}, "collection_log": […]}  — or a batch: {"schema":"ess-findings-batch/1", "sites": [ … ]}'></textarea>
-        <button class="btn primary" id="import-load" style="margin-top:12px">Import findings</button>
-        <p class="hint">A single <code>ess-findings/1</code> object, or a <code>ess-findings-batch/1</code> object with a <code>sites</code> array (from <code>resolve.py --batch … --template</code>, filled in). A batch loads a picker bar; single files load straight in. Manual &amp; failed sources are flagged so you can finish them here.</p>
-      </div>
     </section>
 
-    <!-- Batch bar — shown when a batch of sites is imported together. Each chip
+    <!-- Batch bar — shown only when several sites are being assessed together
+         (started from Advanced options, or by importing a batch file). Each chip
          opens that site in the workspace below; work is saved per site. -->
     <section class="card" id="batch-bar" hidden>
       <div class="card-head">
@@ -128,14 +116,15 @@
     <!-- Everything below appears once a site is loaded -->
     <div id="workspace" hidden>
 
-      <!-- Site summary (proforma header replica) -->
+      <!-- STEP 2 — site summary (proforma header replica) -->
       <section class="card" id="site-summary">
         <div class="card-head">
-          <h2><span class="step">2</span> Site summary</h2>
+          <h2><span class="step">2</span> Check the site details</h2>
           <div class="head-actions">
             <button class="btn ghost" id="btn-clear-site" title="Choose a different site">Change site</button>
           </div>
         </div>
+        <p class="dash-note">Filled in from the Bureau station record and two auto-generated locator maps. Add the site photos here — they carry through to the report.</p>
         <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
         <!-- Two locator maps (hyper-local + greater-region), each with its own
@@ -161,7 +150,7 @@
         </div>
       </section>
 
-      <!-- Progress -->
+      <!-- Progress — pins to the top of this column as it scrolls -->
       <section class="card compact" id="progress">
         <div class="progress-row">
           <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
@@ -169,49 +158,87 @@
         </div>
       </section>
 
-      <!-- attention banner (after import / agent run) -->
+      <!-- STEP 3 — the two automated passes. Copy prompt and the box you paste the
+           reply into are deliberately side by side in one card, so the round trip
+           to an assistant never needs a scroll. -->
+      <section class="card" id="run-checks">
+        <div class="card-head">
+          <h2><span class="step">3</span> Run the checks</h2>
+        </div>
+        <p class="dash-note">Two passes fill in most of the assessment before you touch it: the live sources this tool can query itself, then an AI assistant for everything else.</p>
+
+        <ol class="flow">
+          <li class="flow-step">
+            <div class="flow-text">
+              <b>Auto-check the live sources</b>
+              <span>Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.</span>
+            </div>
+            <div class="flow-do">
+              <button class="btn primary" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
+              <span class="flow-status" id="auto-status" role="status"></span>
+            </div>
+          </li>
+
+          <li class="flow-step">
+            <div class="flow-text">
+              <b>Copy the prompt into an AI assistant</b>
+              <span>A complete, self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research everything else.</span>
+            </div>
+            <div class="flow-do">
+              <button class="btn primary" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant to run this assessment and hand back JSON">📋 Copy prompt</button>
+              <span class="flow-status" id="prompt-status" role="status"></span>
+            </div>
+          </li>
+
+          <li class="flow-step">
+            <div class="flow-text">
+              <b>Paste its reply back here</b>
+              <span>The assistant answers with one JSON object. Paste the whole reply — code fences and stray commentary are fine. Anything it left blank keeps the result you already have.</span>
+            </div>
+            <div class="flow-do flow-do-block">
+              <label class="sr-only" for="paste-json">The assistant's JSON reply</label>
+              <textarea id="paste-json" rows="4" spellcheck="false" autocomplete="off"
+                        placeholder='Paste the assistant&#39;s reply here — {"schema":"ess-findings/1", "site": {…}, "collection_log": […]}'></textarea>
+              <div class="flow-row">
+                <button class="btn primary" id="btn-paste-apply">✓ Apply response</button>
+                <button class="btn ghost tiny" id="btn-paste-clear">Clear</button>
+                <span class="flow-status" id="paste-status" role="status"></span>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- attention banner (after a paste / agent run) -->
       <div id="attention-banner" class="attention" hidden></div>
 
-      <!-- STEP 3 — collection dashboard -->
+      <!-- STEP 4 — collection dashboard -->
       <section class="card" id="dashboard">
         <div class="card-head">
-          <h2><span class="step">3</span> Collect location metadata</h2>
-          <div class="head-actions">
-            <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
-            <label class="inline-check" title="Off by default (keeps the browser light). When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings on import / agent / API runs. Editing a card's notes never triggers a search — use the buttons on a species card to fetch reference images on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images</label>
-            <button class="btn ghost" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant (ChatGPT, Gemini, Claude, Copilot…) to run this assessment and hand back JSON you can import here">📋 Copy prompt</button>
-            <button class="btn ghost" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
-          </div>
+          <h2><span class="step">4</span> Finish &amp; include each source</h2>
         </div>
-        <!-- Recommended order of work. Open by default (the order is the whole
-             point of the section); collapsing it is remembered per browser. -->
+        <!-- The primary workflow only. Everything about batching, file imports and
+             agent mode lives in Advanced options at the foot of this column.
+             Open by default; collapsing it is remembered per browser. -->
         <details class="dash-guide" id="dash-guide" open>
-          <summary>How to work this section — the order that leaves you the least to do by hand</summary>
+          <summary>How to work through the list</summary>
           <ol class="dash-steps">
-            <li><b>Let the machines go first.</b> <b>⚡ Run auto-checks</b> (above) answers every source marked
-              <b>API</b> live in your browser. For the whole assessment researched end to end, use
-              <b>🔑 Agent</b> in the top bar with your own API key, or <b>📋 Copy prompt</b> → paste into any
-              assistant → bring its JSON back through <b>Choose a site → Import JSON</b>. Doing this first means
-              the list below is mostly filled in before you touch it.</li>
-            <li><b>Then take what's left, in order.</b> Switch on <b>⚠ Needs attention</b> to show only the
-              sources still owned by a human (Manual / Failed / Not checked), and work down the categories from
-              the top — the nav rail on the far left carries the count still outstanding per category. Each
-              source opens pre-aimed at this location where the site supports it.</li>
-            <li><b>Set a result on every card</b> —
+            <li><b>Start with what still needs you.</b> <b>⚠ Needs attention</b> below shows only the sources
+              nobody has answered yet (Manual / Failed / Not checked). The rail on the far left carries the count
+              still outstanding per category.</li>
+            <li><b>Open the source and set a result</b> —
               <span class="chip found">Found</span>
               <span class="chip none">Nothing found</span>
               <span class="chip failed">Search failed</span>
-              <span class="chip manual">Needs manual check</span> — and put what you saw in the card's notes
-              while it's in front of you. Add evidence photos on the cards that take them.</li>
-            <li><b>Press Include</b> on a card to push its notes and photos into the matching report section on
-              the right. The report is built from what you include, so do it as you go rather than at the end.</li>
-            <li><b>Tick Reviewed last</b>, once you're happy with a card — it turns green, and <b>☐ Needs
-              review</b> lists the ones you haven't. Review is tracked separately from the result on purpose: a
-              <em>Found</em> result isn't always good news (a protected species means caution on site, not a
-              clean bill of health).</li>
+              <span class="chip manual">Needs manual check</span> — then write what you saw in the card's notes
+              while it's still in front of you. Add evidence photos on the cards that take them.</li>
+            <li><b>Press ＋ Include</b> to push a card's notes and photos into the matching report section on the
+              right. The report is built from what you include, so do it as you go rather than at the end.</li>
+            <li><b>Tick ✓ Reviewed last</b>, once you're happy with a card — it turns green, and <b>☐ Needs
+              review</b> lists the ones you haven't. A <em>Found</em> result isn't always good news (a protected
+              species means caution on site), which is why review is tracked separately from the result.</li>
           </ol>
-          <p class="dash-note">Finish the left-hand side before exporting: step 4 in the report pane only shows
-            what you've included here.</p>
+          <p class="dash-note">Finish this list before exporting: step 5 on the right only shows what you've included here.</p>
         </details>
         <div class="status-filter-bar" id="status-filter-bar">
           <span class="sfb-label">Show only:</span>
@@ -227,6 +254,90 @@
       </section>
 
     </div><!-- /workspace (left) -->
+
+    <!-- ADVANCED OPTIONS — every other way of working, kept out of the way of the
+         four steps above. Closed by default; the open/closed choice is remembered. -->
+    <details class="card adv" id="advanced">
+      <summary class="adv-summary">
+        <span class="adv-title">⚙ Advanced options</span>
+        <span class="adv-sub">Several sites at once · import a findings file · let Claude run it · display &amp; instructions</span>
+      </summary>
+      <div class="adv-body">
+
+        <section class="adv-block">
+          <h3>Assess several sites at once</h3>
+          <p class="hint">Pick a list of sites and work them as a batch. Each opens into its own assessment and is
+            saved separately, so you can finish them one at a time and fact-check the whole set at the end.</p>
+          <div class="adv-actions">
+            <button class="btn" id="btn-open-batch">🗂 Batch multiple sites</button>
+          </div>
+        </section>
+
+        <section class="adv-block">
+          <h3>Import a findings file</h3>
+          <p class="hint">Load a saved <code>ess-findings/1</code> export, or a <code>ess-findings-batch/1</code>
+            file with a <code>sites</code> array (from <code>resolve.py --batch … --template</code>, filled in).
+            A batch opens the picker bar above; a single file loads straight in. To paste an assistant's reply
+            instead, use the box in step 3 — you don't need a file for that.</p>
+          <div class="adv-actions">
+            <input id="import-file" type="file" accept="application/json,.json" />
+            <button class="btn" id="import-load">Import findings</button>
+          </div>
+        </section>
+
+        <section class="adv-block">
+          <h3>Agent mode — let Claude run the whole assessment</h3>
+          <p class="hint">Instead of the copy-prompt/paste-back round trip in step 3, Claude can work through every
+            source itself and fill the dashboard live. Needs your own Anthropic API key, which stays in this
+            browser. Each run costs a few cents.</p>
+          <div class="adv-actions">
+            <button class="btn" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">🔑 Agent mode…</button>
+          </div>
+          <!-- Filled + toggled by assets/agent.js -->
+          <div id="agent-panel" class="agent-panel" hidden></div>
+        </section>
+
+        <section class="adv-block">
+          <h3>Display options</h3>
+          <div class="adv-checks">
+            <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
+            <label class="inline-check" title="Off by default (keeps the browser light). When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings on import / agent / API runs. Editing a card's notes never triggers a search — use the buttons on a species card to fetch reference images on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images</label>
+          </div>
+        </section>
+
+        <details class="adv-instructions">
+          <summary>The alternate workflows, in full</summary>
+          <div class="adv-instructions-body">
+            <p><b>Copy prompt → paste back (the default).</b> Step 3 copies one self-contained prompt describing this
+              site and every source that applies to it. Any assistant with web access can work it; it replies with a
+              single <code>ess-findings/1</code> JSON object, which you paste into the box in step 3. Sources the
+              reply leaves blank keep whatever result they already have, so running the auto-checks first is never
+              wasted.</p>
+            <p><b>Agent mode (bring your own key).</b> Claude drives the same loop from inside this page using
+              Anthropic's server-side web search &amp; fetch, writing each result into the dashboard as it goes.
+              Nothing is sent anywhere but <code>api.anthropic.com</code>, and no key is stored on any server —
+              see <a href="docs/AGENT-MODE.md" target="_blank" rel="noopener">docs/AGENT-MODE.md</a>.</p>
+            <p><b>The <code>ess-collect</code> skill.</b> Running Claude Code in this repository? Ask it to
+              "run an ESS for &lt;site&gt;" and the packaged skill produces the same JSON — with
+              <code>--batch</code> for a whole list — which you bring back through <b>Import a findings file</b>
+              above.</p>
+            <p><b>Batches.</b> Sites in a batch each keep their own findings, photos and report. Work one, export it,
+              then pick the next from the tray above the workspace; <b>🔍 Check all</b> copies one fact- and
+              consistency-check prompt covering the whole set.</p>
+            <p><b>Statuses.</b> <span class="chip found">Found</span> and
+              <span class="chip none">Nothing found</span> are both real answers — the difference between
+              "checked, and there is something" and "checked, and there is nothing".
+              <span class="chip failed">Search failed</span> means the check couldn't be completed and
+              <span class="chip manual">Needs manual check</span> means a human has to drive it, so both stay on
+              the ⚠ Needs attention list until someone resolves them.</p>
+            <p><b>Internal sources</b> (the permits register, POPE / leasing SharePoint) are an operator action list.
+              They show on the dashboard but their notes never reach the exported report. Hide them with
+              <b>Show internal / manual sources</b> above.</p>
+          </div>
+        </details>
+
+      </div>
+    </details>
 
     <footer class="foot">
       <p>Client-side only — nothing you enter leaves your browser. Work is saved locally per site. <span id="foot-meta"></span></p>
@@ -262,11 +373,11 @@
         </div>
       </div>
 
-      <!-- STEP 4 — report -->
+      <!-- STEP 5 — report -->
       <div id="workspace-right" hidden>
         <section class="card" id="report">
           <div class="card-head">
-            <h2><span class="step">4</span> ESS report</h2>
+            <h2><span class="step">5</span> ESS report</h2>
             <div class="head-actions">
               <button class="btn primary" id="btn-download-html" title="Export the printable HTML report.">⬇ EXPORT</button>
               <button class="btn ghost" id="btn-check-report" title="Copy a precise fact-&amp;-consistency-check prompt for this finished report — paste it into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) to have it independently reviewed">🔍 Check report</button>

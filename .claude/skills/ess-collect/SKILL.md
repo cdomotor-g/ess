@@ -200,7 +200,8 @@ imports straight into the browser tool) and a short human-readable summary.
 
 Run `resolve.py --template` to get the empty skeleton, then fill it in — it is
 the same schema the browser tool imports and exports, so a filled template drops
-straight into **Import agent findings** for review and export:
+straight into the tool's step 3 **Paste its reply back here** box for review and
+export:
 
 ```
 python .claude/skills/ess-collect/resolve.py --station "WOODGATE ALERT" --template > findings.json
@@ -341,7 +342,8 @@ single `ess-findings-batch/1` object the browser tool imports in one go.
    FOUND / MANUAL / FAILED · anything notable (a threatened species, a heritage
    place) — so the reader sees at a glance which sites need attention.
 
-The user imports the batch at **Choose a site → Import JSON**: the tool shows a
+The user pastes the batch into the step 3 box (or loads the file from **Advanced
+options → Import a findings file**): the tool shows a
 picker bar with one chip per site (and its found / needs-attention counts), and
 they open each to finish the Manual/Failed items and export. PMST stays MANUAL per
 site (no API), so N sites means N polygon draws — flag them together.

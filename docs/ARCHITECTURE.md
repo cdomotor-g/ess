@@ -97,6 +97,15 @@ Vanilla JS, no dependencies, no build. It:
   host/CORS as the imagery, so the result stays a self-contained, exportable
   JPEG. The chosen span (km) and the labels toggle persist per site and travel
   into the report + exports;
+- orders the **left column as the workflow itself** — ① choose a site, ② check the
+  site details, ③ run the checks, ④ finish & include each source, with ⑤ the report
+  in the right column. Step ③ (`#run-checks`) holds the whole assistant round trip
+  in one card: **Run auto-checks**, **Copy prompt** and the box the JSON reply is
+  pasted into, so it never needs a scroll. Everything belonging to a *different*
+  way of working — batches, file imports, the BYOK agent, display preferences —
+  lives in the `<details id="advanced">` card at the foot of the column, closed by
+  default (open state remembered), which is why a first-time operator sees only
+  the four steps;
 - lays the workspace out as **two independently scrolling columns** (collection
   left, report right) sized to the viewport below the topbar. Each column pins
   what has to stay reachable while the other content scrolls: the progress card on
@@ -241,6 +250,13 @@ paths fill the same state, and the browser's own live checks (ALA) do too:
 `found|none|failed|manual|unset`. It is emitted by `app.js reportObject()`,
 scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
 — so a file the skill writes and a file the tool exports are interchangeable.
+**Importing a file for the site already open merges rather than replaces**
+(`applyFindings` → `isSameSite` → `mergePrevious`): an entry that carries no
+status, note, result or photo leaves the existing result alone, and the
+operator's own bookkeeping (review tick, include target, card photos) carries
+across an entry that does. This is what lets the primary workflow run the
+auto-checks *before* the assistant's reply comes back without the reply undoing
+them. A file for a different site replaces the workspace as before.
 `site` and each `sections[]`/`collection_log[]` entry may carry an optional
 `images: [{ caption, data_url, credit?, source_url? }]` — populated by the
 browser tool (uploaded photos, or reference images auto-sourced from Wikipedia,

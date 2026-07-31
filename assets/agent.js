@@ -8,7 +8,8 @@
  * the shared review/export state via window.ESS). Results fill the dashboard
  * live; the same reviewer/export surface then applies.
  *
- * Nothing here runs unless the user opens the Agent panel and adds a key. The
+ * Nothing here runs unless the user opens Advanced options → Agent mode and adds
+ * a key. The
  * key is stored only in this browser's localStorage and is sent only to
  * api.anthropic.com. No backend, no shared/default key (see docs/ROADMAP.md for
  * the proxy path that would enable a shared key).
@@ -109,9 +110,10 @@
   function openPanel() { const p = $("#agent-panel"); if (p) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "center" }); } }
   function setStatus(msg, err) { const s = $("#agent-status"); if (s) { s.textContent = msg; s.className = "agent-status" + (err ? " err" : ""); } }
 
-  // The dashboard no longer carries a run button — the panel's own button starts a
-  // run, and the topbar key button (the one control that's always on screen) is
-  // where a run in progress has to show up.
+  // Agent mode is one of the alternate workflows, so it lives in the Advanced
+  // options card at the foot of the collection column: the panel's own button
+  // starts a run, and the button that opens the panel is where a run in progress
+  // shows up.
   function reflectRunning() {
     const runBtn = $("#agent-run-2");
     if (runBtn) {
@@ -120,7 +122,7 @@
     }
     const key = $("#btn-agent-settings");
     if (key) {
-      key.textContent = running ? "⏳ Agent running…" : "🔑 Agent";
+      key.textContent = running ? "⏳ Agent running…" : "🔑 Agent mode…";
       key.title = running
         ? "Claude is working through the sources — open this panel for progress"
         : "Run assessments with Claude using your own API key";

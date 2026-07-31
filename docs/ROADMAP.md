@@ -34,8 +34,8 @@ slice. Each backlog item names the files to touch and how to verify.
   entries.
 - **Batch mode** — a `ess-findings-batch/1` envelope (`{ sites: [ <ess-findings/1>,
   … ] }`) runs end-to-end, with two entry points into the same **batch picker bar**.
-  (1) **In the browser** — a **🗂 Batch multiple sites** button in the site picker
-  opens a modal (`#batch-builder`) to multi-select sites (search-and-add stations,
+  (1) **In the browser** — a **🗂 Batch multiple sites** button in **⚙ Advanced
+  options** opens a modal (`#batch-builder`) to multi-select sites (search-and-add stations,
   or paste a `resolve.py`-style list of names/numbers or `lat,lon[,name]`);
   `createBatchFromSites` scaffolds a blank per-site state for each and opens the
   first. (2) **From a file** — `resolve.py --batch` scaffolds many sites in one call
@@ -62,7 +62,8 @@ slice. Each backlog item names the files to touch and how to verify.
   (incl. `--template` → the `ess-findings/1` skeleton) and a full playbook,
   emitting the same status taxonomy + JSON.
 - **Agent ↔ tool interoperability** — one shared `ess-findings/1` schema; the
-  tool imports the agent's findings (**Import agent findings** tab), surfaces
+  tool imports the agent's findings (the step 3 paste box, or **Advanced
+  options → Import a findings file**), surfaces
   Manual/Failed for review, and re-exports. "Copy agent prompt" for the reverse.
 - **BYOK in-browser agent** (beta) — `assets/agent.js` runs the whole assessment
   from the browser with the user's own Anthropic key (server-side web

@@ -32,25 +32,35 @@ python3 -m http.server 8000
 Opening `index.html` directly with `file://` will **not** work (browsers block
 `fetch()` of the JSON data from the filesystem). Serve it, or publish to Pages.
 
-1. Type a station name/number, or switch to **By coordinates**. Doing several
-   sites? Click **🗂 Batch multiple sites** to pick a whole list at once (search
-   and add stations, or paste names/numbers or `lat,lon[,name]`, one per line) —
-   **Start batch** opens the picker bar and the first site, ready to work through.
-2. The site summary auto-populates (station #, WMO, state, delivery group,
-   facility, lat/long) — this replicates the workbook's VLOOKUP autofill. A
-   **satellite locator map** is generated automatically with a pin on the
-   station; pick how many km it spans (default 100) and it re-renders. Toggle
+The left pane is the workflow, numbered in the order you work it. Everything
+belonging to another way of working — batches, file imports, the in-browser
+agent, display preferences — is folded into **⚙ Advanced options** at the foot of
+that pane, so the four steps are all you see until you go looking.
+
+1. **Choose a site.** Type a station name/number, or switch to
+   **By coordinates**.
+2. **Check the site details.** The summary auto-populates (station #, WMO, state,
+   delivery group, facility, lat/long) — this replicates the workbook's VLOOKUP
+   autofill. A **satellite locator map** is generated automatically with a pin on
+   the station; pick how many km it spans (default 100) and it re-renders. Toggle
    **Roads & labels** to overlay road and locality/place names on the imagery
    (on by default). Add **station photos** here — paste from the clipboard, drag
    a file, or use the file picker. The map and photos travel with the report and
    every export.
-3. Work down the **collection dashboard**. It opens with a short **order of work**
-   guide — automated passes first (**⚡ Run auto-checks**, or the agent), then the
-   sources still owned by a human, then results, then **Include**, then
-   **Reviewed** last — which you can collapse once you know it. Each source opens
-   aimed at the site. Hit **Check live** on the Atlas of Living Australia card;
-   set a result on the rest: Found / Nothing found / Search failed / Manual. The
-   **Show only** row filters the list by result, or down to
+3. **Run the checks** — the two automated passes, in one card so the round trip
+   to an assistant never needs a scroll:
+   * **⚡ Run auto-checks** answers every source with a public data API (Atlas of
+     Living Australia, Queensland WildNet) live in your browser, and reports what
+     it found next to the button.
+   * **📋 Copy prompt** copies a complete, self-contained prompt for this site.
+     Paste it into any assistant (ChatGPT, Gemini, Claude, Copilot…).
+   * **Paste its reply back here** takes the JSON the assistant returns — code
+     fences and surrounding commentary and all — and fills the dashboard.
+     Sources the reply leaves blank keep the result they already have, so the
+     auto-checks you ran first are never undone.
+4. **Finish & include each source.** Each source opens aimed at the site. Set a
+   result on the ones still outstanding: Found / Nothing found / Search failed /
+   Manual. The **Show only** row filters the list by result, or down to
    **⚠ Needs attention** (Manual / Failed / Not checked) and **☐ Needs review**. Sources for weeds,
    pests, disease, threatened species and biosecurity get their own photo
    dropzone — attach evidence when a check comes back **Found**. On the species
@@ -59,8 +69,8 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
    from Wikipedia — no hunting for one — with its licensing credit attached. Or
    hit **✨ Auto from notes** and the tool reads the species/subjects out of that
    card's findings text and fetches a photo for each; with **Auto-fetch reference
-   images** on (top of the dashboard, default on) this also happens as you finish
-   editing a card, and automatically on **Import** and during agent runs.
+   images** on (⚙ Advanced options → Display options) this also happens as you
+   finish editing a card, and automatically on **Import** and during agent runs.
    * The **EPBC PMST** card's **Open ↗** link now bakes the site's lat/long into
      the URL, so the Protected Matters Search Tool loads straight onto the
      location with its export panel open. Draw the buffer, generate the **Excel**
@@ -101,7 +111,7 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
      service's own published symbology, so the map can still be read once the
      report is all anyone has. (The ordinary **Open ↗** link still opens Queensland
      Globe itself if you need its own tools or legend.)
-4. The **ESS report** section fills with the standardized proforma wording,
+5. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Each section has an
    **✨ Insert suggested detail** button that drafts a paragraph from that
    section's evidence plus standard wording (`data/statements.json`), and the tool
@@ -124,6 +134,8 @@ scroll, so how far through you are is always on screen — the report's export
 buttons do the same on the right. The two small handles on the seam between the
 panes **collapse one side and give the other the full width** (one at a time);
 click the highlighted handle to bring the pane back. The choice is remembered.
+The narrow **jump rail** on the far left carries the four steps plus one button
+per source category, badged with how many sources in it still need a human.
 
 ### Let the agent do the collection
 
@@ -133,24 +145,27 @@ feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT
 
 - **File handoff (any LLM).** Load the site and click **📋 Copy prompt** to copy
   a complete, self-contained, model-agnostic prompt; paste it into any assistant
-  (ChatGPT, Gemini, Claude, Copilot…), then paste the JSON it returns into the
-  tool's **Choose a site → Import agent findings** tab. No key in the browser.
+  (ChatGPT, Gemini, Claude, Copilot…), then paste the JSON it returns straight
+  into the **Paste its reply back here** box in the same step 3 card. No key in
+  the browser.
   Best for batches. *(In a Claude Code session in this repo, the prompt's top
   note lets you run the `ess-collect` skill instead — same JSON — or just ask
   "Run an ESS for WOODGATE ALERT".)*
-  * **Batches.** Two ways to start a batch. In the browser, click **🗂 Batch
-    multiple sites** (top of **Choose a site**) to pick a list — search-and-add
+  * **Batches.** Two ways to start a batch. In the browser, open **⚙ Advanced
+    options** at the foot of the left pane and click **🗂 Batch multiple sites**
+    to pick a list — search-and-add
     stations, or paste names/numbers or `lat,lon[,name]`, one per line — and
     **Start batch**. Or scaffold them all outside the browser with
     `resolve.py --batch sites.txt --template` (same one-per-line format) — it
     emits one `ess-findings-batch/1` object (`{ sites: [ … ] }`) for an agent to
-    fill and the **Import JSON** tab to load. Either way the tool shows a **batch
+    fill and **Advanced options → Import a findings file** to load. Either way the tool shows a **batch
     picker bar**: one chip per site (with its found / needs-attention counts,
     remembered across visits), each opening into the same review/export surface,
     plus a **🔍 Check all** button that copies one combined
     fact-and-consistency-check prompt covering every site. Ask a Claude Code
     session to "run an ESS for these sites: …" and it does the whole batch.
-- **BYOK in-browser (beta).** Click **🔑 Agent**, paste your **own** Anthropic
+- **BYOK in-browser (beta).** In **⚙ Advanced options**, click **🔑 Agent
+  mode…**, paste your **own** Anthropic
   API key, and **Run full assessment**. The browser drives Claude directly
   (Anthropic's server-side web search/fetch bypass CORS) and fills the dashboard
   live. The key stays in your browser; ~a few cents per site.
