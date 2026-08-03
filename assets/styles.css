@@ -42,6 +42,12 @@
   --manual-bg: light-dark(#e7edf8, #16233d);
   --reviewed:  light-dark(#1f7a4d, #6fd39b);
   --reviewed-bg: light-dark(#e4f3ea, #12321f);
+  /* Caution — work still outstanding, as against a result. The report's "not yet
+     checked" caveat is what wears it. Deliberately its own token rather than a
+     reuse of --none: every status above means a source HAS been answered, and
+     --failed's red belongs to a contradiction, not to an unfinished check. */
+  --caution:    light-dark(#8a6d1a, #e0c25a);
+  --caution-bg: light-dark(#f9f3e0, #2e2712);
   /* light-dark() resolves colours, not whole shadow lists, so the geometry is
      shared and only the two shadow colours switch per theme. */
   --shadow-near: light-dark(rgba(16,32,48,.06), rgba(0,0,0,.30));
@@ -1361,10 +1367,52 @@ a.photo-credit:hover { text-decoration: underline; }
 .report-globe figcaption { font-size: var(--fs-micro); color: var(--ink-soft); margin-top: var(--sp-1); line-height: 1.45; }
 .report-globe .photo-remove { position: absolute; top: 6px; right: 6px; }
 
-/* Included-source evidence blocks inside a report section: each included card
-   contributes a labelled block (its notes + its photos), so multiple sources can
-   land in one section without their content being duplicated across siblings. */
-.r-included { margin-top: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-2); }
+/* Included-source evidence inside a report section, split by what each entry
+   actually is: findings at full weight, sources that came back empty as one
+   line, and anything still outstanding as a caveat rather than a finding (see
+   renderSectionEvidence). Only the first group is a stack of panels — the other
+   two used to be, which is how twelve non-findings could out-weigh eight real
+   ones. */
+.r-evidence { margin-top: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-2); }
+.r-ev-title { display: flex; align-items: center; gap: var(--sp-1); margin: 0;
+  font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); }
+.r-ev-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 var(--sp-1); border-radius: 999px; background: var(--surface-2); color: var(--ink-soft);
+  font-variant-numeric: tabular-nums; letter-spacing: 0; }
+/* The two collapsed strips: a label, then the source names as inline buttons. */
+.r-ev-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-0) var(--sp-1);
+  margin: 0; font-size: var(--fs-meta); color: var(--ink-soft); }
+.r-ev-label { font-weight: 650; color: var(--ink); }
+.r-ev-sep { color: var(--ink-soft); opacity: .5; }
+.r-ev-none { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+/* A source named in a strip is the way back to its card — the detail deliberately
+   stays there, so the name has to be a control, not a word. */
+.r-ev-src { font: inherit; font-size: var(--fs-meta); color: var(--ink); background: none;
+  border: none; border-bottom: 1px dotted var(--line); border-radius: 0; padding: 0; cursor: pointer; }
+.r-ev-src .src-num { margin-right: var(--sp-1); }
+.r-ev-src:hover { color: var(--brand); border-bottom-color: var(--brand); }
+/* Outstanding sources read as a warning, because that is what they are: the
+   section is asserting something the collection has not finished supporting. */
+.r-ev-caveat { border: 1px solid var(--caution); border-left: 4px solid var(--caution);
+  border-radius: 8px; padding: var(--sp-2); background: var(--caution-bg); }
+.r-ev-caveat .r-ev-label, .r-ev-caveat .r-ev-src { color: var(--caution); }
+.r-ev-caveat .r-ev-src { border-bottom-color: var(--caution); opacity: .95; }
+.r-ev-caveat .r-ev-src:hover { color: var(--brand); border-bottom-color: var(--brand); }
+/* The way out of the caveat, at the end of the names it applies to. */
+.r-ev-goto { margin-left: auto; font: inherit; font-size: var(--fs-micro); font-weight: 650; color: var(--brand);
+  background: none; border: none; padding: 0; cursor: pointer; white-space: nowrap; }
+.r-ev-goto:hover { text-decoration: underline; }
+/* Pictures belonging to a collapsed entry — the Queensland Globe capture sits on
+   a source that is usually still "manual", and it is the one image in the report
+   that has to be read, so it survives its entry being collapsed. */
+.r-ev-media { display: flex; flex-direction: column; gap: var(--sp-2); }
+.r-ev-media:empty { display: none; }
+.r-ev-media-src { margin: 0; font-size: var(--fs-micro); font-weight: 650; color: var(--ink-soft); }
+.r-ev-more { align-self: flex-start; }
+/* Each included card contributes a labelled block (its notes + its photos), so
+   multiple sources can land in one section without their content being
+   duplicated across siblings. */
+.r-included { display: flex; flex-direction: column; gap: var(--sp-2); }
 .r-inc-item { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 8px; padding: var(--sp-2); background: var(--surface-2); }
 /* Found evidence blocks in the report get the same loud cherry edge as the
    collection cards, so a found matter stands out in the report column too. */
@@ -1377,6 +1425,13 @@ a.photo-credit:hover { text-decoration: underline; }
 .r-inc-actions { margin-left: auto; display: flex; gap: var(--sp-1); }
 .r-inc-show, .r-inc-remove { font-size: var(--fs-micro); padding: var(--sp-0) var(--sp-2); }
 .r-inc-note { font-size: var(--fs-meta); color: var(--ink); margin: var(--sp-1) 0 0; white-space: pre-wrap; }
+/* A finding's prose shows its first three lines; the rest is one click away. A
+   PMST result runs to a dozen lines of matter types, and four of those in a row
+   was most of the section's height. */
+.r-inc-note.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.r-inc-more { font: inherit; font-size: var(--fs-micro); font-weight: 650; color: var(--brand);
+  background: none; border: none; padding: var(--sp-0) 0 0; cursor: pointer; }
+.r-inc-more:hover { text-decoration: underline; }
 .r-inc-empty { font-size: var(--fs-meta); color: var(--ink-soft); font-style: italic; }
 
 /* Brief highlight when a "Show" button scrolls a card/section into view, so the
@@ -1487,6 +1542,15 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 #print-root .pr .pr-photos.pr-photos-large img { height: auto; max-height: 340px; object-fit: contain; }
 #print-root .pr .pr-ev { margin: var(--sp-1) 0 0; }
 #print-root .pr .pr-ev-item { font-size: 11px; color: #333; margin: var(--sp-0) 0; }
+/* The evidence split, on paper: findings under a heading, empty searches on one
+   line, and outstanding sources as a caveat the reader cannot mistake for a
+   result. Mirrors .r-evidence on screen. */
+#print-root .pr .pr-ev-h { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: #444; margin: var(--sp-1) 0 var(--sp-0); }
+#print-root .pr .pr-ev-line { font-size: 10.5px; color: #333; margin: var(--sp-1) 0 0; }
+#print-root .pr .pr-ev-none { color: #444; }
+#print-root .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
+  border-radius: 4px; padding: var(--sp-1) var(--sp-2); }
 #print-root .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
 /* Both locator maps in the printed report: side by side, square, equal, full width. */
 #print-root .pr .pr-maps { display: flex; gap: var(--sp-3); align-items: flex-start; break-inside: avoid; }

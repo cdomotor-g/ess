@@ -50,6 +50,12 @@ slice. Each backlog item names the files to touch and how to verify.
   only** (they still render and travel into every export) and regenerates them when
   a site is reopened, rather than persisting two large map JPEGs per visited site;
   single-site work persists maps as before.
+- **Evidence split** — a report section shows its **Findings** at full weight,
+  collapses **Checked, nothing found** to one line, and puts **Not yet checked**
+  (interactive-only portals, failed searches) in a caveat strip that links back to
+  the collection cards. A matching consistency warning fires when a section states
+  a conclusion with unchecked sources behind it. The printed and exported HTML
+  carry the same split; the `ess-findings/1` JSON is unchanged.
 - **Report self-check prompt** — a **Check report** button (report toolbar)
   builds a self-contained fact-and-consistency-check prompt for the finished
   report and copies it for any assistant. The output contract is deliberately

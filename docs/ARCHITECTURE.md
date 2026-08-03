@@ -227,6 +227,31 @@ Vanilla JS, no dependencies, no build. It:
   so the header and the foot can never disagree about how finished the report is.
   This is the on-screen surface only: `reportObject()` and `buildReportHtml()` are
   untouched, and the exports are byte-identical;
+- **splits a section's evidence by what each entry actually is**
+  (`renderSectionEvidence`, `.r-evidence`), because three different things used to
+  render identically. On the fixture site twelve of twenty "evidence" blocks were
+  not evidence: four said nothing was found, six said an interactive portal
+  *"requires manual query"*, two said a search had failed — each in the same grey
+  panel, at the same weight, as a confirmed EPBC matter, distinguished only by an
+  11 px status pill. *Threatened Habitat* read as thoroughly evidenced while
+  resting on one real result and four notes about tools nobody had opened. For a
+  document whose whole purpose is to flag gaps rather than hide them, the honesty
+  was in the data and the layout undid it. Entries are now grouped:
+  **Findings** (`found`) keep the full panel — they carry the conclusion, ≤ 3
+  expanded before *+ n more*, each note clamped to three lines with *Show all*
+  (measured after insertion, so the control only appears when there is more to
+  show); **Checked, nothing found** (`none`) collapses to one line naming the
+  sources; **Not yet checked** (`manual` / `failed` / unset) is a caveat strip in
+  the `--caution` amber — a warning, not a finding — every name a jump back to its
+  collection card. A collapsed entry's *pictures* are not collapsed with it
+  (`appendEvidenceImages`): the Queensland Globe capture rides on a source that is
+  usually still `manual`, and it is the one image in the report that has to be
+  read. `sectionWarnings` gained the matching check — *"this section's statement
+  asserts a conclusion, but n of its sources have not been checked"* — so the gap
+  is counted in the header roll-up as well as shown. The split is carried into the
+  printed and exported HTML (`evNotesHtml`), built from the `status` each
+  `evidence_notes` entry already had, so the `ess-findings/1` JSON schema is
+  unchanged;
 - lays the workspace out as **two independently scrolling columns** (collection
   left, report right) sized to the viewport below the topbar. Each column pins
   what has to stay reachable while the other content scrolls: the progress card on
