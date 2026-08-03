@@ -150,12 +150,28 @@
         </div>
       </section>
 
-      <!-- Progress — pins to the top of this column as it scrolls -->
-      <section class="card compact" id="progress">
-        <div class="progress-row">
-          <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
-          <div class="progress-legend" id="progress-legend"></div>
+      <!-- COLLECTION STATUS — the single answer to "what still needs me".
+           Replaces the old progress card (six legend pills), the attention banner
+           and the six-button filter row: one denominator ("still need you" =
+           Manual + Failed + Not checked), one vocabulary, one control. The four
+           segments ARE the filter. Pins to the top of this column as it scrolls,
+           so it is on screen the whole way down the dashboard. -->
+      <section class="card compact" id="collection-status" aria-label="Collection status">
+        <div class="cs-row">
+          <span class="cs-lead">Collection</span>
+          <div class="cs-track" aria-hidden="true"><span class="cs-fill" id="cs-fill"></span></div>
+          <p class="cs-count" id="cs-count" role="status"></p>
+          <button type="button" class="cs-more" id="cs-more" aria-expanded="false" aria-controls="cs-detail"
+                  title="Per-result counts — and filter by one result">
+            <span class="cs-more-label">Results</span><span class="cs-caret" aria-hidden="true">▾</span>
+          </button>
         </div>
+        <div class="cs-segs">
+          <div class="cs-seg-group" id="cs-segs" role="group" aria-label="Show which sources"><!-- filled by JS: renderCollectionStatus() --></div>
+          <!-- Ordering, not filtering, so it sits apart from the segmented control. -->
+          <button type="button" class="cs-sort" id="cs-sort"><!-- filled by JS: syncSortToggle() --></button>
+        </div>
+        <div class="cs-detail" id="cs-detail" hidden><!-- filled by JS: renderStatusDetail() --></div>
       </section>
 
       <!-- STEP 3 — the two automated passes. Copy prompt and the box you paste the
@@ -209,9 +225,6 @@
         </ol>
       </section>
 
-      <!-- attention banner (after a paste / agent run) -->
-      <div id="attention-banner" class="attention" hidden></div>
-
       <!-- STEP 4 — collection dashboard -->
       <section class="card" id="dashboard">
         <div class="card-head">
@@ -223,9 +236,9 @@
         <details class="dash-guide" id="dash-guide" open>
           <summary>How to work through the list</summary>
           <ol class="dash-steps">
-            <li><b>Start with what still needs you.</b> <b>⚠ Needs attention</b> below shows only the sources
-              nobody has answered yet (Manual / Failed / Not checked). The rail on the far left carries the count
-              still outstanding per category.</li>
+            <li><b>Start with what still needs you.</b> <b>Needs you</b> in the collection bar above shows only the
+              sources nobody has answered yet (Manual / Failed / Not checked). The rail on the far left carries the
+              same count per category.</li>
             <li><b>Read what came back, then answer it.</b> Each card leads with the source's own words; put what
               you make of it in <b>Your note</b>, and set a <b>Result</b> —
               <span class="chip found">Found</span>
@@ -235,28 +248,12 @@
               says what to look for, and <b>＋ Add photo</b> takes evidence on the cards that want it.</li>
             <li><b>Press ＋ Include</b> to push a card's notes and photos into the matching report section on the
               right. The report is built from what you include, so do it as you go rather than at the end.</li>
-            <li><b>Tick ✓ Reviewed last</b>, once you're happy with a card — it turns green, and <b>☐ Needs
-              review</b> lists the ones you haven't. A <em>Found</em> result isn't always good news (a protected
-              species means caution on site), which is why review is tracked separately from the result.</li>
+            <li><b>Sign off last</b>, once you're happy with a card — it settles to one line, and the
+              <b>Signed off</b> segment above counts them. Report sections carry their own separate
+              <b>Reviewed</b> tick.</li>
           </ol>
           <p class="dash-note">Finish this list before exporting: step 5 on the right only shows what you've included here.</p>
         </details>
-        <div class="status-filter-bar" id="status-filter-bar">
-          <span class="sfb-label">Show only:</span>
-          <button class="btn tiny sfb-btn" data-status="found" title="Show only sources marked Found">Found</button>
-          <button class="btn tiny sfb-btn" data-status="none" title="Show only sources marked Nothing found">Nothing</button>
-          <button class="btn tiny sfb-btn" data-status="failed" title="Show only sources marked Search failed">Failed</button>
-          <button class="btn tiny sfb-btn" data-status="manual" title="Show only sources marked Manual">Manual</button>
-          <span class="sfb-sep" aria-hidden="true"></span>
-          <button class="btn tiny sfb-btn" id="btn-filter-attention" data-flag="attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
-          <button class="btn tiny sfb-btn" id="btn-filter-unreviewed" data-flag="unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
-          <!-- Ordering, not filtering, so it sits apart at the end of the bar. -->
-          <span class="sfb-sort" role="group" aria-label="Card order">
-            <span class="sfb-label">Sort:</span>
-            <button class="btn tiny sfb-btn" data-sort="attention" title="What still needs you first, settled sources last">attention</button>
-            <button class="btn tiny sfb-btn" data-sort="source" title="The order the source registry lists them in">source order</button>
-          </span>
-        </div>
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
 

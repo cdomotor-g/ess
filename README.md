@@ -63,15 +63,14 @@ that pane, so the four steps are all you see until you go looking.
    what to look for, the jurisdiction and the link), then **what came back** (the
    source's own words, labelled and tinted to the result), then **your note**,
    then what you do about it — set a **Result** (Found / Nothing / Failed /
-   Manual), **Open the source ↗**, choose the **Report** section and **＋
-   Include**, and tick **✓ Reviewed** last. Utilities you need occasionally —
-   copy lat/long, web search, jump to the report, clear your note — are on the
-   card's **⋯** menu. The **Show only** row filters the list by result, or down to
-   **⚠ Needs attention** (Manual / Failed / Not checked) and **☐ Needs review**.
-   The list keeps itself short as you work: a card you've ticked **✓ Reviewed**
-   settles to a single line, one that's answered but not yet reviewed shows a
+   Manual; the **ⓘ** beside it says how Result and sign-off relate), **Open the
+   source ↗**, choose the **Report** section and **＋ Include**, and **Sign off**
+   last. Utilities you need occasionally — copy lat/long, web search, jump to the
+   report, clear your note — are on the card's **⋯** menu.
+   The list keeps itself short as you work: a card you've **signed off**
+   settles to a single line, one that's answered but not yet signed off shows a
    short summary, and only the sources that still need you stay at full size and
-   sort to the top of their category (**Sort: source order** puts the registry
+   sort to the top of their category (**⇅ Source order** puts the registry
    order back). Click any collapsed card to open it again. Each category heading
    says what is inside it — `8 sources · 3 found · 4 need you` — and a category
    with nothing outstanding folds away to that one line.
@@ -143,10 +142,20 @@ that pane, so the four steps are all you see until you go looking.
 Your work is saved in the browser (localStorage) per site, so you can come back
 to it.
 
+**What's left, in one place.** One bar pins to the top of the collection pane and
+answers it: a two-part progress bar (answered / still needing you), the count in
+words — *11 of 23 still need you* — and four segments that **are** the filter:
+**Needs you · Answered · Signed off · All**. "Still need you" has a single
+definition everywhere in the tool (Manual, Search failed, Not checked), so the bar,
+the segments, the jump-rail badges and each category's roll-up can never disagree.
+Per-result counts (and per-result filters) are one click away under **Results**,
+and **⇅** at the right end switches the card order. Your choice of segment is
+remembered per site. An import or an agent run lands the bar on **Needs you**
+itself, so what's left is on screen without a banner having to say so.
+
 **The two panes.** Collection is on the left, the report on the right, each
-scrolling on its own. The **progress bar pins to the top of the left pane** as you
-scroll, so how far through you are is always on screen — the report's export
-buttons do the same on the right. The two small handles on the seam between the
+scrolling on its own. The collection bar stays pinned as you scroll — the report's
+export buttons do the same on the right. The two small handles on the seam between the
 panes **collapse one side and give the other the full width** (one at a time);
 click the highlighted handle to bring the pane back. The choice is remembered.
 The narrow **jump rail** on the far left carries the four steps plus one button
@@ -174,7 +183,7 @@ feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT
     `resolve.py --batch sites.txt --template` (same one-per-line format) — it
     emits one `ess-findings-batch/1` object (`{ sites: [ … ] }`) for an agent to
     fill and **Advanced options → Import a findings file** to load. Either way the tool shows a **batch
-    picker bar**: one chip per site (with its found / needs-attention counts,
+    picker bar**: one chip per site (with its found / still-needs-you counts,
     remembered across visits), each opening into the same review/export surface,
     plus a **🔍 Check all** button that copies one combined
     fact-and-consistency-check prompt covering every site. Ask a Claude Code

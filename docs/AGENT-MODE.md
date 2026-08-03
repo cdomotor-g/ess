@@ -38,9 +38,9 @@ browser.
 3. Paste that JSON straight into the browser tool at step 3, **Paste its reply
    back here**, and press **✓ Apply response**. (Saved it to a file instead?
    **⚙ Advanced options → Import a findings file**.)
-4. The dashboard fills with the agent's results; an attention banner flags the
-   **Manual** and **Failed** items still needing a human. Finish those, then
-   export.
+4. The dashboard fills with the agent's results, and the collection bar lands on
+   its **Needs you** segment — the **Manual** and **Failed** items still needing a
+   human. Finish those (**All** brings the rest back), then export.
 
 Best when: batches of sites, or you want to use an LLM you already pay for. No
 agent can drive interactive portals (EPBC PMST) or log into SharePoint — those
@@ -55,7 +55,7 @@ with one station/number or `lat,lon[,name]` per line; `-` reads stdin) — have 
 agent fill each site's slot (see the `ess-collect` skill's "Running a batch of
 sites"), then paste the whole object into the step 3 box (or load the file from
 **⚙ Advanced options → Import a findings file**). The tool
-shows a **batch picker bar** (one chip per site, with its found / needs-attention
+shows a **batch picker bar** (one chip per site, with its found / still-needs-you
 counts), loads each into the same review/export surface, and a **🔍 Check all**
 button copies one combined fact/consistency-check prompt covering every site. The
 batch grouping is remembered across visits; **Clear batch** drops the grouping but
