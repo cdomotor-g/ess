@@ -335,6 +335,7 @@ textarea { resize: vertical; min-height: 62px; }
   background: transparent; color: var(--ink); cursor: pointer;
 }
 .menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+a.menu-item { display: block; text-decoration: none; }
 
 /* ---------- batch bar (imported multi-site picker) ---------- */
 #batch-bar .batch-count { color: var(--ink-soft); font-weight: 600; font-size: .8em; }
@@ -744,10 +745,22 @@ body.qm-open { overflow: hidden; }
 @media (max-width: 980px) {
   .group-head { position: static; }
 }
-.src { border: 1px solid var(--line); border-radius: 10px; padding: var(--sp-3); margin-bottom: var(--sp-2); background: var(--surface); }
-/* "Found" is the loudest marking — a cherry left edge + a faint cherry ring so a
-   found matter (which may need caution on site) is impossible to miss. */
-.src.status-found { border-left: 5px solid var(--found-edge); border-color: var(--found-edge); box-shadow: inset 0 0 0 1px var(--found-edge); }
+/* ---------- source card ----------
+   Three zones, read top to bottom in the order an opinion actually forms:
+
+     IDENTITY     .src-top   which source is this (+ ⓘ for the reference material)
+     FINDING      .src-result / .src-note / .src-photos   what came back, then mine
+     DISPOSITION  .src-do    record the result → go look → into the report → done
+
+   The zone gap is what separates them; each zone is tight inside itself, so the
+   card reads as three things rather than nine rows. */
+.src { border: 1px solid var(--line); border-radius: 10px; padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); background: var(--surface);
+  display: flex; flex-direction: column; gap: var(--sp-2); }
+/* "Found" is the loudest marking — a cherry left edge, so a found matter (which
+   may need caution on site) is impossible to miss. It used to be joined by a ring,
+   a chip and a lit segmented button all saying the same word; the edge and the
+   single result marker in the disposition zone now carry it between them. */
+.src.status-found { border-left: 5px solid var(--found-edge); border-color: var(--found-edge); }
 .src.status-none { border-left: 4px solid var(--none); }
 .src.status-failed { border-left: 4px solid var(--failed); }
 .src.status-manual { border-left: 4px solid var(--manual); }
@@ -755,8 +768,7 @@ body.qm-open { overflow: hidden; }
 /* Reviewed tints the whole card so progress is visible at a glance; the
    border-left above still tracks the Found/None/Failed/Manual category. */
 .src.is-reviewed { background: var(--reviewed-bg); }
-.src-top { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: baseline; flex-wrap: wrap; }
-.src-top-right { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.src-top { display: flex; justify-content: space-between; gap: var(--sp-2); align-items: baseline; }
 .src-name { font-size: var(--fs-title); font-weight: 650; }
 .src-num { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
   padding: 0 var(--sp-1); margin-right: var(--sp-2); border-radius: 6px; background: var(--surface-2); color: var(--ink-soft);
@@ -778,44 +790,65 @@ body.qm-open { overflow: hidden; }
 }
 .src-icon.jur-national { background: var(--cat-national, var(--brand)); }
 .src-icon.jur-state    { background: var(--cat, var(--ink-soft)); }
-.src-name .tag { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: var(--sp-0) var(--sp-1); border-radius: 5px; margin-left: var(--sp-2); vertical-align: middle; }
+/* ---- ⓘ — everything about the source that is reference, not decision ----
+   The jurisdiction/method tags and the static "what to look for" prose read the
+   same on every run and every site. Permanently on 23 cards they were ~500 px of
+   noise between the operator and the finding; here they are one glyph, and the
+   panel is only built when it is opened. */
+.src-info { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+  font: inherit; font-size: var(--fs-meta); line-height: 1; cursor: pointer; }
+.src-info:hover, .src-info.on { border-color: var(--brand); color: var(--brand); }
+.src-about { padding: var(--sp-2) var(--sp-3); border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+.src-about[hidden] { display: none; }
+.src-facts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.tag { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: var(--sp-0) var(--sp-1); border-radius: 5px; }
 .tag.api { background: var(--reviewed-bg); color: var(--reviewed); }
 .tag.internal { background: var(--manual-bg); color: var(--manual); }
-.tag.jur { background: var(--surface-2); color: var(--ink-soft); }
+.tag.jur { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--line); }
+.tag.method { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--line); }
+.src-desc { font-size: var(--fs-meta); color: var(--ink-soft); margin: var(--sp-2) 0 0; }
+.src-url { display: block; margin-top: var(--sp-2); font-size: var(--fs-micro); word-break: break-all; }
+
 /* ---- the three text regions on a source card ----
    They mean three different things and used to be typeset almost identically, so
    the reader could not tell instruction from finding from their own note. Each
    now has its own treatment, legible with the labels cropped out:
 
-     .src-desc    what to look for   caption — soft ink, no fill, no frame
+     .src-desc    what to look for   caption — soft ink, no fill, no frame (in ⓘ)
      .src-result  what came back     panel  — tinted to the result, labelled
      .src-note    your note          field  — a framed, editable surface
 
    Colour is never the only carrier: the caption is smaller, the panel wears a
    label and a left rule, and the field wears a border. */
-.src-desc { font-size: var(--fs-meta); color: var(--ink-soft); margin: var(--sp-1) 0 var(--sp-2); }
-.src-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.status-select { display: inline-flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.status-select button { border: none; background: var(--surface); color: var(--ink-soft); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-meta); font-weight: 600; cursor: pointer; border-right: 1px solid var(--line); }
-.status-select button:last-child { border-right: none; }
-.status-select button.on[data-s=found] { background: var(--found-bg); color: var(--found); box-shadow: inset 0 0 0 1.5px var(--found-edge); }
-.status-select button.on[data-s=none] { background: var(--none-bg); color: var(--none); }
-.status-select button.on[data-s=failed] { background: var(--failed-bg); color: var(--failed); }
-.status-select button.on[data-s=manual] { background: var(--manual-bg); color: var(--manual); }
+.zone-label { display: block; font-size: var(--fs-micro); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); }
+/* The note's label row also carries the photo affordance — photos are the
+   operator's other evidence, and pairing them here saves the card a whole row. */
+.note-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-1); }
 /* Your note — an input first and foremost. It keeps the surface colour even when
    the card around it is tinted (reviewed, or a found result), so it always reads
-   as the one thing on the card you can type into. */
-.src-note { margin-top: var(--sp-2); }
-.src-note textarea { min-height: 44px; font-size: var(--fs-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); }
+   as the one thing on the card you can type into. It is sized to what it holds
+   (autoGrow), so an empty note costs one line rather than three. */
+.src-note textarea { min-height: 28px; padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-body); color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); resize: none; overflow: hidden; }
 
 /* What came back — the machine's own words, and the highest-value text on the
-   card. A tinted panel keyed to the result it produced, under an explicit label,
-   so it can never be read as the operator's note. */
-.src-result { margin-top: var(--sp-2); font-size: var(--fs-body); color: var(--ink);
+   card, so it leads the finding zone and sits above the operator's own note. A
+   tinted panel keyed to the result it produced, under an explicit label, so it
+   can never be read as the operator's note. Long findings clamp to four lines;
+   syncResultClamp adds "Show all" only when there is more to see. */
+.src-result { font-size: var(--fs-body); color: var(--ink);
   padding: var(--sp-2) var(--sp-3); border-radius: 8px;
   border-left: 3px solid var(--line); background: var(--surface-2); display: none; }
 .src-result.show { display: block; }
-.src-result-label { display: block; margin-bottom: var(--sp-1); font-size: var(--fs-micro);
+.src-result-body {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.src-result.is-open .src-result-body { display: block; -webkit-line-clamp: none; line-clamp: none; overflow: visible; }
+.src-result-more { margin-top: var(--sp-1); padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-micro); font-weight: 700; color: var(--brand); text-decoration: underline; }
+.src-result-label { display: block; margin-bottom: var(--sp-0); font-size: var(--fs-micro);
   font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); }
 .src-result .r-species { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
 .src-result.status-found  { background: var(--found-bg);  border-left-color: var(--found-edge); }
@@ -837,6 +870,34 @@ body.qm-open { overflow: hidden; }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
 .chip.reviewed { background: var(--reviewed-bg); color: var(--reviewed); }
+
+/* ---------- disposition zone ----------
+   What the operator does about the finding, in the order they do it: record the
+   result, go look if they still need to, route it into the report, tick it off.
+   Two rows, one job each; utilities that used to sit at button weight in the same
+   row as "go look" and "record the answer" are in the card's ⋯ menu. */
+.src-do { display: flex; flex-direction: column; gap: var(--sp-1); }
+.do-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.do-lead { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-soft); min-width: 42px; }
+/* The one status marker on a resting card: the recorded result, as a chip you can
+   press to change it. An unanswered card renders the full picker instead — the
+   ask is the point of that card, and answering it stays a single click. */
+.result-slot { display: inline-flex; }
+.result-chip { font: inherit; font-size: var(--fs-micro); font-weight: 700; cursor: pointer;
+  border: 1.5px solid transparent; }
+.result-chip:hover { border-color: currentColor; }
+.status-select { display: inline-flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.status-select button { border: none; background: var(--surface); color: var(--ink-soft); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-meta); font-weight: 600; cursor: pointer; border-right: 1px solid var(--line); }
+.status-select button:last-child { border-right: none; }
+.status-select button.on[data-s=found] { background: var(--found-bg); color: var(--found); box-shadow: inset 0 0 0 1.5px var(--found-edge); }
+.status-select button.on[data-s=none] { background: var(--none-bg); color: var(--none); }
+.status-select button.on[data-s=failed] { background: var(--failed-bg); color: var(--failed); }
+.status-select button.on[data-s=manual] { background: var(--manual-bg); color: var(--manual); }
+/* The ⋯ overflow sits at the end of the action row and pushes nothing around. */
+.card-menu { margin-left: auto; }
+.card-menu .menu-toggle { line-height: 1; }
+.card-menu .menu-item.danger:hover, .card-menu .menu-item.danger:focus-visible { color: var(--failed); }
 
 /* Prominent per-card "I've reviewed this" tickbox — separate axis from the
    Found/None/Failed/Manual result, so review progress can be tracked on
@@ -870,7 +931,19 @@ body.qm-open { overflow: hidden; }
 .photo-thumb.view { cursor: default; }
 .photo-thumb.view img { cursor: zoom-in; }
 .photo-thumb.view figcaption { font-size: var(--fs-micro); color: var(--ink-soft); padding: var(--sp-1); }
-.src-photos { margin-top: var(--sp-2); }
+/* Evidence photos on a card. At rest this is one compact button — the always-on
+   dashed dropzone cost ~44 px of empty invitation on every biosecurity card, and
+   most of them never take a photo. Pressing it reveals the real drop/paste/pick
+   zone (and the Wikipedia reference-image tools) and focuses it, so click-then-
+   Ctrl+V still lands a screenshot on the card. */
+.src-photos { display: flex; flex-direction: column; gap: var(--sp-2); align-items: flex-start; }
+.src-photos .photo-grid { margin-top: 0; }
+.photo-add { color: var(--ink-soft); border-style: dashed; }
+.photo-add:hover { color: var(--brand); border-style: solid; }
+.photo-tools { width: 100%; display: flex; flex-direction: column; gap: var(--sp-2); }
+.photo-tools[hidden] { display: none; }
+/* the column gap above is the only spacing inside the revealed tools */
+.photo-tools > *, .photo-tools .wiki-tools, .photo-tools .wiki-row { margin-top: 0; }
 /* attribution line under an auto-sourced (Wikipedia) photo */
 .photo-credit { display: block; font-size: var(--fs-micro); line-height: 1.3; color: var(--ink-soft); opacity: .8;
   padding: 0 var(--sp-1) var(--sp-1); overflow: hidden; text-overflow: ellipsis; }
@@ -888,22 +961,14 @@ a.photo-credit:hover { text-decoration: underline; }
 .wiki-tools { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-2); }
 .wiki-tools .wiki-lead { font-size: var(--fs-meta); color: var(--ink-soft); }
 
-/* ---------- notes label + Include-in-report control on a source card ---------- */
-.note-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-1); }
-.note-label { display: block; font-size: var(--fs-meta); font-weight: 600; color: var(--ink-soft); margin: 0; }
-/* "Clear" wipes just the notes text (photos are kept) so agentic entries can be
-   redone from scratch — muted until hovered so it never competes with the notes. */
-.note-clear { padding: var(--sp-0) var(--sp-2); font-size: var(--fs-micro); color: var(--ink-soft); }
-.note-clear:hover { color: var(--failed); border-color: var(--failed); }
-.include-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-2);
-  padding: var(--sp-2); border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
-.include-row.is-in { border-style: solid; border-color: var(--reviewed); background: var(--reviewed-bg); }
-.include-row .inc-lead { font-size: var(--fs-meta); font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
+/* ---------- Include-in-report row on a source card ----------
+   The last row of the card: where it lands in the report, and then the review
+   tick — last control on the card, in DOM order and on screen, which is what the
+   instructions have always said ("tick ✓ Reviewed last"). */
 .include-row .inc-target { flex: 1; min-width: 130px; width: auto; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-meta); }
 .include-row .inc-btn { white-space: nowrap; }
 .include-row .inc-btn.on { background: var(--reviewed); border-color: var(--reviewed); color: #fff; }
-/* "Show" jumps the report (right column) to this card's target section. */
-.include-row .inc-show { white-space: nowrap; }
+.include-row .review-toggle { margin-left: auto; }
 
 /* ---------- site map ---------- */
 /* Two locator maps stacked in the (narrow) collection column; they render side by
