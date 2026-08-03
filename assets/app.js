@@ -3922,12 +3922,29 @@
       w.push('Statement says "no known…" but the evidence or notes indicate matters were found — reconsider the statement or the note.');
     if (idx >= 1 && !anyFound && !note.trim())
       w.push("Statement indicates matters are present, but no supporting detail is recorded — add the specifics.");
+    // The section states a conclusion while some of the sources behind it were
+    // never opened — an interactive-only portal still to be queried, or a search
+    // that failed. That is precisely the class of error this checker exists to
+    // catch, and the one the old flat evidence list hid by rendering "requires
+    // manual query" in the same block, at the same weight, as a confirmed matter.
+    const unchecked = ev.filter((x) => isUnchecked(x.f));
+    if (unchecked.length) {
+      // Name the first two; a warning that runs to six source names is a
+      // paragraph, and the caveat strip below it already lists every one.
+      const names = unchecked.slice(0, 2).map((x) => x.src.name).join(", ");
+      const rest = unchecked.length - 2;
+      w.push(`This section's statement asserts a conclusion, but ${unchecked.length} of its sources ${unchecked.length === 1 ? "has" : "have"} not been checked: `
+        + `${names}${rest > 0 ? ` and ${rest} more` : ""}.`);
+    }
     return w;
   }
 
   function renderReport() {
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
+    // Clamped finding notes, collected as they're built and measured once the
+    // whole pane is in the document — see measureClamps().
+    const clamps = [];
     // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
     const readyMaps = state.site ? MAP_SLOTS.filter((slot) => { const ms = state.maps[slot.key]; return ms && ms.image && ms.image.dataUrl; }) : [];
     if (readyMaps.length) {
@@ -4013,46 +4030,11 @@
       }
 
       // Included sources: each card the operator added to THIS section contributes
-      // its status, notes and photos — grouped by source, de-duplicated, and every
-      // photo individually removable. Editing the card updates this live.
-      const inc = includedCardsForSection(section.id);
-      if (inc.length) {
-        const incWrap = el("div", { class: "r-included" });
-        const seenImg = new Set();
-        inc.forEach(({ src, f }) => {
-          const st = f.status && f.status !== "unset" ? f.status : "unset";
-          // Same number this source carries on its collection card (left pane) so the
-          // two columns can be cross-referenced at a glance. On-screen aid only — the
-          // number is NOT part of reportObject()/buildReportHtml, so it never reaches
-          // the exported/printed report.
-          const num = cardNumbers[src.id];
-          const head = el("div", { class: "r-inc-head" },
-            num ? el("span", { class: "src-num", title: "Collection card number (left pane)" }, `${num}`) : null,
-            el("span", { class: "chip " + (st === "unset" ? "manual" : st), style: st === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[st]),
-            el("span", { class: "r-inc-name" }, src.name),
-            el("div", { class: "r-inc-actions" },
-              el("button", { type: "button", class: "btn tiny r-inc-show", title: "Scroll the collection (left) to this source's card", onclick: () => showSourceCard(src.id) }, "⇠ Show"),
-              el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
-          const item = el("div", { class: "r-inc-item status-" + st }, head);
-          if (f.note && f.note.trim()) item.append(el("div", { class: "r-inc-note" }, f.note.trim()));
-          const imgs = (f.images || []).filter((im) => { const k = im.dataUrl || im.id; if (seenImg.has(k)) return false; seenImg.add(k); return true; });
-          // The Queensland Globe map is the one picture in the report that has
-          // to be READ, not glanced at — it gets the full width of the section,
-          // exactly as the exported report renders it.
-          imgs.filter(isQldMapImage).forEach((im) =>
-            item.append(qldMapFigure(im, () => removeFindingImage(src.id, im.id))));
-          const photos = imgs.filter((im) => !isQldMapImage(im));
-          if (photos.length) {
-            const grid = el("div", { class: "photo-grid small" });
-            photos.forEach((im) => grid.append(photoFigure(im, src.name, () => removeFindingImage(src.id, im.id))));
-            item.append(grid);
-          }
-          if ((!f.note || !f.note.trim()) && !imgs.length)
-            item.append(el("div", { class: "r-inc-empty" }, "Included — add notes or photos on the source card."));
-          incWrap.append(item);
-        });
-        box.append(incWrap);
-      }
+      // its status, notes and photos — split by what the entry actually is (see
+      // renderSectionEvidence), de-duplicated, and every photo individually
+      // removable. Editing the card updates this live.
+      const evidence = renderSectionEvidence(includedCardsForSection(section.id), clamps);
+      if (evidence) box.append(evidence);
       wrap.append(box);
     });
     // Appendix last, after every report section — see qldMapAppendix().
@@ -4071,7 +4053,188 @@
       box.append(list);
       wrap.append(box);
     }
+    measureClamps(clamps); // now everything is in the document, so heights are real
     renderReportHeader(); // identity + roll-ups, from the state just rendered
+  }
+
+  /* ------------------------------------------------ a section's evidence, split
+     Three different things used to render identically. On the fixture site twelve
+     of a section list's twenty "evidence" blocks were not evidence at all: four
+     said nothing was found, six said an interactive portal "requires manual
+     query", two said a search had failed — each in the same grey panel, at the
+     same weight, as a confirmed EPBC matter. Threatened Habitat looked thoroughly
+     evidenced while resting on one real result and four notes about tools nobody
+     had opened. The honesty was in the data; the layout undid it.
+
+     So entries are grouped by what they ARE, not merely tagged with an 11 px pill:
+
+       Findings                  found            full weight — these carry the conclusion
+       Checked, nothing found    none             one line naming the sources
+       Not yet checked           manual/failed/…  a caveat strip, not a finding
+
+     Returns null when the section has nothing included. */
+  const EV_FINDINGS_SHOWN = 3; // findings expanded before "+ n more"
+  function evidenceSplit(inc) {
+    const out = { found: [], none: [], open: [] };
+    inc.forEach((x) => {
+      const st = x.f.status || STATUS.UNSET;
+      if (st === STATUS.FOUND) out.found.push(x);
+      else if (st === STATUS.NONE) out.none.push(x);
+      else out.open.push(x); // manual / failed / unset — nobody has answered this one yet
+    });
+    return out;
+  }
+  // Whether this card still owes the section an answer. Shared with
+  // sectionWarnings so the caveat strip and the warning can't disagree.
+  const isUnchecked = (f) => (f.status || STATUS.UNSET) !== STATUS.FOUND && (f.status || STATUS.UNSET) !== STATUS.NONE;
+
+  function renderSectionEvidence(inc, clamps) {
+    if (!inc.length) return null;
+    const { found, none, open } = evidenceSplit(inc);
+    const wrap = el("div", { class: "r-evidence" });
+    // One dedupe set for the whole section: the same photo attached to two
+    // included sources is still shown once, as it always was.
+    const seenImg = new Set();
+
+    if (found.length) {
+      const grp = el("div", { class: "r-included" },
+        el("h4", { class: "r-ev-title" }, "Findings", el("span", { class: "r-ev-count" }, `${found.length}`)));
+      // Beyond the third, findings are built but folded away: a section that
+      // genuinely has eight results should say so without becoming a wall.
+      const folded = [];
+      found.forEach(({ src, f }, i) => {
+        const item = evidenceItem(src, f, seenImg, clamps);
+        if (i >= EV_FINDINGS_SHOWN) { item.hidden = true; folded.push(item); }
+        grp.append(item);
+      });
+      if (folded.length) {
+        const more = el("button", { type: "button", class: "btn tiny r-ev-more",
+          title: "Show the rest of this section's findings",
+          onclick: () => {
+            folded.forEach((n) => { n.hidden = false; });
+            more.remove();
+            measureClamps(clamps); // the notes just revealed have real heights now
+          } }, `+ ${folded.length} more finding${folded.length === 1 ? "" : "s"}`);
+        grp.append(more);
+      }
+      wrap.append(grp);
+    }
+
+    // "We looked at these four and found nothing" is one sentence, not four panels.
+    if (none.length)
+      wrap.append(el("p", { class: "r-ev-line r-ev-none" },
+        el("span", { class: "r-ev-label" }, `Checked, nothing found (${none.length})`),
+        evSourceList(none)));
+
+    // The honest reading of a manual/failed/unset entry — and the one that creates
+    // useful pressure to go and finish it.
+    if (open.length)
+      wrap.append(el("div", { class: "r-ev-caveat" },
+        el("p", { class: "r-ev-line" },
+          el("span", { class: "r-ev-label" }, `⚠ Not yet checked (${open.length})`),
+          evSourceList(open, (f) => f.status === STATUS.FAILED ? " (search failed)" : ""),
+          el("button", { type: "button", class: "r-ev-goto",
+            title: `These sources still owe this section an answer — go to ${open[0].src.name} on the collection list`,
+            onclick: () => showSourceCard(open[0].src.id) }, "go to these in collection →"))));
+
+    // A collapsed entry's PICTURES are not collapsed with it. The Queensland Globe
+    // capture rides on a source that is almost always still "manual", and it is the
+    // one picture in the report that has to be read rather than glanced at — so the
+    // media stays, with its remove controls, below the strips. Each keeps its
+    // source's name, which it used to get from the panel it sat in.
+    const media = el("div", { class: "r-ev-media" });
+    [...none, ...open].forEach(({ src, f }) => {
+      const holder = el("div", { class: "r-ev-media-item" });
+      if (!appendEvidenceImages(holder, src, f, seenImg)) return;
+      holder.prepend(el("p", { class: "r-ev-media-src" }, src.name));
+      media.append(holder);
+    });
+    if (media.children.length) wrap.append(media);
+    return wrap;
+  }
+
+  // One finding, at full weight: status, source, its prose (clamped to three lines
+  // until asked otherwise) and its pictures.
+  function evidenceItem(src, f, seenImg, clamps) {
+    const st = f.status && f.status !== STATUS.UNSET ? f.status : STATUS.UNSET;
+    // Same number this source carries on its collection card (left pane) so the
+    // two columns can be cross-referenced at a glance. On-screen aid only — the
+    // number is NOT part of reportObject()/buildReportHtml, so it never reaches
+    // the exported/printed report.
+    const num = cardNumbers[src.id];
+    const head = el("div", { class: "r-inc-head" },
+      num ? el("span", { class: "src-num", title: "Collection card number (left pane)" }, `${num}`) : null,
+      el("span", { class: "chip " + (st === STATUS.UNSET ? "manual" : st), style: st === STATUS.UNSET ? "opacity:.5" : "" }, STATUS_LABEL[st]),
+      el("span", { class: "r-inc-name" }, src.name),
+      el("div", { class: "r-inc-actions" },
+        el("button", { type: "button", class: "btn tiny r-inc-show", title: "Scroll the collection (left) to this source's card", onclick: () => showSourceCard(src.id) }, "⇠ Show"),
+        el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
+    const item = el("div", { class: "r-inc-item status-" + st }, head);
+    if (f.note && f.note.trim()) {
+      const note = el("div", { class: "r-inc-note is-clamped" }, f.note.trim());
+      // Hidden until measurement proves there is more to show — a two-line note
+      // with a "Show all" under it is a control that does nothing.
+      const toggle = el("button", { type: "button", class: "r-inc-more", hidden: "hidden", "aria-expanded": "false",
+        onclick: () => {
+          const clamped = note.classList.toggle("is-clamped");
+          toggle.textContent = clamped ? "Show all" : "Show less";
+          toggle.setAttribute("aria-expanded", clamped ? "false" : "true");
+        } }, "Show all");
+      item.append(note, toggle);
+      clamps.push({ note, toggle });
+    }
+    const shown = appendEvidenceImages(item, src, f, seenImg);
+    if ((!f.note || !f.note.trim()) && !shown)
+      item.append(el("div", { class: "r-inc-empty" }, "Included — add notes or photos on the source card."));
+    return item;
+  }
+
+  // A card's pictures, wherever they are being shown. Returns how many were added
+  // (0 when every one of them was already rendered elsewhere in this section).
+  function appendEvidenceImages(node, src, f, seenImg) {
+    const imgs = (f.images || []).filter((im) => { const k = im.dataUrl || im.id; if (seenImg.has(k)) return false; seenImg.add(k); return true; });
+    // The Queensland Globe map is the one picture in the report that has to be
+    // READ, not glanced at — it gets the full width of the section, exactly as
+    // the exported report renders it.
+    imgs.filter(isQldMapImage).forEach((im) =>
+      node.append(qldMapFigure(im, () => removeFindingImage(src.id, im.id))));
+    const photos = imgs.filter((im) => !isQldMapImage(im));
+    if (photos.length) {
+      const grid = el("div", { class: "photo-grid small" });
+      photos.forEach((im) => grid.append(photoFigure(im, src.name, () => removeFindingImage(src.id, im.id))));
+      node.append(grid);
+    }
+    return imgs.length;
+  }
+
+  // The sources named inside a collapsed strip. Each name is a button, not text:
+  // the whole point of collapsing these is that the detail stays on the card, so
+  // every name has to be the way back to it.
+  function evSourceList(rows, suffixOf) {
+    const out = [];
+    rows.forEach(({ src, f }, i) => {
+      if (i) out.push(el("span", { class: "r-ev-sep", "aria-hidden": "true" }, "·"));
+      const num = cardNumbers[src.id];
+      out.push(el("button", { type: "button", class: "r-ev-src",
+        title: `Go to ${src.name} on the collection list`, onclick: () => showSourceCard(src.id) },
+        num ? el("span", { class: "src-num" }, `${num}`) : null,
+        src.name + (suffixOf ? suffixOf(f) : "")));
+    });
+    return out;
+  }
+
+  // "Show all" only earns its place when the note is actually longer than the
+  // clamp, which can only be known once the block is in the document — and again
+  // when "+ n more" reveals one that was folded away (heights are 0 while hidden).
+  function measureClamps(clamps) {
+    if (!clamps.length) return;
+    requestAnimationFrame(() => {
+      clamps.forEach(({ note, toggle }) => {
+        if (!note.isConnected) return;
+        const clamped = note.classList.contains("is-clamped");
+        toggle.hidden = clamped && note.scrollHeight <= note.clientHeight + 2;
+      });
+    });
   }
 
   /* ------------------------------------------------ the report's own roll-up
@@ -4650,10 +4813,30 @@
     const siteShots = s.images && s.images.length
       ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images, true, interactive)}</div>` : "";
     const nl2br = (x) => esc(x).replace(/\n/g, "<br>");
-    const evNotesHtml = (sec) => (sec.evidence_notes && sec.evidence_notes.length)
-      ? `<div class="pr-ev">${sec.evidence_notes.map((e) =>
-          `<p class="pr-ev-item"><span class="st st-${esc(e.status)}">${esc(STATUS_LABEL[e.status] || e.status)}</span> <b>${esc(e.source)}</b> — ${esc(e.note)}</p>`).join("")}</div>`
-      : "";
+    // The same three-way split the on-screen pane makes (see
+    // renderSectionEvidence): the person receiving the report has to be able to
+    // tell a finding from a source nobody has opened, and in a flat list they
+    // could not. Built from `evidence_notes` as exported, so the JSON schema is
+    // untouched — the status each entry already carries is what does the sorting.
+    const evNames = (notes) => notes.map((e) =>
+      esc(e.source) + (e.status === STATUS.FAILED ? " (search failed)" : "")).join(" · ");
+    const evNotesHtml = (sec) => {
+      const notes = sec.evidence_notes || [];
+      if (!notes.length) return "";
+      const found = notes.filter((e) => e.status === STATUS.FOUND);
+      const none = notes.filter((e) => e.status === STATUS.NONE);
+      const open = notes.filter((e) => e.status !== STATUS.FOUND && e.status !== STATUS.NONE);
+      const rows = [];
+      if (found.length)
+        rows.push(`<p class="pr-ev-h">Findings (${found.length})</p>` + found.map((e) =>
+          `<p class="pr-ev-item"><span class="st st-${esc(e.status)}">${esc(STATUS_LABEL[e.status] || e.status)}</span> <b>${esc(e.source)}</b> — ${esc(e.note)}</p>`).join(""));
+      if (none.length)
+        rows.push(`<p class="pr-ev-line pr-ev-none"><b>Checked, nothing found (${none.length}):</b> ${evNames(none)}</p>`);
+      if (open.length)
+        rows.push(`<p class="pr-ev-line pr-ev-caveat"><b>⚠ Not yet checked (${open.length}):</b> ${evNames(open)}`
+          + ` — these sources have not been checked, so the statement above is not yet fully evidenced.</p>`);
+      return `<div class="pr-ev">${rows.join("")}</div>`;
+    };
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${nl2br(sec.detail)}</p>` : ""}
@@ -4733,6 +4916,12 @@
       .pr-photos.pr-photos-large{gap:12px} .pr-photos.pr-photos-large figure{width:300px}
       .pr-photos.pr-photos-large img{height:auto;max-height:340px;object-fit:contain}
       .pr-ev{margin:6px 0 0} .pr-ev-item{font-size:11.5px;color:#333;margin:3px 0}
+      /* Findings, empty searches and outstanding sources are three different
+         things — the exported report says so, exactly as the pane does. */
+      .pr-ev-h{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#444;margin:6px 0 2px}
+      .pr-ev-line{font-size:11px;color:#333;margin:5px 0 0}
+      .pr-ev-none{color:#444}
+      .pr-ev-caveat{color:#7a5f10;background:#f6efd8;border-left:3px solid #8a6d1a;border-radius:4px;padding:4px 8px}
       .pr-maps{display:flex;gap:12px;align-items:flex-start}
       .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
       .pr-map-img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid #bbb;border-radius:6px}

@@ -147,15 +147,25 @@ that pane, so the four steps are all you see until you go looking.
    for, however far down you have scrolled and whichever site a batch has just
    switched to. Beside that: **n of 11 sections reviewed** and a
    **consistency-warning count** that takes you to the first warning.
+   Each section's evidence is grouped by what it actually is: **Findings** at full
+   weight (the first three expanded, each note clamped to three lines with *Show
+   all*), **Checked, nothing found** as a single line naming those sources, and
+   **⚠ Not yet checked** — the interactive-only portals and failed searches — as a
+   caveat, with every source name a jump back to its collection card. A section
+   with one real result and four tools nobody has opened yet now says so.
    Each section has an
    **Insert suggested detail** button that drafts a paragraph from that
    section's evidence plus standard wording (`data/statements.json`), and the tool
    **flags contradictions** — a statement that says "no known…" while the evidence
-   came back *Found*, or a "matters present" statement with no supporting detail.
+   came back *Found*, a "matters present" statement with no supporting detail, or
+   a section asserting a conclusion while some of its sources have not been
+   checked.
    One **Export ▾** menu takes the report out of the app — **Print/PDF** (the
    handover format) first, then **HTML file**, **JSON export**, **Copy summary**;
    photos and review flags travel with the export (embedded, so the HTML/JSON stay
-   self-contained). Each section carries its own **Reviewed** tick, and where the
+   self-contained), and the printed and exported reports carry the same
+   findings / nothing-found / not-yet-checked split, so the person receiving the
+   report sees the caveat too. Each section carries its own **Reviewed** tick, and where the
    sections end the report says what is still missing — sections with no statement,
    an empty comment, no included evidence or no review, each a shortcut to the
    first one. Next to it, **Check report** copies a
