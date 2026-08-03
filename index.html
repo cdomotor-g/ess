@@ -27,8 +27,8 @@
         </div>
       </div>
       <div class="topbar-meta" id="topbar-meta">
-        <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">🌙 Dark</button>
-        <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">🧨 Clear cache</button>
+        <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">Dark</button>
+        <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">Clear cache</button>
         <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
       </div>
     </div>
@@ -105,8 +105,8 @@
       <div class="card-head">
         <h2>Batch <span class="batch-count" id="batch-count"></span></h2>
         <div class="head-actions">
-          <button class="btn ghost" id="btn-batch-review" title="Copy one fact- &amp; consistency-check prompt covering every site in this batch — paste into any assistant">🔍 Check all</button>
-          <button class="btn ghost" id="btn-batch-clear" title="Remove the batch grouping (each site's saved work is kept)">Clear batch</button>
+          <button class="btn tertiary" id="btn-batch-review" title="Copy one fact- &amp; consistency-check prompt covering every site in this batch — paste into any assistant">Check all</button>
+          <button class="btn tertiary" id="btn-batch-clear" title="Remove the batch grouping (each site's saved work is kept)">Clear batch</button>
         </div>
       </div>
       <p class="dash-note">Pick a site to open it below. Finish its Manual / Failed items and export, then move to the next.</p>
@@ -121,7 +121,7 @@
         <div class="card-head">
           <h2><span class="step">2</span> Check the site details</h2>
           <div class="head-actions">
-            <button class="btn ghost" id="btn-clear-site" title="Choose a different site">Change site</button>
+            <button class="btn tertiary" id="btn-clear-site" title="Choose a different site">Change site</button>
           </div>
         </div>
         <p class="dash-note">Filled in from the Bureau station record and two auto-generated locator maps. Add the site photos here — they carry through to the report.</p>
@@ -183,30 +183,33 @@
         </div>
         <p class="dash-note">Two passes fill in most of the assessment before you touch it: the live sources this tool can query itself, then an AI assistant for everything else.</p>
 
+        <!-- The three sub-steps are a sequence, so only the next un-run one carries
+             a filled button: syncFlowSteps() promotes it and demotes the ones that
+             are done (which swap their letter for a ✓). -->
         <ol class="flow">
-          <li class="flow-step">
+          <li class="flow-step" data-flow="auto">
             <div class="flow-text">
               <b>Auto-check the live sources</b>
               <span>Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.</span>
             </div>
             <div class="flow-do">
-              <button class="btn primary" id="btn-run-auto" title="Run every source that can be checked automatically">⚡ Run auto-checks</button>
+              <button class="btn primary" id="btn-run-auto" title="Run every source that can be checked automatically">Run auto-checks</button>
               <span class="flow-status" id="auto-status" role="status"></span>
             </div>
           </li>
 
-          <li class="flow-step">
+          <li class="flow-step" data-flow="prompt">
             <div class="flow-text">
               <b>Copy the prompt into an AI assistant</b>
               <span>A complete, self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research everything else.</span>
             </div>
             <div class="flow-do">
-              <button class="btn primary" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant to run this assessment and hand back JSON">📋 Copy prompt</button>
+              <button class="btn secondary" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant to run this assessment and hand back JSON">Copy prompt</button>
               <span class="flow-status" id="prompt-status" role="status"></span>
             </div>
           </li>
 
-          <li class="flow-step">
+          <li class="flow-step" data-flow="applied">
             <div class="flow-text">
               <b>Paste its reply back here</b>
               <span>The assistant answers with one JSON object. Paste the whole reply — code fences and stray commentary are fine. Anything it left blank keeps the result you already have.</span>
@@ -216,8 +219,8 @@
               <textarea id="paste-json" rows="4" spellcheck="false" autocomplete="off"
                         placeholder='Paste the assistant&#39;s reply here — {"schema":"ess-findings/1", "site": {…}, "collection_log": […]}'></textarea>
               <div class="flow-row">
-                <button class="btn primary" id="btn-paste-apply">✓ Apply response</button>
-                <button class="btn ghost tiny" id="btn-paste-clear">Clear</button>
+                <button class="btn secondary" id="btn-paste-apply">Apply response</button>
+                <button class="btn tertiary tiny" id="btn-paste-clear">Clear</button>
                 <span class="flow-status" id="paste-status" role="status"></span>
               </div>
             </div>
@@ -263,7 +266,7 @@
          four steps above. Closed by default; the open/closed choice is remembered. -->
     <details class="card adv" id="advanced">
       <summary class="adv-summary">
-        <span class="adv-title">⚙ Advanced options</span>
+        <span class="adv-title">Advanced options</span>
         <span class="adv-sub">Several sites at once · import a findings file · let Claude run it · display &amp; instructions</span>
       </summary>
       <div class="adv-body">
@@ -273,7 +276,7 @@
           <p class="hint">Pick a list of sites and work them as a batch. Each opens into its own assessment and is
             saved separately, so you can finish them one at a time and fact-check the whole set at the end.</p>
           <div class="adv-actions">
-            <button class="btn" id="btn-open-batch">🗂 Batch multiple sites</button>
+            <button class="btn secondary" id="btn-open-batch">Batch multiple sites</button>
           </div>
         </section>
 
@@ -285,7 +288,7 @@
             instead, use the box in step 3 — you don't need a file for that.</p>
           <div class="adv-actions">
             <input id="import-file" type="file" accept="application/json,.json" />
-            <button class="btn" id="import-load">Import findings</button>
+            <button class="btn secondary" id="import-load">Import findings</button>
           </div>
         </section>
 
@@ -295,7 +298,7 @@
             source itself and fill the dashboard live. Needs your own Anthropic API key, which stays in this
             browser. Each run costs a few cents.</p>
           <div class="adv-actions">
-            <button class="btn" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">🔑 Agent mode…</button>
+            <button class="btn" id="btn-agent-settings" hidden title="Run assessments with Claude using your own API key">Agent mode…</button>
           </div>
           <!-- Filled + toggled by assets/agent.js -->
           <div id="agent-panel" class="agent-panel" hidden></div>
@@ -326,7 +329,7 @@
               <code>--batch</code> for a whole list — which you bring back through <b>Import a findings file</b>
               above.</p>
             <p><b>Batches.</b> Sites in a batch each keep their own findings, photos and report. Work one, export it,
-              then pick the next from the tray above the workspace; <b>🔍 Check all</b> copies one fact- and
+              then pick the next from the tray above the workspace; <b>Check all</b> copies one fact- and
               consistency-check prompt covering the whole set.</p>
             <p><b>Statuses.</b> <span class="chip found">Found</span> and
               <span class="chip none">Nothing found</span> are both real answers — the difference between
@@ -382,21 +385,32 @@
         <section class="card" id="report">
           <div class="card-head">
             <h2><span class="step">5</span> ESS report</h2>
+            <!-- One primary on this surface: the export. Everything else here is
+                 an export variant, so it goes in the overflow. "Check report"
+                 used to sit between the two — it copies a review prompt rather
+                 than exporting anything, and now lives with the report's own
+                 review controls at the foot of the pane. -->
             <div class="head-actions">
-              <button class="btn primary" id="btn-download-html" title="Export the printable HTML report.">⬇ EXPORT</button>
-              <button class="btn ghost" id="btn-check-report" title="Copy a precise fact-&amp;-consistency-check prompt for this finished report — paste it into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) to have it independently reviewed">🔍 Check report</button>
+              <button class="btn primary" id="btn-download-html" title="Export the printable HTML report.">Export</button>
               <div class="menu" id="report-more-menu">
-                <button class="btn ghost menu-toggle" id="btn-report-more" aria-haspopup="true" aria-expanded="false" title="More export options">More ▾</button>
+                <button class="btn tertiary menu-toggle" id="btn-report-more" aria-haspopup="true" aria-expanded="false" title="More export options">More ▾</button>
                 <div class="menu-list" role="menu" hidden>
-                  <button class="menu-item" id="btn-print" role="menuitem">🖨 Print page</button>
-                  <button class="menu-item" id="btn-download-json" role="menuitem">⬇ JSON export</button>
-                  <button class="menu-item" id="btn-copy-summary" role="menuitem">📋 Copy summary</button>
+                  <button class="menu-item" id="btn-print" role="menuitem">Print page</button>
+                  <button class="menu-item" id="btn-download-json" role="menuitem">JSON export</button>
+                  <button class="menu-item" id="btn-copy-summary" role="menuitem">Copy summary</button>
                 </div>
               </div>
             </div>
           </div>
           <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
           <div id="report-sections"><!-- filled by JS --></div>
+          <!-- The last of the report's review controls: each section carries its
+               own Reviewed tick, and this hands the finished set to an assistant
+               for an independent check. -->
+          <div class="r-review">
+            <p class="r-review-lead">Each section above carries its own <b>Reviewed</b> tick. With those done, have an assistant check the finished report against its own evidence.</p>
+            <button class="btn secondary" id="btn-check-report" title="Copy a precise fact-&amp;-consistency-check prompt for this finished report — paste it into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) to have it independently reviewed">Check report</button>
+          </div>
         </section>
       </div>
     </div><!-- /col-right -->
@@ -409,7 +423,7 @@
   <div id="batch-builder" class="bb-overlay" hidden>
     <div class="bb-dialog" role="dialog" aria-modal="true" aria-labelledby="bb-title">
       <div class="bb-head">
-        <h2 id="bb-title">🗂 Build a batch</h2>
+        <h2 id="bb-title">Build a batch</h2>
         <button class="bb-close" id="bb-close" title="Close" aria-label="Close">✕</button>
       </div>
       <p class="bb-note">Add several sites, then start the batch. Each opens into its own assessment below and is saved separately, so you can work through them one at a time and <b>Check all</b> at the end.</p>
@@ -429,7 +443,7 @@
           <textarea id="bb-paste-text" rows="4" placeholder="Woodgate
 540001
 -25.0891,152.5489,North tank"></textarea>
-          <button class="btn ghost" id="bb-paste-add" type="button" style="margin-top:8px">Add all</button>
+          <button class="btn tertiary" id="bb-paste-add" type="button" style="margin-top:8px">Add all</button>
           <p class="hint bb-paste-msg" id="bb-paste-msg" hidden></p>
         </details>
       </div>
@@ -437,7 +451,7 @@
       <div class="bb-selected">
         <div class="bb-selected-head">
           <span class="field-label" style="margin:0">Selected <span class="bb-count" id="bb-count"></span></span>
-          <button class="btn tiny ghost" id="bb-clear-sel" type="button" hidden>Clear all</button>
+          <button class="btn tiny tertiary" id="bb-clear-sel" type="button" hidden>Clear all</button>
         </div>
         <div class="bb-chips" id="bb-chips">
           <p class="bb-empty" id="bb-empty">No sites yet — search or paste above to add some.</p>
@@ -445,7 +459,7 @@
       </div>
 
       <div class="bb-foot">
-        <button class="btn ghost" id="bb-cancel" type="button">Cancel</button>
+        <button class="btn tertiary" id="bb-cancel" type="button">Cancel</button>
         <button class="btn primary" id="bb-create" type="button" disabled>Start batch</button>
       </div>
     </div>

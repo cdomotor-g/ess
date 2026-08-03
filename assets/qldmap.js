@@ -1732,8 +1732,8 @@
             <p class="qm-sub">Check the station pin is where it should be, choose the layers, then capture the map for the report. <b>Click anywhere on the map</b> to see which layers cover that point.</p>
           </div>
           <div class="qm-head-actions">
-            <button type="button" class="btn ghost qm-recentre" title="Re-frame the map on the station coordinate">🎯 Centre on station</button>
-            <button type="button" class="btn primary qm-capture" title="Take a picture of the map exactly as you see it here and put it straight into the report">📸 Capture map for the report</button>
+            <button type="button" class="btn secondary qm-recentre" title="Re-frame the map on the station coordinate">Centre on station</button>
+            <button type="button" class="btn primary qm-capture" title="Take a picture of the map exactly as you see it here and put it straight into the report">Capture map for the report</button>
             <button type="button" class="qm-close" aria-label="Close">✕</button>
           </div>
         </div>
@@ -1743,7 +1743,7 @@
             <div class="qm-cap-card">
               <div class="qm-panel-head">Picture for the report</div>
               <p class="qm-cap-how">The map itself <em>is</em> the picture — frame it, wait for the bar at its bottom to finish, then press the button below. One press captures the view and puts it in the report.</p>
-              <button type="button" class="btn primary qm-cap-go" title="Take a picture of the map exactly as you see it here and put it straight into the report">📸 Capture map for the report</button>
+              <button type="button" class="btn primary qm-cap-go" title="Take a picture of the map exactly as you see it here and put it straight into the report">Capture map for the report</button>
               <div class="qm-cap-state">Nothing captured yet.</div>
               <img class="qm-cap-thumb" alt="Preview of the captured map" hidden>
               <p class="qm-cap-note">The layer list travels with it into the report appendix — it is deliberately kept off the picture and out of the report body.</p>

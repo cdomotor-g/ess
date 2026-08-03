@@ -122,6 +122,29 @@ Vanilla JS, no dependencies, no build. It:
   piece of vocabulary that needs explaining — a *Found* result is not good news,
   and sign-off is a separate judgement — is a `ⓘ` disclosure on each card's
   **Result** label rather than a paragraph in the instruction block;
+- tiers every action, in **four weights defined once** in `styles.css`:
+  `.primary` (filled, **at most one visible per surface**), `.secondary`
+  (outlined — the bare `.btn`), `.tertiary` (text weight, no border) and the
+  `⋯` / `More ▾` **overflow** menus. `.tiny` is a size, not a tier. A source
+  card's one primary is **Open the source ↗** — what the operator opened the card
+  to do; the specialist tools that appear on one to three cards in an assessment
+  (*Open site map*, *Check live*, *Import PMST Excel*) are secondary, and the
+  rare or recoverable utilities are in the card's `⋯`, where *Clear my note* is
+  ruled off and coloured as destructive. Step ③ is a sequence, so only its **next
+  un-run sub-step** carries a filled button (`syncFlowSteps`, `state.flow`,
+  persisted per site in `ui.flow`); a sub-step that has been done swaps its
+  letter for a ✓ and demotes, but is never disabled. The report header's one
+  primary is the export; *Check report* copies a review prompt rather than
+  exporting anything, so it sits with the report's own review controls at the
+  foot of that pane. Both overflow menus share one implementation and one set of
+  keys — ↑/↓, Home/End, and `Esc` to close and hand focus back to the trigger;
+- writes buttons as **text, not pictographs**. A button carrying a text label
+  carries no emoji; what remains is the monochrome mark language shared with the
+  status dots and carets (`✓ ▾ ⋯ ↗ ⓘ ＋`), plus the handful of places where the
+  glyph *is* the label — the category rail's monograms, the `📷` drop zone, the
+  `📄` empty report. Nine unrelated pictographs on buttons had become a second,
+  undocumented icon language competing with the category monograms and the
+  status colours;
 - calls the one live API (Atlas of Living Australia) directly from the browser;
 - tracks a status per source and assembles a report using the standardized
   wording from `dropdowns.json`;

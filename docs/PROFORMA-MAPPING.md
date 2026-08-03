@@ -71,7 +71,7 @@ drafts those paragraphs:
   **Threatened Fauna** (threatened animals + a separate migratory sentence),
   grouped by category, and seeds each section's note — only where the reviewer
   hasn't already written it.
-- **"✨ Insert suggested detail"** on every section assembles a default paragraph
+- **"Insert suggested detail"** on every section assembles a default paragraph
   from that section's evidence plus standardized wording in **`data/statements.json`**
   (hand-authored, not build-generated): the impact-assessment sentence, the QLD
   Koala Conservation Plan note + link, an acid-sulfate note under Additional

@@ -78,8 +78,8 @@
 
     panel.append(
       h("div", { class: "card-head", style: "margin-bottom:8px" },
-        h("h2", {}, "🔑 Run assessment with Claude ", h("span", { class: "beta" }, "beta · your key")),
-        h("button", { class: "btn ghost tiny", onclick: () => { panel.hidden = true; } }, "Close")),
+        h("h2", {}, "Run assessment with Claude ", h("span", { class: "beta" }, "beta · your key")),
+        h("button", { class: "btn tertiary tiny", onclick: () => { panel.hidden = true; } }, "Close")),
       h("p", { class: "warn" },
         "Bring your own Anthropic API key. It is stored only in this browser (localStorage) and sent only to api.anthropic.com — never to any other server. ",
         "Claude works through every source using Anthropic's web search/fetch tools and fills the dashboard; you then review the Manual/Failed items and export. Each run costs a few cents to your key. Use a limited key."),
@@ -87,10 +87,13 @@
         h("div", {}, h("label", { class: "field-label", for: "agent-key" }, "Anthropic API key"), keyInput),
         h("div", { style: "flex:0 0 auto;min-width:170px" }, h("label", { class: "field-label", for: "agent-model" }, "Model"), modelSel)),
       h("div", { class: "agent-row", style: "margin-top:4px" },
-        h("button", { class: "btn primary", onclick: saveKey }, "Save key"),
-        h("button", { class: "btn ghost", onclick: clearKey }, "Clear key"),
-        h("button", { class: "btn", id: "agent-run-2", onclick: runAgent }, "⚡ Run full assessment"),
-        h("a", { class: "btn ghost", href: "docs/AGENT-MODE.md", target: "_blank", rel: "noopener" }, "How it works ↗")),
+        // One primary on this surface, and which one depends on where the
+        // operator is: with no key saved the only useful move is saving one;
+        // with a key, it is starting the run (see reflectRunning).
+        h("button", { class: "btn secondary", id: "agent-save-key", onclick: saveKey }, "Save key"),
+        h("button", { class: "btn tertiary", onclick: clearKey }, "Clear key"),
+        h("button", { class: "btn secondary", id: "agent-run-2", onclick: runAgent }, "Run full assessment"),
+        h("a", { class: "btn tertiary", href: "docs/AGENT-MODE.md", target: "_blank", rel: "noopener" }, "How it works ↗")),
       h("div", { class: "agent-status", id: "agent-status" }, keyVal ? "Key saved in this browser." : "No key saved yet."),
     );
     reflectRunning();
@@ -101,11 +104,13 @@
     const m = $("#agent-model").value;
     try { v ? localStorage.setItem(LS_KEY, v) : localStorage.removeItem(LS_KEY); localStorage.setItem(LS_MODEL, m); } catch (_) {}
     setStatus(v ? "Key saved in this browser." : "Key cleared.");
+    reflectRunning(); // saving a key hands the primary over to the run button
   }
   function clearKey() {
     try { localStorage.removeItem(LS_KEY); } catch (_) {}
     const k = $("#agent-key"); if (k) k.value = "";
     setStatus("Key cleared.");
+    reflectRunning(); // …and clearing it hands the primary back
   }
   function openPanel() { const p = $("#agent-panel"); if (p) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "center" }); } }
   function setStatus(msg, err) { const s = $("#agent-status"); if (s) { s.textContent = msg; s.className = "agent-status" + (err ? " err" : ""); } }
@@ -118,11 +123,16 @@
     const runBtn = $("#agent-run-2");
     if (runBtn) {
       runBtn.disabled = running;
-      runBtn.innerHTML = running ? '<span class="spin"></span> Assessing…' : "⚡ Run full assessment";
+      runBtn.innerHTML = running ? '<span class="spin"></span> Assessing…' : "Run full assessment";
     }
+    // The panel's single primary follows the state: save a key, then run.
+    const hasKey = !!getKey();
+    const saveBtn = $("#agent-save-key");
+    if (saveBtn) { saveBtn.classList.toggle("primary", !hasKey); saveBtn.classList.toggle("secondary", hasKey); }
+    if (runBtn) { runBtn.classList.toggle("primary", hasKey && !running); runBtn.classList.toggle("secondary", !hasKey || running); }
     const key = $("#btn-agent-settings");
     if (key) {
-      key.textContent = running ? "⏳ Agent running…" : "🔑 Agent mode…";
+      key.textContent = running ? "Agent running…" : "Agent mode…";
       key.title = running
         ? "Claude is working through the sources — open this panel for progress"
         : "Run assessments with Claude using your own API key";
@@ -344,7 +354,7 @@
   // panel's "Clear key" removes those.
   async function blastCache() {
     const ok = confirm(
-      "🧨 Clear cache for a fresh test?\n\n" +
+      "Clear cache for a fresh test?\n\n" +
       "Removes ALL saved ESS working state in this browser — loaded sites, findings, " +
       "review ticks, photos/reference images, map cache and preferences — plus the " +
       "browser's Cache Storage and session storage, then reloads.\n\n" +

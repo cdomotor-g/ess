@@ -22,7 +22,7 @@ produce the same `ess-findings/1` object.
 Runs the research outside the browser, then imports the result. No key in the
 browser.
 
-1. In the browser tool, load the site and click **📋 Copy prompt**. This copies
+1. In the browser tool, load the site and click **Copy prompt**. This copies
    a complete, self-contained, **model-agnostic** prompt for that site — every
    step, every applicable source (deep-linked to the location), the
    standardized report wording, and a ready-to-fill `ess-findings/1` skeleton.
@@ -36,8 +36,8 @@ browser.
    `found` / `none` / `failed` / `manual` with evidence, and returns the
    completed `ess-findings/1` JSON.
 3. Paste that JSON straight into the browser tool at step 3, **Paste its reply
-   back here**, and press **✓ Apply response**. (Saved it to a file instead?
-   **⚙ Advanced options → Import a findings file**.)
+   back here**, and press **Apply response**. (Saved it to a file instead?
+   **Advanced options → Import a findings file**.)
 4. The dashboard fills with the agent's results, and the collection bar lands on
    its **Needs you** segment — the **Manual** and **Failed** items still needing a
    human. Finish those (**All** brings the rest back), then export.
@@ -54,9 +54,9 @@ site's skeleton in one call — `resolve.py --batch sites.txt --template` (a fil
 with one station/number or `lat,lon[,name]` per line; `-` reads stdin) — have the
 agent fill each site's slot (see the `ess-collect` skill's "Running a batch of
 sites"), then paste the whole object into the step 3 box (or load the file from
-**⚙ Advanced options → Import a findings file**). The tool
+**Advanced options → Import a findings file**). The tool
 shows a **batch picker bar** (one chip per site, with its found / still-needs-you
-counts), loads each into the same review/export surface, and a **🔍 Check all**
+counts), loads each into the same review/export surface, and a **Check all**
 button copies one combined fact/consistency-check prompt covering every site. The
 batch grouping is remembered across visits; **Clear batch** drops the grouping but
 keeps each site's saved work.
@@ -65,8 +65,8 @@ keeps each site's saved work.
 
 ## B. BYOK in-browser agent (this browser + your key)
 
-Runs the whole thing live from the browser — **beta**. Open **⚙ Advanced
-options** at the foot of the left pane and click **🔑 Agent mode…**.
+Runs the whole thing live from the browser — **beta**. Open **Advanced
+options** at the foot of the left pane and click **Agent mode…**.
 
 ### How it works
 - You paste **your own Anthropic API key**. The browser calls
