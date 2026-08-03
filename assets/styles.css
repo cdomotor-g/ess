@@ -584,33 +584,103 @@ body.qm-open { overflow: hidden; }
 .summary-item .v { font-weight: 600; text-align: right; }
 .summary-item .v.copyable { cursor: pointer; border-bottom: 1px dotted var(--ink-soft); }
 
-/* ---------- progress ---------- */
-/* Pinned progress bar. The left column scrolls on its own, so the progress card
-   sticks to the top of that column — "how far through am I" stays on screen all
-   the way down the dashboard, the same way the report's export buttons stay
-   reachable on the right. It pulls itself up by the column's top padding so it
-   pins flush under the topbar (see --col-pad-top), and publishes its own height as
-   --progress-h so the sticky group headers pin directly beneath it rather than
-   behind it. Wide layout only: below 981px the page scrolls as one. */
+/* ---------- collection status ---------- */
+/* ONE control answering "what still needs me" — it replaced a six-pill progress
+   card, an attention banner and a six-button filter row that each answered it in
+   different words and disagreed about the arithmetic. Two rows inside ~52px:
+   the journey (bar + the count in a sentence) and the four segments, which ARE
+   the filter. Per-result counts fold away behind "Results".
+
+   The left column scrolls on its own, so the bar sticks to the top of that column
+   — what's left stays on screen all the way down the dashboard, the same way the
+   report's export buttons stay reachable on the right. It pulls itself up by the
+   column's top padding so it pins flush under the topbar (see --col-pad-top), and
+   publishes its own height as --status-h so the sticky group headers pin directly
+   beneath it rather than behind it. Wide layout only: below 981px the page
+   scrolls as one. */
 @media (min-width: 981px) {
-  #progress {
+  #collection-status {
     position: sticky; top: calc(-1 * var(--col-pad-top, 0px)); z-index: 7;
   }
   /* Applied by app.js once the card is actually stuck — squares off the top edge
      against the topbar and lifts it off the cards sliding underneath. */
-  #progress.is-pinned {
+  #collection-status.is-pinned {
     border-top-color: transparent;
     border-radius: 0 0 var(--radius) var(--radius);
     box-shadow: var(--shadow), 0 6px 12px -6px rgba(0,0,0,.25);
   }
-  /* Keep scroll-to-section (the nav rail, "Change site") clear of the pinned card. */
-  #col-left { scroll-padding-top: calc(var(--progress-h, 0px) + var(--sp-1)); }
+  /* Keep scroll-to-section (the nav rail, "Change site") clear of the pinned bar. */
+  #col-left { scroll-padding-top: calc(var(--status-h, 0px) + var(--sp-1)); }
 }
-.progress-row { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
-.progress-bar-wrap { flex: 1; min-width: 160px; height: 10px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
-.progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--brand)); transition: width .3s; }
-.progress-legend { display: flex; gap: var(--sp-2); font-size: var(--fs-meta); flex-wrap: wrap; }
-.progress-legend b { font-variant-numeric: tabular-nums; }
+/* Tighter than .card.compact: this thing is permanent chrome and has to earn its
+   height back from the cards it sits above. */
+#collection-status { padding: var(--sp-1) var(--sp-4); }
+.cs-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 20px; }
+.cs-lead { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ink-soft); flex: none; }
+/* Two segments, not six pills: answered (solid) and still-needing-you (the hollow
+   remainder). A journey, not a scoreboard. */
+.cs-track { flex: 1 1 90px; min-width: 60px; height: 6px; border-radius: 999px;
+  background: repeating-linear-gradient(-45deg, var(--surface-2) 0 4px, transparent 4px 8px), var(--surface-2);
+  border: 1px solid var(--line); overflow: hidden; }
+.cs-fill { display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--accent), var(--brand)); transition: width .3s; }
+/* The count in words — the single sentence every other surface used to paraphrase.
+   role="status", so a screen reader hears it move. */
+.cs-count { margin: 0; flex: none; font-size: var(--fs-meta); font-weight: 650; font-variant-numeric: tabular-nums; }
+#collection-status.is-clear .cs-count { color: var(--reviewed); }
+.cs-more { font: inherit; font-size: var(--fs-micro); line-height: 1.4; font-weight: 650; color: var(--ink-soft);
+  background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 0 var(--sp-1);
+  display: inline-flex; align-items: center; gap: var(--sp-0); cursor: pointer; flex: none; }
+.cs-more:hover, .cs-more.on { color: var(--brand); border-color: var(--line); }
+.cs-more.on .cs-caret { transform: rotate(180deg); }
+.cs-caret { display: inline-block; transition: transform .15s; }
+@media (prefers-reduced-motion: reduce) {
+  .cs-fill, .cs-caret { transition: none; }
+}
+
+/* The segmented control. Four views of one list, joined so they read as one
+   control with one value — not four independent toggles. */
+.cs-segs { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
+.cs-seg-group { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.cs-seg { font: inherit; font-size: var(--fs-micro); line-height: 1.4; font-weight: 650; color: var(--ink-soft);
+  background: var(--surface); border: 0; border-left: 1px solid var(--line);
+  padding: var(--sp-0) var(--sp-2); display: inline-flex; align-items: center; gap: var(--sp-1); cursor: pointer; }
+.cs-seg:first-child { border-left: 0; }
+.cs-seg:hover { background: var(--surface-2); color: var(--ink); }
+.cs-seg b { font-variant-numeric: tabular-nums; }
+/* The selected segment. Weight + fill + aria-pressed, so the filtered list is
+   never a mystery — colour is not doing this on its own. */
+.cs-seg.on { background: var(--brand); border-left-color: var(--brand); color: #fff; }
+.cs-seg.on + .cs-seg { border-left-color: var(--brand); }
+.cs-seg[data-seg=attention].on { background: var(--manual); border-left-color: var(--manual); color: var(--cat-ink); }
+.cs-seg[data-seg=attention].on + .cs-seg { border-left-color: var(--manual); }
+.cs-seg[data-seg=signed].on { background: var(--reviewed); border-left-color: var(--reviewed); color: var(--cat-ink); }
+.cs-seg[data-seg=signed].on + .cs-seg { border-left-color: var(--reviewed); }
+/* Ordering is a different question from filtering, so it sits apart from the
+   segmented control rather than in the run of segments. */
+.cs-sort { font: inherit; font-size: var(--fs-micro); line-height: 1.4; font-weight: 600; color: var(--ink-soft);
+  background: transparent; border: 1px dashed var(--line); border-radius: 7px;
+  padding: var(--sp-0) var(--sp-2); margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-1);
+  cursor: pointer; white-space: nowrap; }
+.cs-sort:hover { border-style: solid; border-color: var(--brand); color: var(--brand); }
+
+/* The per-result breakdown — the old six legend pills and four result filters,
+   folded into one disclosure and doubling as the filters themselves. */
+.cs-detail { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2);
+  padding-top: var(--sp-2); border-top: 1px dashed var(--line); }
+.cs-detail[hidden] { display: none; }
+.cs-res { font: inherit; font-size: var(--fs-micro); line-height: 1.5; font-weight: 600; color: var(--ink-soft);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  padding: 0 var(--sp-2); display: inline-flex; align-items: center; gap: var(--sp-1); cursor: pointer; }
+.cs-res:hover { border-color: var(--brand); color: var(--ink); }
+.cs-res b { font-variant-numeric: tabular-nums; color: var(--ink); }
+.cs-res.found.on { background: var(--found-bg); border-color: var(--found); color: var(--found); }
+.cs-res.none.on { background: var(--none-bg); border-color: var(--none); color: var(--none); }
+.cs-res.failed.on { background: var(--failed-bg); border-color: var(--failed); color: var(--failed); }
+.cs-res.manual.on { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
+.cs-res.unset.on { background: var(--surface-2); border-color: var(--ink-soft); color: var(--ink); }
+.cs-res.on b { color: inherit; }
 
 /* ---------- step 3 — run the checks ---------- */
 /* Three sub-steps in one card: auto-check, copy the prompt, paste the reply back.
@@ -702,21 +772,6 @@ body.qm-open { overflow: hidden; }
 .dash-steps b { color: var(--ink); }
 .dash-steps .chip { margin: 0 var(--sp-hair); }
 
-.status-filter-bar { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; margin: 0 0 var(--sp-4); }
-.status-filter-bar .sfb-label { font-size: var(--fs-meta); color: var(--ink-soft); margin-right: var(--sp-0); }
-/* Divider between the four result filters and the two "still to do" filters —
-   same control, different question. */
-.status-filter-bar .sfb-sep { width: 1px; align-self: stretch; margin: 0 var(--sp-1); background: var(--line); }
-.sfb-btn.on[data-status=found] { background: var(--found-bg); border-color: var(--found); color: var(--found); }
-.sfb-btn.on[data-status=none] { background: var(--none-bg); border-color: var(--none); color: var(--none); }
-.sfb-btn.on[data-status=failed] { background: var(--failed-bg); border-color: var(--failed); color: var(--failed); }
-.sfb-btn.on[data-status=manual] { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
-.sfb-btn.on[data-flag=attention] { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
-.sfb-btn.on[data-flag=unreviewed] { background: var(--reviewed-bg); border-color: var(--reviewed); color: var(--reviewed); }
-/* Ordering is a different question from filtering, so it sits at the far end of
-   the bar rather than in the run of filter buttons. */
-.status-filter-bar .sfb-sort { display: flex; align-items: center; gap: var(--sp-1); margin-left: auto; }
-.sfb-btn.on[data-sort] { background: var(--surface-2); border-color: var(--brand); color: var(--brand); }
 /* The dashboard is eight groups and up to ~30 expandable cards in a column that
    scrolls on its own, so the category heading sticks to the top of that column —
    whatever you're reading is always named on screen. Alternate groups are banded
@@ -726,11 +781,11 @@ body.qm-open { overflow: hidden; }
    without the cards inside changing width. */
 .group:nth-of-type(even) { background: var(--surface-2); margin-inline: calc(-1 * var(--sp-2)); padding: var(--sp-0) var(--sp-2) var(--sp-2); }
 
-/* Pins directly under the pinned progress card — --progress-h is measured by
-   app.js, and is 0 whenever the progress card isn't on screen. */
+/* Pins directly under the pinned collection bar — --status-h is measured by
+   app.js, and is 0 whenever that bar isn't on screen. */
 .group-head {
   display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2);
-  position: sticky; top: calc(var(--progress-h, 0px) - var(--col-pad-top, 0px)); z-index: 3;
+  position: sticky; top: calc(var(--status-h, 0px) - var(--col-pad-top, 0px)); z-index: 3;
   background: var(--surface); padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--line);
 }
@@ -849,7 +904,7 @@ body.qm-open { overflow: hidden; }
 .src-sum-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .src-sum-inc { font-size: var(--fs-micro); color: var(--ink-soft); }
 .src-sum-inc.is-in { color: var(--reviewed); font-weight: 700; }
-.src-sum-foot .review-toggle { margin-left: auto; }
+.src-sum-foot .signoff { margin-left: auto; }
 /* A card opened above its resting density fades its content in — no height
    animation, and none at all when reduced motion is asked for. */
 @media (prefers-reduced-motion: no-preference) {
@@ -957,7 +1012,6 @@ body.qm-open { overflow: hidden; }
 .chip.none { background: var(--none-bg); color: var(--none); }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
-.chip.reviewed { background: var(--reviewed-bg); color: var(--reviewed); }
 
 /* ---------- disposition zone ----------
    What the operator does about the finding, in the order they do it: record the
@@ -968,6 +1022,18 @@ body.qm-open { overflow: hidden; }
 .do-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .do-lead { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-soft); min-width: 42px; }
+/* The Result label doubles as the disclosure for the one piece of vocabulary this
+   app has to explain — stated at the control instead of in an instruction block
+   the operator reads once. It replaces a plain label, so the card gains no
+   control it didn't already have a slot for. */
+.do-lead-info { font: inherit; font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--ink-soft); background: transparent; border: 0; padding: 0;
+  display: inline-flex; align-items: baseline; gap: var(--sp-1); cursor: help; }
+.do-lead-info:hover, .do-lead-info.on { color: var(--brand); }
+.do-lead-mark { font-size: var(--fs-meta); text-transform: none; letter-spacing: 0; }
+.do-hint { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--ink-soft);
+  background: var(--surface-2); border-radius: 8px; padding: var(--sp-1) var(--sp-2); }
+.do-hint[hidden] { display: none; }
 /* The one status marker on a resting card: the recorded result, as a chip you can
    press to change it. An unanswered card renders the full picker instead — the
    ask is the point of that card, and answering it stays a single click. */
@@ -987,14 +1053,27 @@ body.qm-open { overflow: hidden; }
 .card-menu .menu-toggle { line-height: 1; }
 .card-menu .menu-item.danger:hover, .card-menu .menu-item.danger:focus-visible { color: var(--failed); }
 
-/* Prominent per-card "I've reviewed this" tickbox — separate axis from the
-   Found/None/Failed/Manual result, so review progress can be tracked on
-   top of (not instead of) the result status. */
-.review-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-meta); font-weight: 700;
-  padding: var(--sp-1) var(--sp-2); border-radius: 999px; border: 1.5px solid var(--line); cursor: pointer;
+/* The card's sign-off — the operator's own judgement, on a separate axis from the
+   Found/None/Failed/Manual result. Rendered as a PRESSED PILL, and worded "sign
+   off", to keep it clearly distinct from the report pane's per-section "Reviewed"
+   CHECKBOX (.review-toggle below): they are two tallies, and they used to be the
+   same control with the same label. */
+.signoff { font: inherit; font-size: var(--fs-meta); font-weight: 700; color: var(--ink-soft);
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: 999px;
+  padding: var(--sp-0) var(--sp-2); display: inline-flex; align-items: center; gap: var(--sp-1);
+  cursor: pointer; white-space: nowrap; transition: background .15s, border-color .15s, color .15s; }
+.signoff:hover { border-color: var(--reviewed); color: var(--reviewed); }
+.signoff-tick { font-size: var(--fs-micro); }
+.signoff.on { border-color: var(--reviewed); background: var(--reviewed); color: var(--cat-ink); }
+
+/* The REPORT pane's per-section tally. A squared checkbox rather than a pill, and
+   the word "section" in the label, so the two can never be read as the same
+   control — see .signoff above. */
+.review-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-meta); font-weight: 650;
+  padding: var(--sp-0) var(--sp-2); border-radius: 6px; border: 1.5px solid var(--line); cursor: pointer;
   user-select: none; color: var(--ink-soft); background: var(--surface); transition: background .15s, border-color .15s, color .15s; }
 .review-toggle:hover { border-color: var(--reviewed); }
-.review-toggle input { width: 15px; height: 15px; accent-color: var(--reviewed); cursor: pointer; margin: 0; }
+.review-toggle input { width: 14px; height: 14px; accent-color: var(--reviewed); cursor: pointer; margin: 0; border-radius: 0; }
 .review-toggle.on { border-color: var(--reviewed); color: var(--reviewed); background: var(--reviewed-bg); }
 
 /* ---------- photos ---------- */
@@ -1050,13 +1129,13 @@ a.photo-credit:hover { text-decoration: underline; }
 .wiki-tools .wiki-lead { font-size: var(--fs-meta); color: var(--ink-soft); }
 
 /* ---------- Include-in-report row on a source card ----------
-   The last row of the card: where it lands in the report, and then the review
-   tick — last control on the card, in DOM order and on screen, which is what the
-   instructions have always said ("tick ✓ Reviewed last"). */
+   The last row of the card: where it lands in the report, and then the sign-off —
+   last control on the card, in DOM order and on screen, which is what the
+   instructions have always said ("sign off last"). */
 .include-row .inc-target { flex: 1; min-width: 130px; width: auto; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-meta); }
 .include-row .inc-btn { white-space: nowrap; }
 .include-row .inc-btn.on { background: var(--reviewed); border-color: var(--reviewed); color: #fff; }
-.include-row .review-toggle { margin-left: auto; }
+.include-row .signoff { margin-left: auto; }
 
 /* ---------- site map ---------- */
 /* Two locator maps stacked in the (narrow) collection column; they render side by
@@ -1187,14 +1266,6 @@ a.photo-credit:hover { text-decoration: underline; }
 .agent-status { font-size: var(--fs-meta); color: var(--ink-soft); margin-top: var(--sp-3); min-height: 18px; font-variant-numeric: tabular-nums; }
 .agent-status.err { color: var(--failed); }
 
-/* ---------- attention banner (import / agent run) ---------- */
-.attention { border: 1px solid var(--manual); background: var(--manual-bg); color: var(--manual); border-radius: 10px; padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-body); display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
-/* display:flex above beats the UA [hidden] rule, which left an empty bar sitting
-   between the steps whenever there was nothing to draw attention to. */
-.attention[hidden] { display: none; }
-.attention.clear { border-color: var(--reviewed); background: var(--reviewed-bg); color: var(--reviewed); }
-.attention b { font-variant-numeric: tabular-nums; }
-.attention .btn { background: transparent; color: inherit; border-color: currentColor; }
 input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1) 0; }
 .btn.on { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
 
@@ -1221,7 +1292,7 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 /* ---------- print ---------- */
 #print-root { display: none; }
 @media print {
-  .topbar, .railnav, .pane-divider, #site-picker, #run-checks, #advanced, #dashboard, #progress,
+  .topbar, .railnav, .pane-divider, #site-picker, #run-checks, #advanced, #dashboard, #collection-status,
   .head-actions, .foot, #app > .banner { display: none !important; }
   /* A pane collapsed on screen must not go missing from the printout. */
   .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right { display: block !important; }

@@ -77,7 +77,7 @@ Vanilla JS, no dependencies, no build. It:
   lines with a measured *Show all*; then the operator's own note, sized to its
   content; then evidence photos behind a compact **＋ Add photo**) →
   **disposition** (record the result → open the source → route it to a report
-  section → **✓ Reviewed**, last control on the card in DOM and visual order).
+  section → **✓ Sign off**, last control on the card in DOM and visual order).
   The result is stated **once** on a resting card: the recorded value is a chip
   that expands back into the four-way picker on click, and an unanswered card
   shows the picker outright, since answering it is that card's whole job.
@@ -86,19 +86,42 @@ Vanilla JS, no dependencies, no build. It:
   is **built on first open**, so 23 cards cost 23 buttons rather than 23 copies
   of prose and tooling nobody has asked for yet;
 - renders each card at **one of three densities, derived from its state** and
-  never from what has been clicked (`cardDensity`): a **reviewed** card is one
+  never from what has been clicked (`cardDensity`): a **signed-off** card is one
   ~36 px line (number, result glyph, name, target section, tick), an **answered
-  but unreviewed** card is a ~120 px summary (identity, two lines of the finding
-  or the operator's note, the result, and the review tick), and anything a human
-  still owns — *Manual*, *Search failed*, *Not checked* — renders in full.
+  but not signed off** card is a ~120 px summary (identity, two lines of the
+  finding or the operator's note, the result, and the sign-off), and anything a
+  human still owns — *Manual*, *Search failed*, *Not checked* — renders in full.
   Clicking a collapsed card opens it in place; that expansion is transient, so
   the next full render returns the pane to a picture of state rather than of
   click history. Within a category, cards sort **attention first**
-  (unset → failed → manual → found → none → reviewed) unless the operator
-  switches the dashboard's `Sort:` control to source order (remembered per
+  (unset → failed → manual → found → none → signed off) unless the operator
+  flips the collection bar's `⇅` toggle to source order (remembered per
   browser). Each category header carries its own roll-up — `n sources · n found
   · n need you` — and a category with nothing outstanding folds to that header;
   the per-category open/closed choice is remembered per site;
+- answers **"what still needs me" exactly once**, from one sticky control
+  (`renderCollectionStatus`, `#collection-status`) that replaced a six-pill
+  progress card, an attention banner and a six-button filter row. "Still needs
+  you" has a single definition — `ATTENTION = manual | failed | unset`, applied
+  through `isOutstanding` — and the progress bar, the four filter segments, the
+  jump-rail badges and the group roll-ups all count with it, so the pane can no
+  longer read *100% checked* and *11 still need you* at the same time. The
+  segments **are** the filter: `state.filter` is a single value out of `FILTERS`
+  (`attention` / `answered` / `signed` / `all`, plus the five per-result values
+  behind the bar's `Results` disclosure), each rendered with `aria-pressed`, and
+  it is **persisted per site** in the save payload's `ui.filter`. The count sits
+  in a `role="status"` element and is only rewritten when the sentence changes,
+  so a screen reader hears the outstanding count move and nothing else. An import
+  or an agent run leaves the bar on `Needs you` (`focusOnOutstanding`) — the job
+  the banner used to do, done by the control that already answers the question;
+- keeps the **two "done" tallies apart**. The card's is a **sign-off** — a
+  pressed pill (`.signoff`, `aria-pressed`) reading *Sign off* / *✓ Signed off*;
+  the report section's is a **checkbox** (`.review-toggle`) reading *Mark section
+  reviewed*. Different word, different control, different shape: they were
+  previously the same `.review-toggle` with the same label in both panes. The one
+  piece of vocabulary that needs explaining — a *Found* result is not good news,
+  and sign-off is a separate judgement — is a `ⓘ` disclosure on each card's
+  **Result** label rather than a paragraph in the instruction block;
 - calls the one live API (Atlas of Living Australia) directly from the browser;
 - tracks a status per source and assembles a report using the standardized
   wording from `dropdowns.json`;
@@ -282,7 +305,7 @@ scaffolded by `resolve.py --template`, and consumed by `app.js importFindings()`
 **Importing a file for the site already open merges rather than replaces**
 (`applyFindings` → `isSameSite` → `mergePrevious`): an entry that carries no
 status, note, result or photo leaves the existing result alone, and the
-operator's own bookkeeping (review tick, include target, card photos) carries
+operator's own bookkeeping (sign-off, include target, card photos) carries
 across an entry that does. This is what lets the primary workflow run the
 auto-checks *before* the assistant's reply comes back without the reply undoing
 them. A file for a different site replaces the workspace as before.

@@ -211,10 +211,12 @@
     qldMap: { selection: null, capture: null },
     date: "",
     maintenance: "",
-    filterAttention: false, // dashboard: show only Manual/Failed/Not-checked
-    filterStatus: null,     // dashboard: show only sources with this one status (found/none/failed/manual/unset)
-    filterUnreviewed: false, // dashboard: show only sources not yet ticked "Reviewed"
-    showAttention: false,   // show the attention banner (after import / agent run)
+    // ONE dashboard filter, one value — see FILTERS. The four segments on the
+    // collection bar are the everyday values; the per-result ones live behind that
+    // bar's "Results" disclosure. Persisted per site, so returning to a site keeps
+    // your place. Never two filters at once: that is what made "what's left"
+    // answerable four different ways.
+    filter: "all",
     // Dashboard ordering: "attention" (default — what still needs a human first) or
     // "source" (the registry order). A browser-wide preference, not per site.
     cardSort: "attention",
@@ -225,8 +227,40 @@
     batch: null,            // { generated, keys: [siteKey,…], active: siteKey|null } when a batch is loaded
   };
   const mapGenTokens = {}; // per-slot guard against a stale async render landing after a newer request
-  const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
   const cardNumbers = {}; // sourceId -> position in the currently-rendered (filtered) dashboard list
+
+  // ------------------------------------------------------- one status vocabulary
+  // "Still needs you" has exactly ONE definition in this app: Manual, Search failed
+  // or Not checked. The collection bar, the four filter segments, the nav-rail
+  // badges and the per-category roll-ups all count it with statusOf/isOutstanding,
+  // so the pane can never again read "100% checked" and "11 still need you" at the
+  // same time.
+  const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
+  const statusOf = (f) => (f && f.status) || STATUS.UNSET;
+  const isOutstanding = (f) => ATTENTION.includes(statusOf(f));
+  // The operator's own sign-off. Deliberately a different word from the report
+  // pane's "Reviewed": they are separate tallies and were previously rendered with
+  // pixel-identical controls.
+  const isSignedOff = (f) => !!(f && f.reviewed);
+
+  // The dashboard's single filter. `seg: true` puts it on the segmented control in
+  // the bar; the rest are the per-result values behind its "Results" disclosure.
+  // `empty` is what the list says when the filter matches nothing.
+  const FILTERS = {
+    attention: { seg: true, label: "Needs you", test: isOutstanding, count: (l) => l.filter(isOutstanding).length,
+      empty: "✓ Nothing needs you — every source has an answer." },
+    answered:  { seg: true, label: "Answered", test: (f) => !isOutstanding(f), count: (l) => l.filter((f) => !isOutstanding(f)).length,
+      empty: "Nothing answered yet — start with the sources that need you." },
+    signed:    { seg: true, label: "Signed off", test: isSignedOff, count: (l) => l.filter(isSignedOff).length,
+      empty: "Nothing signed off yet." },
+    all:       { seg: true, label: "All", test: () => true, count: (l) => l.length, empty: "No sources for this site." },
+    found:  { label: "Found", test: (f) => statusOf(f) === "found", empty: 'No sources marked "Found".' },
+    none:   { label: "Nothing found", test: (f) => statusOf(f) === "none", empty: 'No sources marked "Nothing found".' },
+    failed: { label: "Search failed", test: (f) => statusOf(f) === "failed", empty: 'No sources marked "Search failed".' },
+    manual: { label: "Needs manual check", test: (f) => statusOf(f) === "manual", empty: 'No sources marked "Needs manual check".' },
+    unset:  { label: "Not checked", test: (f) => statusOf(f) === "unset", empty: "Everything has been checked." },
+  };
+  const activeFilter = () => FILTERS[state.filter] || FILTERS.all;
 
   // ------------------------------------------------------- density + ordering
   // A card is rendered at one of three densities, derived from state alone —
@@ -239,17 +273,16 @@
   // Twelve of a typical site's 23 cards are settled work; at full weight they were
   // ~5,000 px of "already done" between the operator and the next thing that isn't.
   function cardDensity(f) {
-    const status = (f && f.status) || STATUS.UNSET;
-    if (ATTENTION.includes(status)) return "full";
-    return f && f.reviewed ? "line" : "summary";
+    if (isOutstanding(f)) return "full";
+    return isSignedOff(f) ? "line" : "summary";
   }
   // Default ordering within a category: the operator's next action first, settled
   // work last. Ties fall back to the registry's own priority, so the order inside a
   // rank is still the one data/sources.json asks for.
   const ATTENTION_RANK = { unset: 0, failed: 1, manual: 2, found: 3, none: 4 };
   function attentionRank(f) {
-    if (f && f.reviewed) return 9; // reviewed sinks below every unreviewed result
-    const r = ATTENTION_RANK[(f && f.status) || STATUS.UNSET];
+    if (isSignedOff(f)) return 9; // signed-off sinks below every result still open
+    const r = ATTENTION_RANK[statusOf(f)];
     return r === undefined ? 5 : r;
   }
   function sortCards(list) {
@@ -263,7 +296,7 @@
   // is on — otherwise filtering to Found would fold every group the filter just
   // built.
   function anyFilterOn() {
-    return !!(state.filterStatus || state.filterAttention || state.filterUnreviewed);
+    return state.filter !== "all";
   }
 
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -1018,11 +1051,8 @@
     state.qldMap = { selection: null, capture: null };
     state.date = new Date().toISOString().slice(0, 10);
     state.maintenance = "";
-    state.filterAttention = false;
-    state.filterStatus = null;
-    state.filterUnreviewed = false;
-    state.showAttention = false;
-    state.groupOpen = {}; // restore() brings back this site's own collapse choices
+    state.filter = "all";  // restore() brings back this site's own filter choice
+    state.groupOpen = {};  // …and its own collapse choices
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
   }
@@ -1044,10 +1074,8 @@
     renderSiteImages();
     renderMapsSections();
     ensureAllMaps();
-    renderDashboard();
+    renderDashboard(); // renders the collection bar on the way through
     renderReport();
-    renderProgress();
-    syncFilterButton();
     $("#fld-date").value = state.date;
     $("#fld-maintenance").value = state.maintenance;
     $("#workspace").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1141,11 +1169,18 @@
     }
     state.date = si.assessment_date || new Date().toISOString().slice(0, 10);
     state.maintenance = si.site_maintenance || "";
-    state.filterAttention = false;
-    state.filterStatus = null;
-    state.filterUnreviewed = false;
     state.groupOpen = {}; // an incoming run answers the categories itself; fold by state
-    state.showAttention = true; // surface what the agent left for the human
+    focusOnOutstanding();
+  }
+
+  // What the attention banner used to be for. An import (or an agent run) answers
+  // most of the list and leaves the rest to a human, so the control lands on that
+  // subset itself rather than announcing it in a second voice and asking for a
+  // click — the pressed segment says why the list is short, and "All" is one click
+  // away. A run that left nothing outstanding stays on the whole list: filtering to
+  // an empty "Needs you" would be a worse answer than showing the finished work.
+  function focusOnOutstanding() {
+    state.filter = sourcesForSite().some((s) => isOutstanding(state.findings[s.id] || {})) ? "attention" : "all";
   }
 
   // Is an imported findings file describing the site that's already open? siteKey
@@ -1861,7 +1896,7 @@
           rs.note = seed.note; rs.choice = seed.choice; seeded++;
         }
       }
-      save(); refreshCard(sourceId); renderProgress(); renderReport();
+      save(); refreshCard(sourceId); renderCollectionStatus(); renderReport();
       toast(res.found
         ? `PMST imported — MNES summary added${seeded ? `, and ${seeded} section narrative${seeded > 1 ? "s" : ""} drafted` : ""}.`
         : "PMST imported — no MNES matters returned.");
@@ -1889,13 +1924,8 @@
     // expansion: the resting view always reflects state, never accumulated clicks.
     CARD_OPEN.expanded.clear();
     const cats = DATA.sourcesMeta.categories;
-    let list = sourcesForSite();
-    if (state.filterStatus)
-      list = list.filter((s) => ((state.findings[s.id] || {}).status || "unset") === state.filterStatus);
-    else if (state.filterAttention)
-      list = list.filter((s) => ATTENTION.includes((state.findings[s.id] || {}).status || "unset"));
-    if (state.filterUnreviewed)
-      list = list.filter((s) => !(state.findings[s.id] || {}).reviewed);
+    const filter = activeFilter();
+    const list = sourcesForSite().filter((s) => filter.test(state.findings[s.id] || {}));
     for (const id of Object.keys(cardNumbers)) delete cardNumbers[id];
     dashboardCats.length = 0; // rebuilt below, in render order, for the nav rail
     let n = 0;
@@ -1913,14 +1943,9 @@
       dashboardCats.push(cat.id);
     }
     if (!wrap.children.length)
-      wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" },
-        state.filterStatus ? `No sources marked "${STATUS_LABEL[state.filterStatus]}".` :
-        state.filterAttention ? "✓ Nothing needs attention — every source has a result." :
-        state.filterUnreviewed ? "✓ Everything has been reviewed." : "No sources for this site."));
-    syncStatusFilterBar();
-    syncUnreviewedFilterButton();
-    syncSortToggle();
-    renderRailNav(); // tracks the groups that survived the filters above
+      wrap.append(el("p", { class: "dash-note", style: "margin:8px 0" }, filter.empty));
+    renderCollectionStatus();
+    renderRailNav(); // tracks the groups that survived the filter above
   }
 
   // ------------------------------------------------------------- group headers
@@ -1931,9 +1956,9 @@
   function groupRollup(inCat) {
     let found = 0, need = 0;
     for (const src of inCat) {
-      const st = (state.findings[src.id] || {}).status || STATUS.UNSET;
-      if (st === STATUS.FOUND) found++;
-      if (ATTENTION.includes(st)) need++;
+      const f = state.findings[src.id] || {};
+      if (statusOf(f) === STATUS.FOUND) found++;
+      if (isOutstanding(f)) need++; // same definition the collection bar counts with
     }
     return { n: inCat.length, found, need };
   }
@@ -2106,7 +2131,7 @@
   function railAttentionCounts() {
     const counts = {};
     for (const src of sourcesForSite())
-      if (ATTENTION.includes((state.findings[src.id] || {}).status || "unset"))
+      if (isOutstanding(state.findings[src.id] || {}))
         counts[src.category] = (counts[src.category] || 0) + 1;
     return counts;
   }
@@ -2117,12 +2142,12 @@
     const old = btn.querySelector(".rail-badge");
     if (old) old.remove();
     if (n) btn.append(el("span", { class: "rail-badge", "aria-hidden": "true" }, `${n}`));
-    const full = label + (n ? ` — ${n} needing attention` : "");
+    const full = label + (n ? ` — ${n} still need you` : "");
     btn.title = full;
     btn.setAttribute("aria-label", full);
   }
 
-  // Badge-only refresh, run from renderProgress() so every path that changes a
+  // Badge-only refresh, run from renderCollectionStatus() so every path that changes a
   // result (a click, an auto-check, an agent run, an import) keeps the counts live
   // without rebuilding the rail or its observer.
   function refreshRailBadges() {
@@ -2228,7 +2253,7 @@
           layers: record.layers || [],
         };
         saveImages(); save();
-        refreshCard(src.id); renderProgress(); renderReport();
+        refreshCard(src.id); renderCollectionStatus(); renderReport();
         toast(`Map added to the report — ${(record.layers || []).length} layers recorded in the appendix`);
       },
     });
@@ -2331,6 +2356,22 @@
     return card;
   }
 
+  // The card's sign-off. Deliberately NOT the report pane's "Mark reviewed"
+  // checkbox: they are separate tallies, and rendering them identically was the
+  // single most confusing thing on the page. Different word ("sign off" vs
+  // "reviewed"), different control (a pressed pill vs a checkbox), different shape.
+  function renderSignOff(src, f) {
+    const on = isSignedOff(f);
+    return el("button", {
+      // The visible label already says what this does, so it carries no title —
+      // the accessible name only adds which card, for someone tabbing the list.
+      type: "button", class: "signoff" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false",
+      "aria-label": on ? `Signed off: ${src.name}` : `Sign off ${src.name}`,
+      onclick: () => setReviewed(src.id, !on),
+    }, el("span", { class: "signoff-tick", "aria-hidden": "true" }, on ? "✓" : "○"),
+      el("span", {}, on ? "Signed off" : "Sign off"));
+  }
+
   // Status as shape + word, never colour alone: the glyph differs per result, and
   // the accessible name spells it out.
   const STATUS_GLYPH = { found: "●", none: "○", failed: "▲", manual: "◆", unset: "◌" };
@@ -2355,7 +2396,7 @@
       // aria-expanded alone: what expands is the card this button is inside, so
       // there is no sibling region for aria-controls to point at.
       type: "button", class: "src-line", "aria-expanded": "false",
-      "aria-label": `${src.name} — ${STATUS_LABEL[f.status]}, reviewed, feeding ${sec}. Expand to change it.`,
+      "aria-label": `${src.name} — ${STATUS_LABEL[f.status]}, signed off, feeding ${sec}. Expand to change it.`,
       onclick: () => expandCard(src.id),
     },
       el("span", { class: "src-num" }, num ? `${num}` : ""),
@@ -2391,8 +2432,6 @@
       : null;
 
     const included = cardIncluded(f);
-    const reviewCb = el("input", { type: "checkbox", onchange: (e) => setReviewed(src.id, e.target.checked) });
-    reviewCb.checked = !!f.reviewed;
 
     card.append(
       el("div", { class: "src-top" },
@@ -2406,7 +2445,7 @@
       el("div", { class: "src-sum-foot" },
         el("span", { class: "src-line-sec" }, `→ ${sectionTitleOf(src, f)}`),
         el("span", { class: "src-sum-inc" + (included ? " is-in" : "") }, included ? "✓ In report" : "not included"),
-        el("label", { class: "review-toggle" }, reviewCb, el("span", {}, "Mark reviewed"))));
+        renderSignOff(src, f)));
 
     // Anywhere that isn't a control opens the card in place.
     card.addEventListener("click", (e) => {
@@ -2504,8 +2543,24 @@
       onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
     }, "Open the source ↗");
 
-    const doRow = el("div", { class: "do-row" },
-      el("span", { class: "do-lead" }, "Result"), renderStatusControl(src, f), link);
+    // The one thing about this app's vocabulary an operator has to be told, told at
+    // the point of use rather than in a paragraph 300 px up the pane that is read
+    // once and never again (it used to be step 4 of the instruction block).
+    const resultHint = el("p", { class: "do-hint", id: `hint-${src.id}`, hidden: true },
+      "Found ≠ good news — a protected species means caution on site. Sign-off is your judgement about this card, tracked separately from the result.");
+    const resultLead = el("button", {
+      type: "button", class: "do-lead do-lead-info", "aria-expanded": "false", "aria-controls": resultHint.id,
+      title: "What Result means, and how it relates to sign-off",
+      onclick: () => {
+        const open = resultHint.hidden;
+        resultHint.hidden = !open;
+        resultLead.setAttribute("aria-expanded", open ? "true" : "false");
+        resultLead.classList.toggle("on", open);
+        queueCardMetrics();
+      },
+    }, "Result", el("span", { class: "do-lead-mark", "aria-hidden": "true" }, "ⓘ"));
+
+    const doRow = el("div", { class: "do-row" }, resultLead, renderStatusControl(src, f), link);
     if (src.id === "qld-globe" && state.site.state === "QLD") {
       doRow.append(el("button", { type: "button", class: "btn tiny primary", onclick: () => openQldGlobeMap(src) }, "🗺 Open site map"));
     }
@@ -2544,7 +2599,7 @@
       about,
       resultPanel,
       noteBlock,
-      el("div", { class: "src-do" }, doRow, renderIncludeRow(src)));
+      el("div", { class: "src-do" }, doRow, resultHint, renderIncludeRow(src)));
     queueCardMetrics();
     return card;
   }
@@ -2758,7 +2813,7 @@
     f.status = f.status === status ? STATUS.UNSET : status;
     save();
     refreshCard(id);
-    renderProgress();
+    renderCollectionStatus();
     renderReport(); // evidence + suggested choices may change
   }
 
@@ -2768,9 +2823,10 @@
     const f = state.findings[id] || (state.findings[id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     f.reviewed = !!reviewed;
     save();
-    if (state.filterUnreviewed && f.reviewed) renderDashboard(); // ticking removes it from this filter
-    else refreshCard(id);
-    renderProgress();
+    // Signing off can move the card out of (or into) the filtered view, so those
+    // filters need the whole list rebuilt rather than the one card.
+    if (state.filter === "signed" || state.filter === "attention") renderDashboard();
+    else { refreshCard(id); renderCollectionStatus(); }
   }
 
   // Rebuilds one card in place. It re-derives density rather than assuming full,
@@ -2863,14 +2919,14 @@
       const r = await alaQuery(s.lat, s.lon, radius, src.api && src.api.endpoint);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
       f.status = r.status; f.result = { html: r.html, ts: Date.now() };
-      save(); refreshCard(src.id); renderProgress(); renderReport();
+      save(); refreshCard(src.id); renderCollectionStatus(); renderReport();
       maybeAutoFetchForSource(src.id); // reference photos for any listed taxa (Task 3)
     } catch (err) {
       const f = state.findings[src.id] || (state.findings[src.id] = {});
       f.status = STATUS.FAILED;
       f.result = { html: `Could not reach the Atlas of Living Australia API (${esc(err.message)}). This is usually a network or browser CORS restriction. Use the <b>Open ↗</b> link to check manually, then set the result.`, err: true, ts: Date.now() };
       save(); refreshCard(src.id);
-      renderProgress(); renderReport();
+      renderCollectionStatus(); renderReport();
     }
   }
 
@@ -2931,14 +2987,14 @@
       const r = await wildnetQuery(s.lat, s.lon, radius, src.api);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
       f.status = r.status; f.result = { html: r.html, ts: Date.now() };
-      save(); refreshCard(src.id); renderProgress(); renderReport();
+      save(); refreshCard(src.id); renderCollectionStatus(); renderReport();
       maybeAutoFetchForSource(src.id);
     } catch (err) {
       const f = state.findings[src.id] || (state.findings[src.id] = {});
       f.status = STATUS.FAILED;
       f.result = { html: `Could not reach the Queensland WildNet API (${esc(err.message)}). This is usually a network or browser CORS restriction. Use the <b>Open ↗</b> link to run the search in the WildNet app, then set the result.`, err: true, ts: Date.now() };
       save(); refreshCard(src.id);
-      renderProgress(); renderReport();
+      renderCollectionStatus(); renderReport();
     }
   }
 
@@ -3083,83 +3139,137 @@
     setFlowStatus("#paste-status", `Findings for ${json.site.name || "this site"} — ${answered} source${answered === 1 ? "" : "s"} answered. Press Apply.`, "ok");
   }
 
-  // ---------------------------------------------------------------- progress
-  function renderProgress() {
-    const list = sourcesForSite();
-    const counts = { found: 0, none: 0, failed: 0, manual: 0, unset: 0 };
-    let reviewed = 0;
-    list.forEach((s) => {
-      const f = state.findings[s.id] || {};
-      counts[f.status || "unset"]++;
-      if (f.reviewed) reviewed++;
-    });
-    const done = list.length - counts.unset;
-    $("#progress-bar").style.width = list.length ? `${Math.round((done / list.length) * 100)}%` : "0";
-    $("#progress-legend").innerHTML =
-      `<span><b>${done}</b>/${list.length} checked</span>` +
-      `<span class="chip found">${counts.found} found</span>` +
-      `<span class="chip none">${counts.none} none</span>` +
-      `<span class="chip failed">${counts.failed} failed</span>` +
-      `<span class="chip manual">${counts.manual} manual</span>` +
-      `<span class="chip reviewed">${reviewed}/${list.length} reviewed</span>`;
-    renderAttention();
-    refreshRailBadges(); // same counts, shown per category on the nav rail
+  // ------------------------------------------------------- collection status
+  // The one control that answers "what still needs me". A journey, not a
+  // scoreboard: two segments (answered / still needing you) rather than six legend
+  // pills, the count in words, and the four filter segments underneath — which ARE
+  // the filter, so there is no separate "Show only" row and no banner repeating the
+  // same number in different words. Per-result counts live one click away, behind
+  // "Results", for the rare moment they matter.
+  function statusCounts() {
+    const list = sourcesForSite().map((s) => state.findings[s.id] || {});
+    const byStatus = { found: 0, none: 0, failed: 0, manual: 0, unset: 0 };
+    list.forEach((f) => { byStatus[statusOf(f)]++; });
+    const outstanding = list.filter(isOutstanding).length;
+    return { list, n: list.length, byStatus, outstanding, answered: list.length - outstanding,
+      signed: list.filter(isSignedOff).length };
+  }
+
+  function outstandingSentence(c) {
+    if (!c.n) return "No sources apply to this site.";
+    if (!c.outstanding) return c.signed >= c.n
+      ? `All ${c.n} sources answered and signed off.`
+      : `All ${c.n} answered — ${c.n - c.signed} still to sign off.`;
+    return `${c.outstanding} of ${c.n} still need you`;
+  }
+
+  function renderCollectionStatus() {
+    const bar = $("#collection-status");
+    if (!bar || !state.site) return;
+    const c = statusCounts();
+    const fill = $("#cs-fill");
+    if (fill) fill.style.width = c.n ? `${Math.round((c.answered / c.n) * 100)}%` : "0";
+    bar.classList.toggle("is-clear", c.n > 0 && !c.outstanding);
+
+    // role="status" — only write when the sentence actually changed, so a screen
+    // reader announces the outstanding count on the ticks that move it and stays
+    // quiet through the renders that don't.
+    const count = $("#cs-count");
+    const text = outstandingSentence(c);
+    if (count && count.textContent !== text) count.textContent = text;
+
+    const segs = $("#cs-segs");
+    if (segs) {
+      segs.replaceChildren(...Object.entries(FILTERS).filter(([, def]) => def.seg).map(([key, def]) => {
+        const on = state.filter === key;
+        return el("button", {
+          type: "button", class: "cs-seg" + (on ? " on" : ""), "data-seg": key,
+          "aria-pressed": on ? "true" : "false",
+          title: SEG_HINT[key],
+          onclick: () => setFilter(on && key !== "all" ? "all" : key),
+        }, el("span", {}, def.label), el("b", {}, `${def.count(c.list)}`));
+      }));
+    }
+    syncSortToggle();
+    // The Results panel is where a per-result filter lives, so it is never shut
+    // while one is on — otherwise the list would be narrowed by a control that
+    // isn't on screen, which is the "mystery filter" the old bar could produce.
+    if (!activeFilter().seg) setStatusDetailOpen(true);
+    else if (!$("#cs-detail").hidden) renderStatusDetail();
+    refreshRailBadges(); // same definition of "outstanding", shown per category on the rail
     refreshGroupHeads(); // …and per category on each group's roll-up
-    // The legend just changed width/wrap, and the card is what the sticky group
+    // The sentence just changed width/wrap, and this card is what the sticky group
     // headers pin under (covers browsers without ResizeObserver too).
-    measureProgressBar();
+    measureStatusBar();
   }
 
-  // Banner drawing the eye to sources a human still owns (shown after an import
-  // or agent run). Updates live as items are resolved; hides when dismissed.
-  function renderAttention() {
-    const b = $("#attention-banner");
-    if (!b) return;
-    if (!state.showAttention || !state.site) { b.hidden = true; return; }
-    const list = sourcesForSite();
-    const need = list.filter((s) => ATTENTION.includes((state.findings[s.id] || {}).status || "unset")).length;
-    const done = list.length - need;
-    b.hidden = false;
-    b.className = "attention" + (need === 0 ? " clear" : "");
-    b.innerHTML = "";
-    const msg = need === 0
-      ? el("span", {}, `All ${list.length} sources resolved — review the report and export.`)
-      : el("span", { html: `<b>${done}</b> automated · <b>${need}</b> still need you (Manual / Failed / Not&nbsp;checked). Open each aimed link, then set its result.` });
-    const actions = el("span", { style: "display:flex;gap:8px;flex-wrap:wrap" });
-    if (need > 0) actions.append(el("button", {
-      class: "btn tiny" + (state.filterAttention ? " on" : ""),
-      onclick: () => {
-        state.filterAttention = !state.filterAttention;
-        if (state.filterAttention) state.filterStatus = null;
-        renderDashboard(); renderAttention(); syncFilterButton();
-      },
-    }, state.filterAttention ? "Show all" : "Show only these"));
-    actions.append(el("button", { class: "btn tiny", onclick: () => { state.showAttention = false; renderAttention(); } }, "Dismiss"));
-    b.append(msg, actions);
+  const SEG_HINT = {
+    attention: "Manual, Search failed and Not checked — the sources a human still owns",
+    answered: "Found and Nothing found — the sources that have an answer",
+    signed: "Sources you have signed off",
+    all: "Every source that applies to this site",
+  };
+
+  // The per-result breakdown, behind the bar's "Results" disclosure: the detail
+  // that used to be six permanent legend pills plus a six-button filter row. Each
+  // count is also the filter for that result, so nothing was lost by folding it away.
+  function renderStatusDetail() {
+    const panel = $("#cs-detail");
+    if (!panel) return;
+    const c = statusCounts();
+    panel.replaceChildren(...["found", "none", "failed", "manual", "unset"].map((s) => {
+      const on = state.filter === s;
+      return el("button", {
+        type: "button", class: `cs-res ${s}` + (on ? " on" : ""), "aria-pressed": on ? "true" : "false",
+        title: `Show only sources marked ${FILTERS[s].label}`,
+        onclick: () => setFilter(on ? "all" : s),
+      }, statusDot(s), el("span", {}, FILTERS[s].label), el("b", {}, `${c.byStatus[s]}`));
+    }));
   }
 
-  function syncFilterButton() {
-    const btn = $("#btn-filter-attention");
-    if (btn) btn.classList.toggle("on", state.filterAttention);
+  function setStatusDetailOpen(open) {
+    const panel = $("#cs-detail"), btn = $("#cs-more");
+    if (!panel || !btn) return;
+    if (open) renderStatusDetail();
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.classList.toggle("on", open);
+    btn.title = open ? "Hide the per-result counts" : "Per-result counts — and filter by one result";
+    measureStatusBar();
   }
 
-  function syncUnreviewedFilterButton() {
-    const btn = $("#btn-filter-unreviewed");
-    if (btn) btn.classList.toggle("on", state.filterUnreviewed);
+  // Putting the panel away also puts away the filter that lives in it, so the list
+  // can never be narrowed by a control that isn't on screen. setFilter re-renders,
+  // which is what actually closes the panel in that case.
+  function toggleStatusDetail() {
+    const open = $("#cs-detail").hidden;
+    if (!open && !activeFilter().seg) { setFilter("all"); setStatusDetailOpen(false); return; }
+    setStatusDetailOpen(open);
   }
 
-  // Only the four result buttons follow filterStatus — the two flag buttons that
-  // share the bar (Needs attention / Needs review) keep their own state.
-  function syncStatusFilterBar() {
-    $$(".sfb-btn[data-status]").forEach((btn) => btn.classList.toggle("on", btn.dataset.status === state.filterStatus));
+  // The dashboard's only filter setter. Persisted per site (see saveNow/restore),
+  // so coming back to a site keeps your place instead of resetting to everything.
+  function setFilter(key) {
+    if (!FILTERS[key]) key = "all";
+    if (state.filter === key) return;
+    state.filter = key;
+    // A discrete choice, and often the last thing done before a reload — persist it
+    // now rather than 400 ms later. (flushSave alone is a no-op with nothing queued.)
+    save(); flushSave();
+    renderDashboard(); // re-renders the bar (and its segments) on the way through
   }
 
+  // Ordering, not filtering — one toggle rather than two buttons in the filter run.
   function syncSortToggle() {
-    $$(".sfb-btn[data-sort]").forEach((btn) => {
-      const on = btn.dataset.sort === state.cardSort;
-      btn.classList.toggle("on", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    });
+    const btn = $("#cs-sort");
+    if (!btn) return;
+    const attentionFirst = state.cardSort === "attention";
+    btn.replaceChildren(el("span", { "aria-hidden": "true" }, "⇅"),
+      el("span", {}, attentionFirst ? "Attention first" : "Source order"));
+    btn.title = attentionFirst
+      ? "Ordered by what still needs you — click for the source registry's own order"
+      : "Ordered as the source registry lists them — click to put what needs you first";
+    btn.setAttribute("aria-label", `Card order: ${attentionFirst ? "attention first" : "source order"}. Click to change.`);
   }
 
   function setCardSort(mode) {
@@ -3262,18 +3372,16 @@
     flashTarget(node);
   }
   // Report block's "Show" → scroll the collection (left) to the source card. The
-  // card may be hidden by an active dashboard filter, so clear filters and
+  // card may be hidden by the active dashboard filter, so drop back to "All" and
   // re-render first if it isn't currently on screen.
   function showSourceCard(sourceId) {
     let node = document.getElementById(`src-${sourceId}`);
     if (!node) {
-      state.filterStatus = null;
-      state.filterAttention = false;
-      state.filterUnreviewed = false;
+      state.filter = "all";
+      save();
       const internalToggle = $("#toggle-manual-internal");
       if (internalToggle && !internalToggle.checked) internalToggle.checked = true;
       renderDashboard();
-      syncFilterButton();
       node = document.getElementById(`src-${sourceId}`);
     }
     if (!node) return;
@@ -3292,7 +3400,7 @@
 
   // The bottom row of a card's disposition zone: where this card lands in the
   // report, then — last on the card, in DOM order and on screen, where the
-  // instructions have always said it belongs — the review tick. Editing the card's
+  // instructions have always said it belongs — the sign-off. Editing the card's
   // notes/photos afterwards updates the report live (the report re-renders from
   // state), so multiple sources can land in one section and stay in sync without
   // any copy/paste going stale. "Show in the report" moved to the card's ⋯ menu.
@@ -3306,16 +3414,8 @@
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
 
-    // "checked" is a boolean HTML attribute — setAttribute("checked", false) would
-    // still mark it checked, so set the property directly instead of via el(attrs).
-    const reviewCbInput = el("input", { type: "checkbox", onchange: (e) => setReviewed(src.id, e.target.checked) });
-    reviewCbInput.checked = !!f.reviewed;
-    const reviewToggle = el("label", { class: "review-toggle" + (f.reviewed ? " on" : "") },
-      reviewCbInput,
-      el("span", {}, f.reviewed ? "✓ Reviewed" : "Mark reviewed"));
-
     return el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
-      el("span", { class: "do-lead" }, "Report"), sel, btn, reviewToggle);
+      el("span", { class: "do-lead" }, "Report"), sel, btn, renderSignOff(src, f));
   }
 
   // Suggest a dropdown option based on the findings in the relevant categories.
@@ -3552,14 +3652,16 @@
       if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
 
       const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""), id: `rsec-${section.id}` });
-      // Per-section "Reviewed" tickbox — lets the operator track progress through the
-      // report the same way the collection cards do. Updated in place (no full report
+      // Per-section "Reviewed" tickbox — the REPORT's own tally, deliberately not the
+      // collection card's "Sign off": different word, different control (a checkbox,
+      // not a pressed pill) and a different accent, because the two used to be
+      // pixel-identical and mean different things. Updated in place (no full report
       // re-render) so ticking stays cheap on image-heavy sites.
       const revInput = el("input", { type: "checkbox" });
       revInput.checked = !!rstate.reviewed;
       const revToggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""),
-        title: "Tick once you've reviewed this report section" },
-        revInput, el("span", {}, rstate.reviewed ? "✓ Reviewed" : "Mark reviewed"));
+        title: "The report's own tally — tick once you've reviewed this section (separate from signing off the source cards)" },
+        revInput, el("span", {}, rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed"));
       revInput.addEventListener("change", (e) => setSectionReviewed(section.id, e.target.checked, box, revToggle));
       box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title), revToggle));
 
@@ -3791,7 +3893,7 @@
     if (label) {
       label.classList.toggle("on", rstate.reviewed);
       const span = label.querySelector("span");
-      if (span) span.textContent = rstate.reviewed ? "✓ Reviewed" : "Mark reviewed";
+      if (span) span.textContent = rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed";
     }
   }
 
@@ -3849,9 +3951,10 @@
       qldMap: qldMapTextState(),
       date: state.date,
       maintenance: state.maintenance,
-      // Presentation state that belongs to this site rather than the browser:
-      // which categories the operator has explicitly folded away or kept open.
-      ui: { groups: state.groupOpen },
+      // Presentation state that belongs to this site rather than the browser: which
+      // categories the operator has explicitly folded away or kept open, and which
+      // slice of the list they were working — so reopening a site keeps their place.
+      ui: { groups: state.groupOpen, filter: state.filter },
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -3949,6 +4052,7 @@
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
       state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
+      state.filter = (d.ui && FILTERS[d.ui.filter]) ? d.ui.filter : "all";
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
       // (v1) for sites saved before the split, then mark dirty so the next save
       // migrates them out of the text key.
@@ -4570,13 +4674,15 @@
   }
   function siteFromKey(key) { const d = readSitePayload(key); return d && d.site ? d.site : null; }
 
+  // Reads a stored payload rather than live state, so it can't go through
+  // isOutstanding — but it counts with the same ATTENTION list, which is the point.
   function countStatuses(d) {
     const f = (d && d.findings) || {};
     let found = 0, attention = 0, total = 0;
     for (const v of Object.values(f)) {
       total++;
-      if (v.status === "found") found++;
-      if (!v.status || v.status === "manual" || v.status === "failed" || v.status === STATUS.UNSET) attention++;
+      if (v.status === STATUS.FOUND) found++;
+      if (ATTENTION.includes(v.status || STATUS.UNSET)) attention++;
     }
     return { found, attention, total };
   }
@@ -4631,8 +4737,8 @@
       const c = countStatuses(d);
       const meta = el("span", { class: "batch-chip-meta" });
       if (c.found) meta.append(el("span", { class: "bc found", title: `${c.found} found` }, `⚑ ${c.found}`));
-      if (c.attention) meta.append(el("span", { class: "bc attn", title: `${c.attention} need attention` }, `⚠ ${c.attention}`));
-      if (!c.found && !c.attention && c.total) meta.append(el("span", { class: "bc ok", title: "all reviewed / nothing outstanding" }, "✓"));
+      if (c.attention) meta.append(el("span", { class: "bc attn", title: `${c.attention} still need you` }, `⚠ ${c.attention}`));
+      if (!c.found && !c.attention && c.total) meta.append(el("span", { class: "bc ok", title: "nothing outstanding" }, "✓"));
       tray.append(el("button", {
         class: "batch-chip" + (key === state.batch.active ? " is-active" : ""),
         title: `Open ${name}`, onclick: () => loadSiteFromBatch(key),
@@ -4974,20 +5080,21 @@
     if (tb) document.documentElement.style.setProperty("--topbar-h", tb.offsetHeight + "px");
   }
 
-  // The progress card pins to the top of the left column, so its height is what
+  // The collection bar pins to the top of the left column, so its height is what
   // the sticky group headers (and scroll-to-section) have to clear. It changes
-  // whenever the legend rewraps, so it's measured rather than assumed; 0 while no
-  // site is loaded, which parks the group headers back at the top of the column.
-  function measureProgressBar() {
-    const card = $("#progress");
+  // whenever the sentence rewraps or the Results panel opens, so it's measured
+  // rather than assumed; 0 while no site is loaded, which parks the group headers
+  // back at the top of the column.
+  function measureStatusBar() {
+    const card = $("#collection-status");
     const h = card && card.offsetParent ? card.offsetHeight : 0;
-    document.documentElement.style.setProperty("--progress-h", h + "px");
+    document.documentElement.style.setProperty("--status-h", h + "px");
   }
 
-  // Square off the pinned progress card against the topbar once it's actually
+  // Square off the pinned collection bar against the topbar once it's actually
   // stuck (CSS alone can't tell). Cheap enough to run per scroll frame.
   function syncProgressPinned() {
-    const col = $("#col-left"), card = $("#progress");
+    const col = $("#col-left"), card = $("#collection-status");
     if (!col || !card || !card.offsetParent) return;
     const stuck = card.getBoundingClientRect().top <= col.getBoundingClientRect().top + 0.5;
     card.classList.toggle("is-pinned", stuck);
@@ -5165,11 +5272,11 @@
       const wr = $("#workspace-right"); if (wr) wr.hidden = true;
       const ph = $("#report-placeholder"); if (ph) ph.hidden = false;
       renderRailNav(); // nothing to jump to with the workspace closed
-      measureProgressBar(); // the progress card went with it — release the pin offset
+      measureStatusBar(); // the collection bar went with it — release the pin offset
       $("#site-picker").scrollIntoView({ behavior: "smooth" });
       $("#station-search").focus();
     });
-    $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderProgress(); });
+    $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderCollectionStatus(); });
     const autoImgCb = $("#toggle-auto-images");
     if (autoImgCb) {
       autoImgCb.checked = autoImagesOn();
@@ -5178,26 +5285,15 @@
         toast(autoImgCb.checked ? "Auto-fetch reference images: on" : "Auto-fetch reference images: off");
       });
     }
-    $("#btn-filter-attention").addEventListener("click", () => {
-      state.filterAttention = !state.filterAttention;
-      if (state.filterAttention) state.filterStatus = null;
-      renderDashboard(); renderAttention(); syncFilterButton();
-    });
-    $("#btn-filter-unreviewed").addEventListener("click", () => {
-      state.filterUnreviewed = !state.filterUnreviewed;
-      renderDashboard();
-    });
-    $$(".sfb-btn[data-status]").forEach((btn) => btn.addEventListener("click", () => {
-      const s = btn.dataset.status;
-      state.filterStatus = state.filterStatus === s ? null : s;
-      if (state.filterStatus) state.filterAttention = false;
-      renderDashboard(); renderAttention(); syncFilterButton();
-    }));
+    // The collection bar's segments are built per render (they carry live counts),
+    // so their handlers ride on the buttons themselves — only the two fixed
+    // controls are wired here.
+    $("#cs-more").addEventListener("click", toggleStatusDetail);
+    $("#cs-sort").addEventListener("click", () => setCardSort(state.cardSort === "attention" ? "source" : "attention"));
     try {
       const saved = localStorage.getItem(LS_CARD_SORT);
       if (saved === "attention" || saved === "source") state.cardSort = saved;
     } catch (_) {}
-    $$(".sfb-btn[data-sort]").forEach((btn) => btn.addEventListener("click", () => setCardSort(btn.dataset.sort)));
     syncSortToggle();
     // Mirror the two free-text header fields into `state` so state is the single
     // source of truth (saveNow / reportObject read state, not the DOM) — this lets
@@ -5248,12 +5344,12 @@
       try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeButton); } catch (_) {}
     }
     measureTopbar();
-    measureProgressBar();
-    window.addEventListener("resize", () => { measureTopbar(); measureProgressBar(); });
-    // Keep the pinned-progress metrics honest: its height drives where the group
-    // headers pin, and its position drives the pinned styling.
-    const progressCard = $("#progress");
-    if (progressCard && "ResizeObserver" in window) new ResizeObserver(measureProgressBar).observe(progressCard);
+    measureStatusBar();
+    window.addEventListener("resize", () => { measureTopbar(); measureStatusBar(); });
+    // Keep the pinned collection bar's metrics honest: its height drives where the
+    // group headers pin, and its position drives the pinned styling.
+    const statusBar = $("#collection-status");
+    if (statusBar && "ResizeObserver" in window) new ResizeObserver(measureStatusBar).observe(statusBar);
     const colLeft = $("#col-left");
     if (colLeft) {
       let queued = false;
@@ -5319,7 +5415,7 @@
       f.status = status;
       if (note != null) f.note = String(note);
       if (resultText) f.result = { html: esc(String(resultText)).replace(/\n/g, "<br>"), ts: Date.now() };
-      save(); refreshCard(id); renderProgress(); renderReport();
+      save(); refreshCard(id); renderCollectionStatus(); renderReport();
       maybeAutoFetchForSource(id, imageSubjects); // reference photos for species cards (Task 3)
       return true;
     },
@@ -5328,8 +5424,10 @@
       const src = DATA.sources.find((x) => x.api && x.api.kind === "wildnet");
       return wildnetQuery(state.site.lat, state.site.lon, radius || (src && src.api && src.api.radius_km) || 10, src && src.api);
     },
-    beginRun: () => { state.showAttention = false; renderAttention(); },
-    endRun: () => { state.showAttention = true; renderProgress(); },
+    beginRun: () => { renderCollectionStatus(); },
+    // An agent run fills the list itself and leaves the rest to a human, so when it
+    // finishes the collection bar lands on that subset — see focusOnOutstanding.
+    endRun: () => { focusOnOutstanding(); save(); renderDashboard(); },
   };
 
   document.addEventListener("DOMContentLoaded", init);
