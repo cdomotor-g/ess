@@ -58,20 +58,28 @@ that pane, so the four steps are all you see until you go looking.
      fences and surrounding commentary and all — and fills the dashboard.
      Sources the reply leaves blank keep the result they already have, so the
      auto-checks you ran first are never undone.
-4. **Finish & include each source.** Each source opens aimed at the site. Set a
-   result on the ones still outstanding: Found / Nothing found / Search failed /
-   Manual. The **Show only** row filters the list by result, or down to
-   **⚠ Needs attention** (Manual / Failed / Not checked) and **☐ Needs review**. Sources for weeds,
-   pests, disease, threatened species and biosecurity get their own photo
-   dropzone — attach evidence when a check comes back **Found**. On the species
-   cards (weeds, feral animals, disease, threatened species) you can also type a
-   name and hit **🔎 Fetch image** to pull a labelled reference photo straight
-   from Wikipedia — no hunting for one — with its licensing credit attached. Or
-   hit **✨ Auto from notes** and the tool reads the species/subjects out of that
-   card's findings text and fetches a photo for each; with **Auto-fetch reference
-   images** on (⚙ Advanced options → Display options) this also happens as you
-   finish editing a card, and automatically on **Import** and during agent runs.
-   * The **EPBC PMST** card's **Open ↗** link now bakes the site's lat/long into
+4. **Finish & include each source.** Each source card reads top to bottom in the
+   order you form an opinion: **who it is** (number, tile, name — with **ⓘ** for
+   what to look for, the jurisdiction and the link), then **what came back** (the
+   source's own words, labelled and tinted to the result), then **your note**,
+   then what you do about it — set a **Result** (Found / Nothing / Failed /
+   Manual), **Open the source ↗**, choose the **Report** section and **＋
+   Include**, and tick **✓ Reviewed** last. Utilities you need occasionally —
+   copy lat/long, web search, jump to the report, clear your note — are on the
+   card's **⋯** menu. The **Show only** row filters the list by result, or down to
+   **⚠ Needs attention** (Manual / Failed / Not checked) and **☐ Needs review**.
+   Sources for weeds, pests, disease, threatened species and biosecurity take
+   evidence photos — press **＋ Add photo** for a drop / paste / pick zone (paste
+   with Ctrl+V straight onto the card) and attach evidence when a check comes back
+   **Found**. On the species cards (weeds, feral animals, disease, threatened
+   species) the same panel lets you type a name and hit **🔎 Fetch image** to pull
+   a labelled reference photo straight from Wikipedia — no hunting for one — with
+   its licensing credit attached. Or hit **✨ Reference image from notes** and the
+   tool reads the species/subjects out of that card's findings text and fetches a
+   photo for each; with **Auto-fetch reference images** on (⚙ Advanced options →
+   Display options) this also happens automatically on **Import** and during
+   agent runs.
+   * The **EPBC PMST** card's **Open the source ↗** link bakes the site's lat/long into
      the URL, so the Protected Matters Search Tool loads straight onto the
      location with its export panel open. Draw the buffer, generate the **Excel**
      report, then click **⬆ Import PMST Excel** on the card: the tool reads the
@@ -109,7 +117,7 @@ that pane, so the four steps are all you see until you go looking.
      picture or the report body. Appendix A gives each layer a **legend box**
      showing the colour and pattern that layer was drawn with, taken from the
      service's own published symbology, so the map can still be read once the
-     report is all anyone has. (The ordinary **Open ↗** link still opens Queensland
+     report is all anyone has. (The ordinary **Open the source ↗** link still opens Queensland
      Globe itself if you need its own tools or legend.)
 5. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Each section has an

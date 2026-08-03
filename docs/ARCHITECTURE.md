@@ -69,7 +69,22 @@ Vanilla JS, no dependencies, no build. It:
 - indexes `stations.json` for autocomplete and replicates the workbook's VLOOKUP
   autofill;
 - filters `sources.json` to the site's state and renders a card per source with
-  its coordinate-aimed deep-link;
+  its coordinate-aimed deep-link. A card is laid out in **three zones, in the
+  order an opinion forms** (`renderSourceCard`): **identity** (number, monogram,
+  name, and an `ⓘ` disclosure holding the jurisdiction/method tags, the static
+  "what to look for" prose, the steps and the URL) → **finding** (`result_text`
+  first, labelled *What came back* and tinted to the result, clamped to four
+  lines with a measured *Show all*; then the operator's own note, sized to its
+  content; then evidence photos behind a compact **＋ Add photo**) →
+  **disposition** (record the result → open the source → route it to a report
+  section → **✓ Reviewed**, last control on the card in DOM and visual order).
+  The result is stated **once** on a resting card: the recorded value is a chip
+  that expands back into the four-way picker on click, and an unanswered card
+  shows the picker outright, since answering it is that card's whole job.
+  Occasional utilities (copy lat/long, web search, jump to the report, clear the
+  note) are in a per-card `⋯` menu. Everything behind `ⓘ`, `⋯` and `＋ Add photo`
+  is **built on first open**, so 23 cards cost 23 buttons rather than 23 copies
+  of prose and tooling nobody has asked for yet;
 - calls the one live API (Atlas of Living Australia) directly from the browser;
 - tracks a status per source and assembles a report using the standardized
   wording from `dropdowns.json`;

@@ -277,7 +277,6 @@
   function renderSourceIcon(src) {
     return el("span", {
       class: `src-icon jur-${src.jurisdiction === "national" ? "national" : "state"}`,
-      title: src.name,
       "aria-hidden": "true",      // the card name is right beside it — don't double-announce
     }, iconMonogram(src));
   }
@@ -2090,8 +2089,74 @@
     node.replaceChildren(
       el("span", { class: "src-result-label" }, o.label || "What came back"),
       el("div", { class: "src-result-body", html: html || "" }));
+    queueCardMetrics();
   }
 
+  // ---------------------------------------------------------------- card metrics
+  // Two things a card can only get right once it has been laid out: how tall the
+  // note needs to be, and whether the finding actually overflows its four-line
+  // clamp. Both are read in one batched frame after a render rather than per card,
+  // so building 23 cards costs one forced layout instead of 46.
+  let cardMetricsQueued = false;
+  function queueCardMetrics() {
+    if (cardMetricsQueued) return;
+    cardMetricsQueued = true;
+    requestAnimationFrame(() => { cardMetricsQueued = false; syncCardMetrics(); });
+  }
+
+  function syncCardMetrics() {
+    // Three passes rather than one: writing and reading a height per textarea in
+    // the same loop forces a reflow per card. Reset every one, measure every one,
+    // then write — two reflows for the whole dashboard.
+    const notes = $$("#dashboard-groups .note-field");
+    notes.forEach((ta) => { ta.style.height = "auto"; });
+    const heights = notes.map((ta) => Math.max(ta.scrollHeight, 28));
+    notes.forEach((ta, i) => { ta.style.height = `${heights[i]}px`; });
+    $$("#dashboard-groups .src-result.show").forEach(syncResultClamp);
+  }
+
+  // A note grows to fit what's in it. Most cards carry a line or none at all, and
+  // a fixed 3-row box on each of 23 cards is ~450 px of empty field.
+  function autoGrow(ta) {
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.max(ta.scrollHeight, 28)}px`;
+  }
+
+  // The finding is clamped to four lines in CSS; this only decides whether the
+  // card needs a "Show all" at all. Measured, not guessed from text length — the
+  // pane is resizable, so the same result wraps to two lines or six depending on
+  // how the operator has the split set. A card whose finding fits never carries
+  // the control.
+  function syncResultClamp(panel) {
+    const body = panel.querySelector(".src-result-body");
+    if (!body || panel.classList.contains("is-open")) return;
+    const over = body.scrollHeight - body.clientHeight > 2;
+    const existing = panel.querySelector(".src-result-more");
+    if (!over) { if (existing) existing.remove(); return; }
+    if (existing) return;
+    panel.append(el("button", {
+      type: "button", class: "src-result-more", "aria-expanded": "false",
+      onclick: (e) => {
+        const open = !panel.classList.contains("is-open");
+        panel.classList.toggle("is-open", open);
+        e.target.textContent = open ? "Show less" : "Show all";
+        e.target.setAttribute("aria-expanded", open ? "true" : "false");
+      },
+    }, "Show all"));
+  }
+
+  // A source card is read in three zones, in the order the operator forms an
+  // opinion — identity → finding → disposition:
+  //
+  //   IDENTITY     which source is this, and (behind ⓘ) what am I looking for
+  //   FINDING      what came back · my note · my photos
+  //   DISPOSITION  record the result → go look → route it to the report → done
+  //
+  // Everything that is reference material rather than decision material lives
+  // behind the ⓘ affordance or the ⋯ overflow, and is built only when opened —
+  // 23 cards' worth of always-on prose and buttons is what made the pane feel
+  // like a wall. Nothing was removed: every capability is one click away.
   function renderSourceCard(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
     if (!f.images) f.images = [];
@@ -2099,49 +2164,66 @@
     card.style.setProperty("--cat", `var(--cat-${src.category})`); // picked up by the monogram tile
     const num = cardNumbers[src.id];
 
-    // "checked" is a boolean HTML attribute — setAttribute("checked", false) would
-    // still mark it checked, so set the property directly instead of via el(attrs).
-    const reviewCbInput = el("input", { type: "checkbox", onchange: (e) => setReviewed(src.id, e.target.checked) });
-    reviewCbInput.checked = !!f.reviewed;
-    const reviewToggle = el("label", { class: "review-toggle" + (f.reviewed ? " on" : ""), title: "Tick once you're satisfied with this source's result" },
-      reviewCbInput,
-      el("span", {}, f.reviewed ? "✓ Reviewed" : "Mark reviewed"));
+    // ---- zone 1: identity ------------------------------------------------
+    // Number, monogram, name — plus ⓘ, which is where the jurisdiction/method
+    // tags and the static "what to look for" prose went. They read identically
+    // on every run and every site, so they earn a disclosure, not 23 permanent
+    // copies down the pane.
+    const about = el("div", { class: "src-about", id: `about-${src.id}`, hidden: true });
+    const aboutBtn = el("button", {
+      type: "button", class: "src-info", "aria-expanded": "false", "aria-controls": about.id,
+      "aria-label": `About ${src.name} — what to look for, and where it comes from`,
+      onclick: () => setAbout(src, aboutBtn, about, about.hidden),
+    }, "ⓘ");
+    // A card is rebuilt whenever anything on it changes (a status tick, a photo
+    // landing); an open disclosure survives that rather than snapping shut under
+    // the operator.
+    if (CARD_OPEN.about.has(src.id)) setAbout(src, aboutBtn, about, true);
 
-    const tags = [];
-    if (src.method === "api") tags.push(el("span", { class: "tag api" }, "API"));
-    if (src.internal) tags.push(el("span", { class: "tag internal" }, "Internal"));
-    tags.push(el("span", { class: "tag jur" }, src.jurisdiction === "national" ? "National" : (state.site.state || "State")));
+    // ---- zone 2: the finding ---------------------------------------------
+    // What came back, first and labelled. Long results are clamped to four lines
+    // with a Show all toggle (added by syncCardMetrics once it can measure).
+    const resultPanel = el("div", { class: "src-result", id: `res-${src.id}` });
+    if (f.result) paintResult(resultPanel, f.result.html, { status: f.status, err: f.result.err });
 
+    // oninput fires per keystroke (save + regrow); onchange fires on blur, and
+    // re-renders the report so the edited note lands in its target section live
+    // (the report is a separate DOM tree, so rebuilding it never disturbs a click
+    // on this card). Editing the notes NEVER triggers a Wikipedia image search —
+    // that turned every note edit into a burst of network fetches + canvas work.
+    // Reference photos are pulled only on explicit request, from + Add photo.
+    const note = el("textarea", {
+      class: "note-field", rows: "1",
+      "aria-label": `Your note on ${src.name}`,
+      placeholder: "Your own words for the report…",
+      oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
+      onchange: () => { renderReport(); },
+    });
+    note.value = f.note || "";
+    // Photos belong to the note — they are the operator's other evidence — so the
+    // "+ Add photo" affordance rides on the note's own label row rather than
+    // costing the card a row of its own.
+    const photos = PHOTO_CATEGORIES.has(src.category) ? renderPhotoBlock(src, f) : null;
+    const noteBlock = el("div", { class: "src-note" },
+      el("div", { class: "note-head" },
+        el("span", { class: "zone-label" }, "Your note"),
+        photos ? photos.addBtn : null),
+      note,
+      photos ? photos.body : null);
+
+    // ---- zone 3: disposition ---------------------------------------------
     const link = el("a", {
       href: buildUrl(src), target: "_blank", rel: "noopener", class: "btn tiny",
-      title: buildUrl(src),
       onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
-    }, "Open ↗");
+    }, "Open the source ↗");
 
-    // Copy just the site's lat/long — for when the operator already has the tab
-    // the "Open ↗" link would open and only needs to paste the coordinates in.
-    const copyCoordBtn = el("button", {
-      type: "button", class: "btn tiny",
-      title: "Copy this site's latitude, longitude to the clipboard",
-      onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Lat/Lon copied"),
-    }, "⧉ Copy Lat Lon");
-
-    const statusSel = el("div", { class: "status-select" });
-    [[STATUS.FOUND, "Found"], [STATUS.NONE, "None"], [STATUS.FAILED, "Failed"], [STATUS.MANUAL, "Manual"]].forEach(([s, lab]) => {
-      statusSel.append(el("button", {
-        "data-s": s, class: f.status === s ? "on" : "",
-        onclick: () => setStatus(src.id, s),
-      }, lab));
-    });
-
-    const actions = el("div", { class: "src-actions" }, link, copyCoordBtn, statusSel);
+    const doRow = el("div", { class: "do-row" },
+      el("span", { class: "do-lead" }, "Result"), renderStatusControl(src, f), link);
     if (src.id === "qld-globe" && state.site.state === "QLD") {
-      actions.append(el("button", { type: "button", class: "btn tiny primary", onclick: () => openQldGlobeMap(src), title: "Open an interactive map of this site over the Queensland environmental layers, check the station pin, then capture it for the report" }, "🗺 Open site map"));
+      doRow.append(el("button", { type: "button", class: "btn tiny primary", onclick: () => openQldGlobeMap(src) }, "🗺 Open site map"));
     }
     const runner = apiRunnerFor(src);
-    if (runner) {
-      actions.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
-    }
+    if (runner) doRow.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
     // PMST card: upload the tool's Excel export and extract the MNES summary in-browser.
     if (src.xlsx_import === "pmst_mnes") {
       const fileInput = el("input", {
@@ -2150,72 +2232,171 @@
       });
       const importBtn = el("button", {
         type: "button", class: "btn tiny primary",
-        title: "Upload the PMST Excel export — extracts the Matters of National Environmental Significance (Known-only for species & communities) into the notes below",
         onclick: () => fileInput.click(),
       }, "⬆ Import PMST Excel");
-      actions.append(importBtn, fileInput);
+      doRow.append(importBtn, fileInput);
     }
-    if (src.web_search) {
-      const q = encodeURIComponent(fillTemplate(src.web_search));
-      actions.append(el("a", { href: `https://www.google.com/search?q=${q}`, target: "_blank", rel: "noopener", class: "btn tiny" }, "Web search ↗"));
-    }
+    doRow.append(renderCardMenu(src, note));
 
-    // onchange fires on blur; re-render the report so the edited note lands in its
-    // target section live (the report is a separate DOM tree, so rebuilding it never
-    // disturbs a click on this card). Editing the notes NO LONGER triggers any
-    // automatic Wikipedia image search in the background — that turned every note
-    // edit into a burst of network fetches + canvas work that bogged the browser
-    // down. Reference photos are now pulled only on explicit request (the "✨
-    // Reference image from notes" / "🔎 Search by name…" buttons on the card).
-    const note = el("textarea", {
-      placeholder: "Notes / evidence for the report…",
-      oninput: (e) => { f.note = e.target.value; save(); },
-      onchange: () => { renderReport(); },
-    });
-    note.value = f.note || "";
-    // Wipe just the notes text (keeps photos/reference images) so an operator can
-    // clear agentic entries and redo a card's notes from scratch.
-    const clearNoteBtn = el("button", { type: "button", class: "btn tiny note-clear",
-      title: "Clear the notes text for this card (photos are kept)",
-      onclick: () => clearNote(src.id, note) }, "Clear");
-
-    let photoBlock = null;
-    if (PHOTO_CATEGORIES.has(src.category)) {
-      const input = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
-      const pickBtn = el("button", { type: "button", class: "pick-btn" }, "choose a file");
-      const zone = el("div", { class: "dropzone small", tabindex: "0", "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
-        "📷 Evidence photo — drag & drop, paste, or ", pickBtn);
-      wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
-      const grid = el("div", { class: "photo-grid small" });
-      f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; saveImages(); })));
-      const wikiRow = WIKI_IMAGE_CATEGORIES.has(src.category) ? renderWikiImageRow(src) : null;
-      photoBlock = el("div", { class: "src-photos" }, zone, wikiRow, input, grid);
-    }
-
-    const resultPanel = el("div", { class: "src-result", id: `res-${src.id}` });
-    if (f.result) paintResult(resultPanel, f.result.html, { status: f.status, err: f.result.err });
-
-    // card.append() is the native DOM method (not the el() helper), which stringifies
-    // a null argument to the literal text "null" instead of skipping it — filter first.
-    card.append(...[
+    card.append(
       el("div", { class: "src-top" },
         el("div", { class: "src-name" },
           el("span", { class: "src-num" }, num ? `${num}` : ""),
           renderSourceIcon(src),
-          src.name, ...tags),
-        el("div", { class: "src-top-right" },
-          reviewToggle,
-          el("span", { class: "chip " + (f.status === "unset" ? "manual" : f.status), style: f.status === "unset" ? "opacity:.5" : "" }, STATUS_LABEL[f.status]))),
-      el("div", { class: "src-desc" }, src.what_to_find || ""),
-      actions,
-      el("div", { class: "src-note" },
-        el("div", { class: "note-head" }, el("label", { class: "note-label" }, "Notes & evidence"), clearNoteBtn),
-        note),
-      photoBlock,
-      renderIncludeRow(src),
+          src.name),
+        aboutBtn),
+      about,
       resultPanel,
-    ].filter(Boolean));
+      noteBlock,
+      el("div", { class: "src-do" }, doRow, renderIncludeRow(src)));
+    queueCardMetrics();
     return card;
+  }
+
+  // Which cards have a disclosure open, by source id — survives the card being
+  // re-rendered (which happens on every status tick, include toggle and photo).
+  const CARD_OPEN = { about: new Set(), photos: new Set() };
+
+  // The ⓘ disclosure: jurisdiction, how it's queried, what to look for, the steps
+  // and the URL. Built on first open — 23 cards of never-read reference prose is
+  // 23 cards of DOM nobody asked for.
+  function setAbout(src, btn, panel, open) {
+    if (open && !panel.childElementCount) {
+      const facts = el("div", { class: "src-facts" },
+        el("span", { class: "tag jur" }, src.jurisdiction === "national" ? "National" : (state.site.state || "State")),
+        src.method === "api"
+          ? el("span", { class: "tag api" }, "Queried by API")
+          : el("span", { class: "tag method" }, "Checked by hand"));
+      if (src.internal) facts.append(el("span", { class: "tag internal" }, "Internal — BOM staff only"));
+      panel.append(facts);
+      if (src.what_to_find) panel.append(
+        el("p", { class: "src-desc" }, el("b", {}, "What to look for: "), src.what_to_find));
+      if (src.instructions) panel.append(
+        el("p", { class: "src-desc" }, el("b", {}, "How to run it: "), src.instructions));
+      const url = buildUrl(src);
+      if (url) panel.append(el("a", { class: "src-url", href: url, target: "_blank", rel: "noopener" }, url));
+    }
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.classList.toggle("on", open);
+    CARD_OPEN.about[open ? "add" : "delete"](src.id);
+  }
+
+  // The card's single status marker. Once a result is recorded it collapses to
+  // that one value — the card border, the tinted finding panel and this chip were
+  // all saying "found" at once — and clicking it brings the four-way picker back.
+  // An unanswered card keeps the picker open: recording the result is the whole
+  // job of that card, and it stays one click.
+  function renderStatusControl(src, f) {
+    const slot = el("div", { class: "result-slot" });
+    const picker = () => {
+      const sel = el("div", { class: "status-select", role: "group", "aria-label": "Result for this source" });
+      [[STATUS.FOUND, "Found"], [STATUS.NONE, "Nothing"], [STATUS.FAILED, "Failed"], [STATUS.MANUAL, "Manual"]].forEach(([s, lab]) => {
+        sel.append(el("button", {
+          type: "button", "data-s": s, class: f.status === s ? "on" : "",
+          "aria-pressed": f.status === s ? "true" : "false",
+          onclick: () => setStatus(src.id, s),
+        }, lab));
+      });
+      return sel;
+    };
+    if (f.status === STATUS.UNSET) { slot.append(picker()); return slot; }
+    slot.append(el("button", {
+      type: "button", class: `chip result-chip ${f.status}`, "aria-expanded": "false",
+      "aria-label": `Result: ${STATUS_LABEL[f.status]} — change it`,
+      onclick: () => {
+        const open = picker();
+        slot.replaceChildren(open);
+        const on = open.querySelector("button.on");
+        if (on) on.focus();
+      },
+    }, STATUS_LABEL[f.status]));
+    return slot;
+  }
+
+  // Per-card ⋯ overflow: the utilities that were competing with "go look" and
+  // "record the answer" at identical weight in the old action row. Items are built
+  // on first open, so a resting card carries one button rather than five.
+  function renderCardMenu(src, note) {
+    const list = el("div", { class: "menu-list", role: "menu", hidden: true });
+    const toggle = el("button", {
+      type: "button", class: "btn tiny menu-toggle", "aria-haspopup": "true", "aria-expanded": "false",
+      "aria-label": `More actions for ${src.name}`,
+      onclick: (e) => {
+        e.stopPropagation();
+        if (!list.childElementCount) {
+          list.append(el("button", { class: "menu-item", role: "menuitem",
+            onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Lat/Lon copied") }, "⧉ Copy lat/long"));
+          if (src.web_search) {
+            const q = encodeURIComponent(fillTemplate(src.web_search));
+            list.append(el("a", { class: "menu-item", role: "menuitem", href: `https://www.google.com/search?q=${q}`, target: "_blank", rel: "noopener" }, "🔎 Web search ↗"));
+          }
+          list.append(el("button", { class: "menu-item", role: "menuitem",
+            onclick: () => showReportSection(targetSectionOf(src)) }, "⇢ Show in the report"));
+          list.append(el("button", { class: "menu-item danger", role: "menuitem",
+            onclick: () => clearNote(src.id, note) }, "✕ Clear my note"));
+          list.addEventListener("click", () => setCardMenuOpen(toggle, list, false));
+        }
+        setCardMenuOpen(toggle, list, list.hidden);
+      },
+    }, "⋯");
+    return el("div", { class: "menu card-menu" }, toggle, list);
+  }
+
+  function setCardMenuOpen(toggle, list, open) {
+    if (open) closeCardMenus();
+    list.hidden = !open;
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  // One delegated pair of listeners for every card menu ever rendered — cards are
+  // re-rendered constantly (every status tick rebuilds one), and per-card document
+  // listeners would pile up against detached nodes.
+  function closeCardMenus() {
+    $$(".card-menu .menu-list:not([hidden])").forEach((list) => {
+      list.hidden = true;
+      const t = list.parentElement.querySelector(".menu-toggle");
+      if (t) t.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  // Evidence photos: a button for the note's label row, and the body that goes
+  // under the note (any thumbnails, plus the drop zone once it's asked for).
+  // Empty, this costs one compact button rather than a 44 px dashed invitation on
+  // every biosecurity card; pressing it reveals the real drop/paste/pick zone (and
+  // the Wikipedia reference-image tools) and focuses it, so click-then-Ctrl+V
+  // still lands a screenshot on the card.
+  function renderPhotoBlock(src, f) {
+    const body = el("div", { class: "src-photos" });
+    const grid = el("div", { class: "photo-grid small" });
+    f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; saveImages(); })));
+    const tools = el("div", { class: "photo-tools", id: `photos-${src.id}`, hidden: true });
+    const addBtn = el("button", {
+      type: "button", class: "btn tiny photo-add", "aria-expanded": "false", "aria-controls": tools.id,
+      onclick: () => setPhotoTools(src, addBtn, tools, tools.hidden, true),
+    }, "＋ Add photo");
+    body.append(grid, tools);
+    // Adding a photo re-renders the card; the zone stays open (and unfocused, so
+    // the page doesn't jump) so a second paste doesn't need re-opening it.
+    if (CARD_OPEN.photos.has(src.id)) setPhotoTools(src, addBtn, tools, true, false);
+    return { addBtn, body };
+  }
+
+  function setPhotoTools(src, btn, tools, open, focus) {
+    if (open && !tools.childElementCount) {
+      const input = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
+      const pickBtn = el("button", { type: "button", class: "pick-btn" }, "choose a file");
+      const zone = el("div", { class: "dropzone small", tabindex: "0", "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
+        "📷 Drag & drop, paste, or ", pickBtn);
+      wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
+      tools.append(zone, input);
+      if (WIKI_IMAGE_CATEGORIES.has(src.category)) tools.append(renderWikiImageRow(src));
+    }
+    tools.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    CARD_OPEN.photos[open ? "add" : "delete"](src.id);
+    // Focus lands on the zone so the click-then-Ctrl+V gesture the zone advertises
+    // works without a second click.
+    if (open && focus) { const z = tools.querySelector(".dropzone"); if (z) z.focus(); }
   }
 
   // Reference-image tools for species/subject cards. To keep the card to a single
@@ -2305,9 +2486,9 @@
   function clearNote(id, textarea) {
     const f = state.findings[id];
     if (!f || !(f.note && f.note.trim())) { toast("No notes to clear on this card."); return; }
-    if (!confirm("Clear the Notes & Evidence text for this card?\n\nPhotos and reference images are kept. This can't be undone.")) return;
+    if (!confirm("Clear your note on this card?\n\nPhotos and reference images are kept. This can't be undone.")) return;
     f.note = "";
-    if (textarea) textarea.value = "";
+    if (textarea) { textarea.value = ""; autoGrow(textarea); }
     save();
     renderReport(); // the cleared note drops out of its report section live
   }
@@ -2773,26 +2954,32 @@
     flashTarget(node);
   }
 
-  // The Include control shown on each source card: a target-section dropdown + a
-  // toggle button. Editing the card's notes/photos afterwards updates the report
-  // live (the report re-renders from state), so multiple sources can land in one
-  // section and stay in sync without any copy/paste going stale.
+  // The bottom row of a card's disposition zone: where this card lands in the
+  // report, then — last on the card, in DOM order and on screen, where the
+  // instructions have always said it belongs — the review tick. Editing the card's
+  // notes/photos afterwards updates the report live (the report re-renders from
+  // state), so multiple sources can land in one section and stay in sync without
+  // any copy/paste going stale. "Show in the report" moved to the card's ⋯ menu.
   function renderIncludeRow(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     const included = cardIncluded(f);
     const target = targetSectionOf(src, f);
-    const sel = el("select", { class: "inc-target",
-      title: "Which ESS report section this card's notes & photos appear in",
+    const sel = el("select", { class: "inc-target", "aria-label": "Report section this card feeds",
       onchange: (e) => setTargetSection(src.id, e.target.value) });
     REPORT_SECTIONS.forEach((s) => sel.append(el("option", { value: s.id, selected: s.id === target ? "selected" : null }, s.title)));
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
-      title: included ? "Currently included — click to remove from the report" : "Add this card's notes & photos to the report section",
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
-    const showBtn = el("button", { type: "button", class: "btn tiny inc-show",
-      title: "Scroll the report (right) to this card's target section",
-      onclick: () => showReportSection(targetSectionOf(src)) }, "Show ⇢");
-    return el("div", { class: "include-row" + (included ? " is-in" : "") },
-      el("span", { class: "inc-lead" }, "Add to report:"), sel, btn, showBtn);
+
+    // "checked" is a boolean HTML attribute — setAttribute("checked", false) would
+    // still mark it checked, so set the property directly instead of via el(attrs).
+    const reviewCbInput = el("input", { type: "checkbox", onchange: (e) => setReviewed(src.id, e.target.checked) });
+    reviewCbInput.checked = !!f.reviewed;
+    const reviewToggle = el("label", { class: "review-toggle" + (f.reviewed ? " on" : "") },
+      reviewCbInput,
+      el("span", {}, f.reviewed ? "✓ Reviewed" : "Mark reviewed"));
+
+    return el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
+      el("span", { class: "do-lead" }, "Report"), sel, btn, reviewToggle);
   }
 
   // Suggest a dropdown option based on the findings in the relevant categories.
@@ -4322,6 +4509,11 @@
     list.addEventListener("click", () => setOpen(false)); // close after choosing an item
     document.addEventListener("click", (e) => { if (!menu.contains(e.target)) setOpen(false); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+    // The same two gestures for every source card's ⋯ menu. Registered once, here,
+    // rather than per card: cards are rebuilt on every status tick, and per-card
+    // document listeners would accumulate against detached nodes.
+    document.addEventListener("click", (e) => { if (!e.target.closest || !e.target.closest(".card-menu")) closeCardMenus(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCardMenus(); });
   }
 
   // Step 3: run the auto-checks, copy the prompt, paste the reply back. The copy
