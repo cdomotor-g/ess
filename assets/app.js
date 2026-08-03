@@ -41,9 +41,18 @@
   // display info live here; each site's full findings stay under its own per-site
   // key (siteKey), so a batch is just an index over storage that already exists.
   const LS_BATCH = "ess-workbench:v1:batch";
-  // Whether the "how to work through the list" guide above the dashboard is left
-  // open (default) or collapsed — it's read a few times and then just takes up room.
+  // The "how to work through the list" guide is onboarding, not chrome: it is shown
+  // expanded on a first visit and never again by default once the operator has
+  // finished a site (it stays one ? away in the collection header). This flag is
+  // what "has finished a site" means — see markOnboarded. The older key recorded
+  // whether the same guide was left open; an operator who had already collapsed it
+  // has plainly read it, so it seeds the new flag rather than being dropped.
+  const LS_ONBOARDED = "ess-workbench:v1:onboarded";
   const LS_GUIDE = "ess-workbench:v1:dash-guide";
+  // Whether the site-details panel (the full station record, map controls and the
+  // photo dropzone) is left open. Closed by default: step 2 is a check, and the
+  // header above the panel already carries everything that check needs.
+  const LS_SITE_DETAILS = "ess-workbench:v1:site-details-open";
   // Dashboard card ordering: "attention" (default) or "source" (registry order).
   // A browser preference rather than per-site state — it's a way of working, and an
   // operator who wants the stable registry order wants it on every site.
@@ -873,6 +882,7 @@
     if (!grid) return;
     grid.innerHTML = "";
     (state.siteImages || []).forEach((im) => grid.append(renderPhotoThumb(im, () => removeSiteImage(im.id), (v) => { im.caption = v; saveImages(); })));
+    renderSiteHeader(); // the header carries the count, which just changed
   }
 
   // ---------------------------------------------------------------- data load
@@ -1070,13 +1080,33 @@
     renderWorkspace();
   }
 
+  // Step 1 folds away once a site is open (see renderWorkspace). It is shown again
+  // by Change site — which clears the workspace — and by the nav rail's ① button,
+  // which does not: switching site from there should not throw away what is on
+  // screen until a different site is actually chosen.
+  function setSitePickerOpen(open) {
+    const picker = $("#site-picker");
+    if (picker) picker.hidden = !open;
+  }
+  function showSitePicker() {
+    setSitePickerOpen(true);
+    $("#site-picker").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("#station-search").focus();
+  }
+
   function renderWorkspace() {
     $("#workspace").hidden = false;
+    // The picker has done its job — the site header names the site and carries
+    // Change site, so leaving a 230 px search card above the workspace is a third
+    // screen of preamble on every visit. showSitePicker() brings it straight back.
+    setSitePickerOpen(false);
     const wr = $("#workspace-right"); if (wr) wr.hidden = false;
     const ph = $("#report-placeholder"); if (ph) ph.hidden = true;
     measureTopbar();
     resetRunChecks(); // step 3 talks about one site at a time
     syncFlowSteps();  // …and points at this site's next un-run sub-step
+    syncGuide();      // first visit gets the how-to; everyone else gets the ?
+    setSiteDetailsOpen(siteDetailsOpen()); // step 2's panel, as this browser left it
     renderSummary();
     renderSiteImages();
     renderMapsSections();
@@ -1344,6 +1374,72 @@
     });
     if (s.manual) grid.append(el("div", { class: "summary-item", style: "grid-column:1/-1" },
       el("span", { class: "k" }, "Source"), el("span", { class: "v" }, "Manual coordinate entry")));
+    renderSiteHeader();
+  }
+
+  // The resting state of step 2 — who the site is, where it is, what the locator
+  // maps look like and how many photos it has. Everything it names is editable in
+  // the panel underneath; this is the header the operator confirms at a glance.
+  // Cheap enough to rebuild whole, so anything it reports (photos, maps, the date)
+  // just calls it again.
+  function renderSiteHeader() {
+    const s = state.site;
+    if (!s || !$("#sd-name")) return;
+    $("#sd-name").textContent = s.name;
+    const ids = [s.station_num && `#${s.station_num}`, s.state, s.delivery_group,
+      (s.facility_types && s.facility_types.join(", ")) || s.primary_facility].filter(Boolean);
+    $("#sd-ids").textContent = ids.join(" · ");
+
+    const coords = `${s.lat}, ${s.lon}`;
+    const coordBtn = $("#sd-coords");
+    coordBtn.innerHTML = "";
+    coordBtn.append(coords, el("span", { class: "sd-copy", "aria-hidden": "true" }, "⧉"));
+    coordBtn.setAttribute("aria-label", `Copy the coordinates ${coords}`);
+
+    // One thumbnail per locator map that has rendered; each opens the same
+    // lightbox as the full-size figure in the panel.
+    const thumbs = $("#sd-thumbs");
+    thumbs.innerHTML = "";
+    MAP_SLOTS.forEach((slot) => {
+      const ms = mapState(slot.key);
+      const m = ms.image;
+      if (!m) return;
+      const label = `${slot.title} — ${(+m.km).toLocaleString()} km across`;
+      thumbs.append(el("button", {
+        type: "button", class: "sd-thumb", title: `${label} — open the full map`, "aria-label": label,
+        onclick: () => openLightbox(m.dataUrl, `${slot.title} — ${(+m.km).toLocaleString()} km across · ${s.name}`),
+      }, el("img", { src: m.dataUrl, alt: "" })));
+    });
+
+    $("#sd-assessed").textContent = state.date ? `Assessed ${formatDate(state.date)}` : "";
+    const n = (state.siteImages || []).length;
+    const photos = $("#sd-photo-count");
+    photos.textContent = n ? `${n} photo${n > 1 ? "s" : ""}` : "Add photos";
+    photos.classList.toggle("is-empty", !n);
+  }
+
+  // dd Mon yyyy from the ISO date the date field stores, without pulling in a
+  // locale-dependent format the report doesn't use.
+  function formatDate(iso) {
+    const d = new Date(`${iso}T00:00:00`);
+    if (isNaN(d)) return iso;
+    return `${d.getDate()} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()]} ${d.getFullYear()}`;
+  }
+
+  // Step 2's panel: the full station record, the map tuning controls, the editable
+  // fields and the photo dropzone. Closed by default, remembered per browser.
+  function siteDetailsOpen() { try { return localStorage.getItem(LS_SITE_DETAILS) === "1"; } catch (_) { return false; } }
+  function setSiteDetailsOpen(open, focusSel) {
+    const panel = $("#site-details"), btn = $("#btn-site-details");
+    if (!panel || !btn) return;
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.textContent = open ? "Details ▴" : "Details ▾";
+    try { localStorage.setItem(LS_SITE_DETAILS, open ? "1" : "0"); } catch (_) {}
+    if (open && focusSel) {
+      const target = $(focusSel);
+      if (target) { target.scrollIntoView({ block: "nearest" }); target.focus(); }
+    }
   }
 
   // ---------------------------------------------------------------- site map
@@ -1604,6 +1700,7 @@
           el("button", { type: "button", class: "btn tiny", onclick: () => generateSiteMap(slot) }, "↻ Retry"),
           el("a", { class: "btn tiny", href: gmaps, target: "_blank", rel: "noopener" }, "Open in Google Maps ↗"))));
       fig.append(frame);
+      renderSiteHeader(); // a slot with no image has no thumbnail either
       return;
     }
     // ready — scale + attribution are baked into the image itself (so they survive
@@ -1617,6 +1714,7 @@
     fig.append(frame);
     fig.append(el("figcaption", { class: "map-cap" },
       `${MAP_SLOT_BY_KEY[slot].title} — ${(+m.km).toLocaleString()} km across · centred on ${s.lat}, ${s.lon}`));
+    renderSiteHeader(); // …and the header's thumbnail of it
   }
 
   // ---------------------------------------------------------------- deep links
@@ -1929,6 +2027,41 @@
     });
   }
 
+  // ------------------------------------------------------------ onboarding guide
+  // "How to work through the list" is onboarding, not furniture. A first-time
+  // operator gets it expanded, as a welcome; once they have finished a site it
+  // never appears unasked again and lives one ? away in the collection header.
+  // Nothing about it is per site, so the record is a browser flag.
+  let onboarded = null; // read once, then kept in memory
+  function isOnboarded() {
+    if (onboarded !== null) return onboarded;
+    onboarded = false;
+    try {
+      // The older key recorded whether the always-on guide was left open. Someone
+      // who had already collapsed it has read it — don't hand it back to them.
+      onboarded = localStorage.getItem(LS_ONBOARDED) === "1" || localStorage.getItem(LS_GUIDE) === "0";
+    } catch (_) {}
+    return onboarded;
+  }
+  // Called the moment a site is finished — everything answered, or exported.
+  function markOnboarded() {
+    if (isOnboarded()) return;
+    onboarded = true;
+    try { localStorage.setItem(LS_ONBOARDED, "1"); } catch (_) {}
+  }
+  function setGuideOpen(open) {
+    const guide = $("#dash-guide"), btn = $("#btn-guide");
+    if (!guide) return;
+    guide.hidden = !open;
+    if (btn) {
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.classList.toggle("on", open);
+    }
+  }
+  // Decided when a site is opened rather than on every dashboard tick, so a guide
+  // being read is never yanked away mid-sentence by work happening around it.
+  function syncGuide() { setGuideOpen(!isOnboarded()); }
+
   // ---------------------------------------------------------------- dashboard
   function renderDashboard() {
     const wrap = $("#dashboard-groups");
@@ -2080,7 +2213,9 @@
     invasive_plants: "🌾", invasive_animals: "🐗", disease: "🦠", additional: "📎",
   };
   const RAIL_STEPS = [
-    { id: "site-picker", step: "1", label: "Choose a site" },
+    // Step 1 is folded away while a site is open, so its rail button un-folds it
+    // rather than scrolling to something that isn't there.
+    { id: "site-picker", step: "1", label: "Choose a site", act: showSitePicker },
     { id: "site-summary", step: "2", label: "Check the site details" },
     { id: "run-checks", step: "3", label: "Run the checks" },
     { id: "dashboard", step: "4", label: "Finish & include each source" },
@@ -2112,18 +2247,18 @@
     const attention = railAttentionCounts();
 
     const targets = [];
-    const railBtn = (id, label, body) => {
+    const railBtn = (id, label, body, act) => {
       const btn = el("button", {
         type: "button", class: "rail-btn", "data-target": id,
         title: label, "aria-label": label,
-        onclick: () => railScrollTo(id),
+        onclick: act || (() => railScrollTo(id)),
       }, body);
       targets.push(id);
       return btn;
     };
 
     for (const s of RAIL_STEPS)
-      rail.append(railBtn(s.id, `${s.step}. ${s.label}`, el("span", { class: "step", "aria-hidden": "true" }, s.step)));
+      rail.append(railBtn(s.id, `${s.step}. ${s.label}`, el("span", { class: "step", "aria-hidden": "true" }, s.step), s.act));
 
     if (dashboardCats.length) rail.append(el("div", { class: "rail-sep" }));
     for (const id of dashboardCats) {
@@ -3080,7 +3215,7 @@
       // Nothing to run here, so the sequence moves on rather than leaving a filled
       // button pointing at a step this site can never complete.
       setFlowStatus("#auto-status", "No live-data sources apply to this site — go straight to the prompt below.", "warn");
-      markFlowDone("auto");
+      markFlowDone("auto", "No live-data sources apply to this site");
       return;
     }
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking…'; }
@@ -3099,10 +3234,9 @@
     if (tally.found) bits.push(`${tally.found} found`);
     if (tally.none) bits.push(`${tally.none} nothing found`);
     if (tally.failed) bits.push(`${tally.failed} couldn't be reached`);
-    setFlowStatus("#auto-status",
-      `✓ ${list.length} live source${list.length > 1 ? "s" : ""} checked${bits.length ? " — " + bits.join(", ") : ""}.`,
-      tally.failed ? "warn" : "ok");
-    markFlowDone("auto");
+    const summary = `${list.length} live source${list.length > 1 ? "s" : ""} checked${bits.length ? " — " + bits.join(", ") : ""}`;
+    setFlowStatus("#auto-status", `✓ ${summary}.`, tally.failed ? "warn" : "ok");
+    markFlowDone("auto", summary);
   }
 
   // ------------------------------------------------------ step 3 (run the checks)
@@ -3122,35 +3256,101 @@
   }
 
   // Step 3 is a sequence, so exactly one of its three sub-steps carries a filled
-  // button: the next one that hasn't been run. The ones behind it demote to
-  // secondary and swap their letter for a ✓ — done, but never disabled, because
-  // re-running the auto-checks or re-copying the prompt is entirely legitimate.
-  const FLOW_STEPS = [["auto", "#btn-run-auto"], ["prompt", "#btn-copy-prompt"], ["applied", "#btn-paste-apply"]];
-  function freshFlow() { return { auto: false, prompt: false, applied: false }; }
+  // button: the next one that hasn't been run. The ones behind it swap their letter
+  // for a ✓ and fold to a one-line receipt of what they did — quiet, but never
+  // disabled, because re-running the auto-checks or re-copying the prompt is
+  // entirely legitimate, and the receipt's own button does exactly that.
+  const FLOW_STEPS = [
+    { key: "auto", btn: "#btn-run-auto", receipt: "#auto-receipt", done: "Auto-checks run" },
+    { key: "prompt", btn: "#btn-copy-prompt", receipt: "#prompt-receipt", done: "Prompt copied" },
+    { key: "applied", btn: "#btn-paste-apply", receipt: "#applied-receipt", done: "Response applied" },
+  ];
+  // `notes` carries each sub-step's receipt line ("12 sources answered") so the
+  // folded card still says what the run actually did, on this site, after a reload.
+  function freshFlow() { return { auto: false, prompt: false, applied: false, notes: {} }; }
   function normalizeFlow(saved) {
     const f = freshFlow();
-    if (saved && typeof saved === "object") FLOW_STEPS.forEach(([k]) => { f[k] = !!saved[k]; });
+    if (!saved || typeof saved !== "object") return f;
+    FLOW_STEPS.forEach(({ key }) => {
+      f[key] = !!saved[key];
+      const note = saved.notes && saved.notes[key];
+      if (typeof note === "string") f.notes[key] = note.slice(0, 140);
+    });
     return f;
   }
-  function markFlowDone(step) {
+  // A sub-step that has been run records what it did. Re-running refreshes the
+  // receipt, so `done` is not a latch that ignores the second run.
+  function markFlowDone(step, receipt) {
     if (!state.flow) state.flow = freshFlow();
-    if (state.flow[step]) return;
     state.flow[step] = true;
+    if (receipt) state.flow.notes[step] = String(receipt).slice(0, 140);
     save();
     syncFlowSteps();
   }
+
+  // Which done sub-steps the operator has explicitly re-opened. Session-only and
+  // per site (resetRunChecks clears it): a receipt folds back down on the next
+  // site rather than carrying one site's open state onto another.
+  let flowOpen = {};
+  // Whether the finished card is expanded. Same lifetime as flowOpen.
+  let runChecksOpen = false;
+  function openFlowStep(key) {
+    flowOpen[key] = true;
+    runChecksOpen = true; // a sub-step can't show through a folded card
+    syncFlowSteps();
+  }
+  function setRunChecksOpen(open) {
+    runChecksOpen = !!open;
+    syncFlowSteps();
+  }
+
   function syncFlowSteps() {
     const flow = state.flow || (state.flow = freshFlow());
-    const next = FLOW_STEPS.find(([key]) => !flow[key]);
-    FLOW_STEPS.forEach(([key, sel]) => {
+    const next = FLOW_STEPS.find(({ key }) => !flow[key]);
+    FLOW_STEPS.forEach(({ key, btn: sel, receipt, done }) => {
+      const isDone = !!flow[key];
       const step = $(`.flow-step[data-flow="${key}"]`);
-      if (step) step.classList.toggle("is-done", !!flow[key]);
+      if (step) {
+        step.classList.toggle("is-done", isDone);
+        // Done and not re-opened → the step is its receipt line and nothing else.
+        step.classList.toggle("is-folded", isDone && !flowOpen[key]);
+      }
+      const rec = $(receipt);
+      if (rec) rec.textContent = "✓ " + (flow.notes[key] || done);
       const btn = $(sel);
       if (!btn) return;
-      const lead = !!next && next[0] === key;
+      const lead = !!next && next.key === key;
       btn.classList.toggle("primary", lead);
       btn.classList.toggle("secondary", !lead);
     });
+
+    // All three passes done: the card itself stands down to one line — the step
+    // heading, what the run produced, and Re-open.
+    const complete = FLOW_STEPS.every(({ key }) => flow[key]);
+    const card = $("#run-checks");
+    const body = $("#run-checks-body");
+    const toggle = $("#btn-run-checks-toggle");
+    const rcReceipt = $("#rc-receipt");
+    const folded = complete && !runChecksOpen;
+    if (card) {
+      card.classList.toggle("is-complete", complete);
+      card.classList.toggle("is-folded", folded);
+    }
+    if (body) body.hidden = folded;
+    if (toggle) {
+      toggle.hidden = !complete;
+      toggle.textContent = folded ? "Re-open" : "Hide";
+      toggle.setAttribute("aria-expanded", folded ? "false" : "true");
+      toggle.title = folded ? "Show the three passes again" : "Fold the finished checks back to one line";
+    }
+    if (rcReceipt) {
+      // The two passes that produce a number are the ones worth carrying up here;
+      // "Prompt copied" adds nothing the other two don't already imply.
+      const bits = ["auto", "applied"].map((k) => flow.notes[k]).filter(Boolean);
+      const text = complete ? "✓ " + (bits.length ? bits.join(" · ") : "All three passes done") : "";
+      if (rcReceipt.textContent !== text) rcReceipt.textContent = text;
+      rcReceipt.hidden = !folded;
+    }
   }
 
   // Wipe step 3 back to its resting state — called whenever a different site is
@@ -3162,6 +3362,8 @@
     setFlowStatus("#paste-status", "");
     const box = $("#paste-json");
     if (box) box.value = "";
+    flowOpen = {};
+    runChecksOpen = false;
   }
 
   // Assistants wrap their JSON in code fences, or top and tail it with prose. Dig
@@ -3211,7 +3413,7 @@
       setFlowStatus("#paste-status", kind === "batch"
         ? "✓ Batch loaded — pick a site from the tray above."
         : `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}. Anything left over is in step 4 below.`, "ok");
-      markFlowDone("applied");
+      markFlowDone("applied", answered ? `${answered} source${answered > 1 ? "s" : ""} answered` : "Response applied");
       // renderWorkspace() parks at the top of the workspace; the operator's next
       // move is the list of what's left, so land them there instead.
       if (kind === "site") requestAnimationFrame(() => {
@@ -3268,6 +3470,9 @@
     const fill = $("#cs-fill");
     if (fill) fill.style.width = c.n ? `${Math.round((c.answered / c.n) * 100)}%` : "0";
     bar.classList.toggle("is-clear", c.n > 0 && !c.outstanding);
+    // Nothing left outstanding is one of the two ways a site counts as finished
+    // (the other is exporting it) — after that the guide is on demand only.
+    if (c.n > 0 && !c.outstanding) markOnboarded();
 
     // role="status" — only write when the sentence actually changed, so a screen
     // reader announces the outstanding count on the ticks that move it and stays
@@ -4381,7 +4586,10 @@
     $("#print-root").innerHTML = buildReportHtml(true);
     window.print();
   }
+  // Every export runs through here, so this is where "the operator has finished a
+  // site" is recorded once — after which the how-to guide is on demand only.
   function download(name, mime, text) {
+    markOnboarded();
     const blob = new Blob([text], { type: mime });
     const a = el("a", { href: URL.createObjectURL(blob), download: name });
     document.body.append(a); a.click(); a.remove();
@@ -5080,7 +5288,7 @@
         setFlowStatus("#prompt-status", ok
           ? "Copied — paste it into your assistant, then bring its reply back below."
           : "The browser blocked the copy. Try again, or use JSON export (under More) and work from that.", ok ? "ok" : "err");
-        if (ok) markFlowDone("prompt"); // a copy that failed hasn't advanced anything
+        if (ok) markFlowDone("prompt", "Prompt copied"); // a copy that failed hasn't advanced anything
       });
     });
     const apply = $("#btn-paste-apply");
@@ -5103,6 +5311,53 @@
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); applyPastedJson(); }
       });
     }
+
+    // A folded sub-step keeps its action one click away: Re-run and Copy again do
+    // the thing (and unfold, so the status has somewhere to land); the paste step
+    // can only be re-opened, since there is nothing to apply until something is in
+    // the box.
+    $$("[data-flow-again]").forEach((btn) => btn.addEventListener("click", () => {
+      const key = btn.dataset.flowAgain;
+      openFlowStep(key);
+      if (key === "auto") runAllAuto();
+      else if (key === "prompt") $("#btn-copy-prompt").click();
+      else if (box) box.focus();
+    }));
+    // …and the finished card as a whole folds to its receipt line, expandable.
+    const rcToggle = $("#btn-run-checks-toggle");
+    if (rcToggle) rcToggle.addEventListener("click", () => setRunChecksOpen($("#run-checks-body").hidden));
+  }
+
+  // Step 2's header controls: the Details disclosure, the copyable coordinates and
+  // the photo count (which is also the way into the dropzone), plus the paste route
+  // that has to keep working while the panel is shut.
+  function wireSiteDetails() {
+    const toggle = $("#btn-site-details");
+    if (toggle) toggle.addEventListener("click", () => setSiteDetailsOpen($("#site-details").hidden));
+    const coords = $("#sd-coords");
+    if (coords) coords.addEventListener("click", () => {
+      if (state.site) copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied");
+    });
+    const photos = $("#sd-photo-count");
+    if (photos) photos.addEventListener("click", () => setSiteDetailsOpen(true, "#site-dropzone"));
+
+    // A screenshot pasted anywhere on the page — with the details panel shut, or
+    // with nothing focused at all — is a station photo. The zone-level listeners
+    // (the site dropzone, each card's evidence zone) run first and call
+    // preventDefault, so this only ever picks up the pastes nothing else claimed,
+    // and never one aimed at a text field (the step-3 JSON box included).
+    document.addEventListener("paste", (e) => {
+      if (e.defaultPrevented || !state.site || $("#workspace").hidden) return;
+      const t = e.target;
+      // Text fields keep their own paste; a zone that takes photos has already
+      // had its go; and a paste inside one of the modals belongs to that modal.
+      if (t && t.closest && t.closest("input, textarea, select, [contenteditable=''], [contenteditable=true], .dropzone, .qm-overlay, .bb-overlay")) return;
+      const files = filesFromClipboard(e);
+      if (!files.length) return;
+      e.preventDefault();
+      addSiteImages(files);
+      toast(files.length > 1 ? `${files.length} photos added to the site` : "Photo added to the site");
+    });
   }
 
   // The Advanced options disclosure at the foot of the left column — batching,
@@ -5376,14 +5631,14 @@
     wireDropzone($("#site-dropzone"), $("#site-photo-input"), (files) => addSiteImages(files));
     // Map controls are built dynamically per slot in renderMapsSections() (each with
     // its own wired inputs), so there are no static map handlers to attach here.
+    wireSiteDetails();
     $("#btn-clear-site").addEventListener("click", () => {
       $("#workspace").hidden = true;
       const wr = $("#workspace-right"); if (wr) wr.hidden = true;
       const ph = $("#report-placeholder"); if (ph) ph.hidden = false;
       renderRailNav(); // nothing to jump to with the workspace closed
       measureStatusBar(); // the collection bar went with it — release the pin offset
-      $("#site-picker").scrollIntoView({ behavior: "smooth" });
-      $("#station-search").focus();
+      showSitePicker();
     });
     $("#toggle-manual-internal").addEventListener("change", () => { renderDashboard(); renderCollectionStatus(); });
     const autoImgCb = $("#toggle-auto-images");
@@ -5407,7 +5662,7 @@
     // Mirror the two free-text header fields into `state` so state is the single
     // source of truth (saveNow / reportObject read state, not the DOM) — this lets
     // the batch flow persist and review sites whose DOM isn't currently shown.
-    $("#fld-date").addEventListener("change", () => { state.date = $("#fld-date").value; save(); });
+    $("#fld-date").addEventListener("change", () => { state.date = $("#fld-date").value; save(); renderSiteHeader(); });
     $("#fld-maintenance").addEventListener("input", () => { state.maintenance = $("#fld-maintenance").value; save(); });
     $("#btn-print").addEventListener("click", doPrint);
     $("#btn-download-html").addEventListener("click", downloadHtml);
@@ -5423,15 +5678,16 @@
     });
     wireBatchBuilder();
 
-    // Remember whether the "how to work through the list" guide is left open or
-    // collapsed.
-    const guide = $("#dash-guide");
-    if (guide) {
-      try { if (localStorage.getItem(LS_GUIDE) === "0") guide.open = false; } catch (_) {}
-      guide.addEventListener("toggle", () => {
-        try { localStorage.setItem(LS_GUIDE, guide.open ? "1" : "0"); } catch (_) {}
-      });
-    }
+    // The how-to guide: shown once as a welcome, then only on demand from the ?
+    // in the collection header. "Got it" both closes it and settles the question
+    // of whether this operator still needs it.
+    const guideBtn = $("#btn-guide");
+    if (guideBtn) guideBtn.addEventListener("click", () => {
+      const open = $("#dash-guide") && !$("#dash-guide").hidden;
+      setGuideOpen(!open);
+    });
+    const guideDone = $("#btn-guide-done");
+    if (guideDone) guideDone.addEventListener("click", () => { markOnboarded(); setGuideOpen(false); });
 
     // pane focus (collapse one column, expand the other)
     for (const side of PANE_SIDES) {
