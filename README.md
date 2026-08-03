@@ -38,20 +38,28 @@ agent, display preferences — is folded into **Advanced options** at the foot o
 that pane, so the four steps are all you see until you go looking.
 
 1. **Choose a site.** Type a station name/number, or switch to
-   **By coordinates**.
-2. **Check the site details.** The summary auto-populates (station #, WMO, state,
-   delivery group, facility, lat/long) — this replicates the workbook's VLOOKUP
-   autofill. A **satellite locator map** is generated automatically with a pin on
-   the station; pick how many km it spans (default 100) and it re-renders. Toggle
-   **Roads & labels** to overlay road and locality/place names on the imagery
-   (on by default). Add **station photos** here — paste from the clipboard, drag
-   a file, or use the file picker. The map and photos travel with the report and
-   every export.
+   **By coordinates**. Once a site is open the picker folds away — **Change site**
+   in the site header (or ① on the nav rail) brings it back.
+2. **Check the site details.** At rest this is a header, not a control panel: the
+   station name, number, state, delivery group and facility, the coordinates
+   (click to copy), thumbnails of the two locator maps and the photo count, in
+   about 130 px. **Details** opens the rest and remembers that choice — the full
+   station record (station #, WMO, state, delivery group, facility, lat/long,
+   replicating the workbook's VLOOKUP autofill), the assessment date and
+   maintenance fields, the photo dropzone, and each map's radius presets, **Side
+   km**, **Roads & labels** and **Refresh**. The two **satellite locator maps**
+   are generated automatically with a pin on the station and are right by default;
+   click a thumbnail to open the full-screen view. Add **station photos** by
+   pasting from the clipboard **anywhere on the page** — with the panel shut, a
+   pasted screenshot still lands on the site and bumps the count — or drag a file
+   / use the picker inside the panel. The maps and photos travel with the report
+   and every export.
 3. **Run the checks** — the two automated passes, in one card so the round trip
    to an assistant never needs a scroll. It is a sequence, so only the sub-step
-   you haven't done yet carries a filled button; the ones behind it are ticked
-   off and quietened, but stay clickable — re-running the checks or re-copying
-   the prompt is always allowed:
+   you haven't done yet carries a filled button; a sub-step that has been run
+   stands down to a one-line receipt of what it did (`✓ 12 live sources checked —
+   3 found`) with its re-run one click away, and when all three are done the whole
+   card folds to a single line, **Re-open** and all:
    * **Run auto-checks** answers every source with a public data API (Atlas of
      Living Australia, Queensland WildNet) live in your browser, and reports what
      it found next to the button.
@@ -61,7 +69,10 @@ that pane, so the four steps are all you see until you go looking.
      fences and surrounding commentary and all — and fills the dashboard.
      Sources the reply leaves blank keep the result they already have, so the
      auto-checks you ran first are never undone.
-4. **Finish & include each source.** Each source card reads top to bottom in the
+4. **Finish & include each source.** On a first visit this step opens with a
+   short **How to work through the list** guide; once you have finished a site —
+   everything answered, or exported — it stops appearing and lives behind the
+   **?** in that card's header. Each source card reads top to bottom in the
    order you form an opinion: **who it is** (number, tile, name — with **ⓘ** for
    what to look for, the jurisdiction and the link), then **what came back** (the
    source's own words, labelled and tinted to the result), then **your note**,

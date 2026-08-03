@@ -181,6 +181,31 @@ Vanilla JS, no dependencies, no build. It:
   lives in the `<details id="advanced">` card at the foot of the column, closed by
   default (open state remembered), which is why a first-time operator sees only
   the four steps;
+- **stands each step down once it has served its purpose**, so the pane costs its
+  height in preamble once rather than on every visit forever. The measured
+  ~2,400 px above the first source card is now ~350 px, in four moves. ① folds
+  away as soon as a site is open (`setSitePickerOpen`) — the site header names the
+  site and carries **Change site**, and the rail's ① button un-folds the picker
+  without discarding the workspace. ② is a **document header** at rest
+  (`renderSiteHeader`, ~130 px from 1,201 px): name, ids, copyable coordinates,
+  a thumbnail per locator map (click → the same lightbox) and the photo count.
+  The full station record, the assessment date/maintenance fields, both maps'
+  radius/labels/refresh controls and the photo dropzone are all still there, one
+  **Details** disclosure away (`LS_SITE_DETAILS`, remembered per browser) —
+  they are *tuning*, and their defaults are right. Because a screenshot pasted
+  with the panel shut must still land on the site, a document-level paste handler
+  (`wireSiteDetails`) claims the image pastes that no dropzone and no text field
+  took. ③ folds pass by pass: a sub-step that has been run becomes a one-line
+  receipt of what it did — `state.flow.notes[key]`, persisted per site alongside
+  the done flags, so it survives a reload — with its re-run one click away
+  (`data-flow-again`, which unfolds *and* re-runs in the same click); once all
+  three are done the card itself is one line (~56 px from 584 px) behind
+  **Re-open**. ④'s **How to work through the list** is **onboarding, not
+  furniture**: shown expanded on a first visit, and after the operator has
+  finished one site — everything answered, or any export — it only ever appears
+  from the `?` in that card's header (`isOnboarded` / `markOnboarded`,
+  `LS_ONBOARDED`, seeded by the older "guide collapsed" key). Nothing here is
+  deleted; everything is one labelled click away;
 - lays the workspace out as **two independently scrolling columns** (collection
   left, report right) sized to the viewport below the topbar. Each column pins
   what has to stay reachable while the other content scrolls: the progress card on

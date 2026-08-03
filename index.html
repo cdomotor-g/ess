@@ -116,37 +116,60 @@
     <!-- Everything below appears once a site is loaded -->
     <div id="workspace" hidden>
 
-      <!-- STEP 2 — site summary (proforma header replica) -->
+      <!-- STEP 2 — site details. This is the *check* step, so at rest it reads as
+           a document header: who the site is, where it is, thumbnails of the two
+           locator maps and the photo count. Everything that tunes or edits it —
+           the full metadata grid, the assessment date, the map radius/labels/
+           refresh controls and the photo dropzone — lives in the Details panel,
+           which is remembered per browser. Nothing is removed, and a pasted image
+           still lands on the site while the panel is shut (see wireSitePaste). -->
       <section class="card" id="site-summary">
-        <div class="card-head">
-          <h2><span class="step">2</span> Check the site details</h2>
-          <div class="head-actions">
-            <button class="btn tertiary" id="btn-clear-site" title="Choose a different site">Change site</button>
+        <div class="sd-head">
+          <div class="sd-id">
+            <h2 class="sd-title"><span class="step">2</span> <span id="sd-name">Site details</span></h2>
+            <p class="sd-ids" id="sd-ids"><!-- filled by JS: renderSiteHeader() --></p>
+            <button type="button" class="sd-coords" id="sd-coords" title="Copy the coordinates"></button>
+            <!-- Locator-map thumbnails; click opens the same lightbox as the full
+                 maps in the panel below. Filled by renderSiteHeader(). -->
+            <div class="sd-thumbs" id="sd-thumbs"></div>
+          </div>
+          <div class="sd-side">
+            <div class="head-actions">
+              <button class="btn tertiary" id="btn-site-details" aria-expanded="false" aria-controls="site-details"
+                      title="Show the full station record, map controls and photos">Details ▾</button>
+              <button class="btn tertiary" id="btn-clear-site" title="Choose a different site">Change site</button>
+            </div>
+            <p class="sd-stat" id="sd-assessed"></p>
+            <button type="button" class="sd-stat sd-link" id="sd-photo-count"
+                    title="Station photos — opens the panel below"></button>
           </div>
         </div>
-        <p class="dash-note">Filled in from the Bureau station record and two auto-generated locator maps. Add the site photos here — they carry through to the report.</p>
-        <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
-        <!-- Two locator maps (hyper-local + greater-region), each with its own
-             controls + figure, built dynamically by assets/app.js. Both are
-             auto-populated and carried through to the report &amp; export. -->
-        <div class="site-maps" id="site-maps"><!-- filled by JS: renderMapsSections() --></div>
+        <div class="sd-panel" id="site-details" hidden>
+          <p class="dash-note">Filled in from the Bureau station record and two auto-generated locator maps. Add the site photos here — they carry through to the report.</p>
+          <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
-        <div class="summary-editable">
-          <div>
-            <label class="field-label" for="fld-date">Assessment date</label>
-            <input id="fld-date" type="date" />
+          <!-- Two locator maps (hyper-local + greater-region), each with its own
+               controls + figure, built dynamically by assets/app.js. Both are
+               auto-populated and carried through to the report &amp; export. -->
+          <div class="site-maps" id="site-maps"><!-- filled by JS: renderMapsSections() --></div>
+
+          <div class="summary-editable">
+            <div>
+              <label class="field-label" for="fld-date">Assessment date</label>
+              <input id="fld-date" type="date" />
+            </div>
+            <div class="grow">
+              <label class="field-label" for="fld-maintenance">Site maintenance <span class="opt">(not auto-populated)</span></label>
+              <input id="fld-maintenance" type="text" placeholder="e.g. quarterly; last visit 04/2026" />
+            </div>
           </div>
-          <div class="grow">
-            <label class="field-label" for="fld-maintenance">Site maintenance <span class="opt">(not auto-populated)</span></label>
-            <input id="fld-maintenance" type="text" placeholder="e.g. quarterly; last visit 04/2026" />
+          <div class="photo-section">
+            <label class="field-label">Station photos <span class="opt">(carried through to the report)</span></label>
+            <div class="dropzone" id="site-dropzone" tabindex="0" aria-label="Add station photo — paste, drag and drop, or choose a file">📷 Drag &amp; drop or paste (Ctrl/Cmd+V) an image here, or <button type="button" class="pick-btn">choose a file</button></div>
+            <input id="site-photo-input" type="file" accept="image/*" multiple hidden />
+            <div class="photo-grid" id="site-photo-grid"></div>
           </div>
-        </div>
-        <div class="photo-section">
-          <label class="field-label">Station photos <span class="opt">(carried through to the report)</span></label>
-          <div class="dropzone" id="site-dropzone" tabindex="0" aria-label="Add station photo — paste, drag and drop, or choose a file">📷 Drag &amp; drop or paste (Ctrl/Cmd+V) an image here, or <button type="button" class="pick-btn">choose a file</button></div>
-          <input id="site-photo-input" type="file" accept="image/*" multiple hidden />
-          <div class="photo-grid" id="site-photo-grid"></div>
         </div>
       </section>
 
@@ -180,64 +203,94 @@
       <section class="card" id="run-checks">
         <div class="card-head">
           <h2><span class="step">3</span> Run the checks</h2>
+          <!-- Shown once all three passes are done: the card stands down to this
+               one line, and Re-open brings the whole thing back. -->
+          <div class="head-actions">
+            <span class="rc-receipt" id="rc-receipt" role="status"></span>
+            <button class="btn tertiary" id="btn-run-checks-toggle" aria-expanded="true" aria-controls="run-checks-body" hidden>Re-open</button>
+          </div>
         </div>
-        <p class="dash-note">Two passes fill in most of the assessment before you touch it: the live sources this tool can query itself, then an AI assistant for everything else.</p>
+        <div id="run-checks-body">
+          <p class="dash-note">Two passes fill in most of the assessment before you touch it: the live sources this tool can query itself, then an AI assistant for everything else.</p>
 
-        <!-- The three sub-steps are a sequence, so only the next un-run one carries
-             a filled button: syncFlowSteps() promotes it and demotes the ones that
-             are done (which swap their letter for a ✓). -->
-        <ol class="flow">
-          <li class="flow-step" data-flow="auto">
-            <div class="flow-text">
-              <b>Auto-check the live sources</b>
-              <span>Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.</span>
-            </div>
-            <div class="flow-do">
-              <button class="btn primary" id="btn-run-auto" title="Run every source that can be checked automatically">Run auto-checks</button>
-              <span class="flow-status" id="auto-status" role="status"></span>
-            </div>
-          </li>
-
-          <li class="flow-step" data-flow="prompt">
-            <div class="flow-text">
-              <b>Copy the prompt into an AI assistant</b>
-              <span>A complete, self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research everything else.</span>
-            </div>
-            <div class="flow-do">
-              <button class="btn secondary" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant to run this assessment and hand back JSON">Copy prompt</button>
-              <span class="flow-status" id="prompt-status" role="status"></span>
-            </div>
-          </li>
-
-          <li class="flow-step" data-flow="applied">
-            <div class="flow-text">
-              <b>Paste its reply back here</b>
-              <span>The assistant answers with one JSON object. Paste the whole reply — code fences and stray commentary are fine. Anything it left blank keeps the result you already have.</span>
-            </div>
-            <div class="flow-do flow-do-block">
-              <label class="sr-only" for="paste-json">The assistant's JSON reply</label>
-              <textarea id="paste-json" rows="4" spellcheck="false" autocomplete="off"
-                        placeholder='Paste the assistant&#39;s reply here — {"schema":"ess-findings/1", "site": {…}, "collection_log": […]}'></textarea>
-              <div class="flow-row">
-                <button class="btn secondary" id="btn-paste-apply">Apply response</button>
-                <button class="btn tertiary tiny" id="btn-paste-clear">Clear</button>
-                <span class="flow-status" id="paste-status" role="status"></span>
+          <!-- The three sub-steps are a sequence, so only the next un-run one carries
+               a filled button: syncFlowSteps() promotes it and demotes the ones that
+               are done (which swap their letter for a ✓ and fold to their receipt
+               line, with the re-run action still one click away). -->
+          <ol class="flow">
+            <li class="flow-step" data-flow="auto">
+              <p class="flow-receipt">
+                <span class="flow-receipt-text" id="auto-receipt"></span>
+                <button type="button" class="btn tertiary tiny" data-flow-again="auto">Re-run</button>
+              </p>
+              <div class="flow-text">
+                <b>Auto-check the live sources</b>
+                <span>Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.</span>
               </div>
-            </div>
-          </li>
-        </ol>
+              <div class="flow-do">
+                <button class="btn primary" id="btn-run-auto" title="Run every source that can be checked automatically">Run auto-checks</button>
+                <span class="flow-status" id="auto-status" role="status"></span>
+              </div>
+            </li>
+
+            <li class="flow-step" data-flow="prompt">
+              <p class="flow-receipt">
+                <span class="flow-receipt-text" id="prompt-receipt"></span>
+                <button type="button" class="btn tertiary tiny" data-flow-again="prompt">Copy again</button>
+              </p>
+              <div class="flow-text">
+                <b>Copy the prompt into an AI assistant</b>
+                <span>A complete, self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research everything else.</span>
+              </div>
+              <div class="flow-do">
+                <button class="btn secondary" id="btn-copy-prompt" title="Copy a complete, self-contained prompt you can paste into any AI assistant to run this assessment and hand back JSON">Copy prompt</button>
+                <span class="flow-status" id="prompt-status" role="status"></span>
+              </div>
+            </li>
+
+            <li class="flow-step" data-flow="applied">
+              <p class="flow-receipt">
+                <span class="flow-receipt-text" id="applied-receipt"></span>
+                <button type="button" class="btn tertiary tiny" data-flow-again="applied">Paste another</button>
+              </p>
+              <div class="flow-text">
+                <b>Paste its reply back here</b>
+                <span>The assistant answers with one JSON object. Paste the whole reply — code fences and stray commentary are fine. Anything it left blank keeps the result you already have.</span>
+              </div>
+              <div class="flow-do flow-do-block">
+                <label class="sr-only" for="paste-json">The assistant's JSON reply</label>
+                <textarea id="paste-json" rows="4" spellcheck="false" autocomplete="off"
+                          placeholder='Paste the assistant&#39;s reply here — {"schema":"ess-findings/1", "site": {…}, "collection_log": […]}'></textarea>
+                <div class="flow-row">
+                  <button class="btn secondary" id="btn-paste-apply">Apply response</button>
+                  <button class="btn tertiary tiny" id="btn-paste-clear">Clear</button>
+                  <span class="flow-status" id="paste-status" role="status"></span>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
       </section>
 
       <!-- STEP 4 — collection dashboard -->
       <section class="card" id="dashboard">
         <div class="card-head">
           <h2><span class="step">4</span> Finish &amp; include each source</h2>
+          <div class="head-actions">
+            <button class="btn tertiary guide-btn" id="btn-guide" aria-expanded="false" aria-controls="dash-guide"
+                    title="How to work through the list">?<span class="sr-only"> How to work through the list</span></button>
+          </div>
         </div>
         <!-- The primary workflow only. Everything about batching, file imports and
              agent mode lives in Advanced options at the foot of this column.
-             Open by default; collapsing it is remembered per browser. -->
-        <details class="dash-guide" id="dash-guide" open>
-          <summary>How to work through the list</summary>
+             Onboarding, not chrome: shown expanded on a first visit as a welcome,
+             and after the operator has finished a site it only appears on demand
+             from the ? above. -->
+        <div class="dash-guide" id="dash-guide" hidden>
+          <div class="dash-guide-head">
+            <b>How to work through the list</b>
+            <button type="button" class="btn tertiary tiny" id="btn-guide-done">Got it</button>
+          </div>
           <ol class="dash-steps">
             <li><b>Start with what still needs you.</b> <b>Needs you</b> in the collection bar above shows only the
               sources nobody has answered yet (Manual / Failed / Not checked). The rail on the far left carries the
@@ -256,7 +309,7 @@
               <b>Reviewed</b> tick.</li>
           </ol>
           <p class="dash-note">Finish this list before exporting: step 5 on the right only shows what you've included here.</p>
-        </details>
+        </div>
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
 
