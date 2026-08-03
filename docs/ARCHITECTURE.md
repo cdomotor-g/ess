@@ -134,10 +134,12 @@ Vanilla JS, no dependencies, no build. It:
   un-run sub-step** carries a filled button (`syncFlowSteps`, `state.flow`,
   persisted per site in `ui.flow`); a sub-step that has been done swaps its
   letter for a ✓ and demotes, but is never disabled. The report header's one
-  primary is the export; *Check report* copies a review prompt rather than
-  exporting anything, so it sits with the report's own review controls at the
-  foot of that pane. Both overflow menus share one implementation and one set of
-  keys — ↑/↓, Home/End, and `Esc` to close and hand focus back to the trigger;
+  primary is **Export ▾** — a single menu holding every way the report leaves the
+  app, handover format (Print/PDF) first; *Check report* copies a review prompt
+  rather than exporting anything, so it sits with the report's own review
+  controls at the foot of that pane. Both overflow menus share one implementation
+  and one set of keys — ↑/↓, Home/End, and `Esc` to close and hand focus back to
+  the trigger;
 - writes buttons as **text, not pictographs**. A button carrying a text label
   carries no emoji; what remains is the monochrome mark language shared with the
   status dots and carets (`✓ ▾ ⋯ ↗ ⓘ ＋`), plus the handful of places where the
@@ -173,8 +175,9 @@ Vanilla JS, no dependencies, no build. It:
   JPEG. The chosen span (km) and the labels toggle persist per site and travel
   into the report + exports;
 - orders the **left column as the workflow itself** — ① choose a site, ② check the
-  site details, ③ run the checks, ④ finish & include each source, with ⑤ the report
-  in the right column. Step ③ (`#run-checks`) holds the whole assistant round trip
+  site details, ③ run the checks, ④ finish & include each source, with the report
+  itself in the right column (it is the deliverable, not a fifth step, so it
+  carries a document header rather than a step number). Step ③ (`#run-checks`) holds the whole assistant round trip
   in one card: **Run auto-checks**, **Copy prompt** and the box the JSON reply is
   pasted into, so it never needs a scroll. Everything belonging to a *different*
   way of working — batches, file imports, the BYOK agent, display preferences —
@@ -206,13 +209,33 @@ Vanilla JS, no dependencies, no build. It:
   from the `?` in that card's header (`isOnboarded` / `markOnboarded`,
   `LS_ONBOARDED`, seeded by the older "guide collapsed" key). Nothing here is
   deleted; everything is one labelled click away;
+- gives the report pane a **document header** of its own (`renderReportHeader`,
+  `.rdoc`, ~117 px, pinned): *Environmental Site Summary* over the site name, then
+  station number · state · delivery group · coordinates · assessment date, with
+  WMO number, facility types and site maintenance one **Details** disclosure away.
+  The right pane is the deliverable and used to carry no title block at all — an
+  operator scrolled down to *Invasive Animals* was editing an untitled document,
+  and in a batch nothing on that side said which site's report was on screen.
+  Beside the identity sit the two roll-ups, both live and both shortcuts to what
+  they count: **n of 11 sections reviewed** (the same word as the tick it counts)
+  and the **consistency-warning count**, which scrolls to the first offending
+  section. Where the sections end, `renderReportCompleteness` says what is still
+  missing — no statement, an empty comment, no included evidence, not yet reviewed
+  — each count a jump to the first section that has that gap, next to *Check
+  report*. Both surfaces read one `reportRollup()`, which groups every included
+  card by section in a single pass (it runs on each keystroke in a section note),
+  so the header and the foot can never disagree about how finished the report is.
+  This is the on-screen surface only: `reportObject()` and `buildReportHtml()` are
+  untouched, and the exports are byte-identical;
 - lays the workspace out as **two independently scrolling columns** (collection
   left, report right) sized to the viewport below the topbar. Each column pins
   what has to stay reachable while the other content scrolls: the progress card on
-  the left, the report's export toolbar on the right, and the dashboard's category
+  the left, the report's document header on the right, and the dashboard's category
   headings under the progress card. The pinned offsets are measured into CSS
-  variables by `app.js` (`--topbar-h`, `--progress-h`) rather than hard-coded,
-  because both boxes change height with content and window width. The handles on
+  variables by `app.js` (`--topbar-h`, `--status-h`, `--rdoc-h`) rather than
+  hard-coded, because those boxes change height with content and window width;
+  each column's `scroll-padding-top` is derived from them, so a jumped-to card or
+  section lands below the pinned box rather than underneath it. The handles on
   the seam collapse either column so the other takes the full width — one at a
   time, remembered in `localStorage`;
 - persists per-site state in `localStorage`, split across two keys per site: a

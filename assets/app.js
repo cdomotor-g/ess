@@ -3904,13 +3904,16 @@
   // contradicts the section's evidence, or a "matters present" statement left with
   // no supporting detail. Only applies to the none/known-scale dropdowns (their
   // first option starts "There are no…"); skips the biosecurity treatment scale.
-  function sectionWarnings(section, rstate) {
+  // `ev` (the section's included cards) is passed in by the roll-up, which groups
+  // every card by section in one pass rather than re-filtering the source list
+  // eleven times per keystroke; on its own it falls back to the per-section query.
+  function sectionWarnings(section, rstate, ev) {
     if (!section || !section.dropdown) return [];
     const opts = DATA.dropdowns[section.dropdown] || [];
     if (!opts.length || !/^there are no/i.test(opts[0])) return [];
     const idx = opts.indexOf(rstate.choice || "");
     if (idx < 0) return [];
-    const ev = includedCardsForSection(section.id);
+    ev = ev || includedCardsForSection(section.id);
     const anyFound = ev.some((x) => x.f.status === "found");
     const note = rstate.note || "";
     const noteHasMatter = /\b(critically|endangered|vulnerable|threatened|listed|weed|weeds|pest|pests|declared|heritage|ramsar|world heritage)\b/i.test(note);
@@ -3970,7 +3973,7 @@
 
       if (section.dropdown) {
         const opts = DATA.dropdowns[section.dropdown] || [];
-        const sel = el("select", { onchange: (e) => { rstate.choice = e.target.value; save(); renderReportWarnings(section, box, rstate); if (section.bioDetail) syncBioDetail(section, box); } });
+        const sel = el("select", { onchange: (e) => { rstate.choice = e.target.value; save(); refreshSection(section, box, rstate); if (section.bioDetail) syncBioDetail(section, box); } });
         opts.forEach((o) => sel.append(el("option", { value: o, selected: rstate.choice === o ? "selected" : null }, o)));
         box.append(el("div", { class: "r-field" }, sel));
       }
@@ -3991,7 +3994,7 @@
       const ref = section.ref && state.site.refs && state.site.refs[section.ref];
       if (ref) box.append(el("p", { class: "r-sub" }, "Reference: ", el("a", { href: ref, target: "_blank", rel: "noopener" }, ref)));
 
-      const ta = el("textarea", { placeholder: "Free-text comments for this section…", oninput: (e) => { rstate.note = e.target.value; renderReportWarnings(section, box, rstate); save(); } });
+      const ta = el("textarea", { placeholder: "Free-text comments for this section…", oninput: (e) => { rstate.note = e.target.value; refreshSection(section, box, rstate); save(); } });
       ta.value = rstate.note || "";
       box.append(el("div", { class: "r-field" }, ta));
 
@@ -4004,7 +4007,7 @@
           onclick: () => {
             const cur = (ta.value || "").trim();
             ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
-            rstate.note = ta.value; renderReportWarnings(section, box, rstate); save();
+            rstate.note = ta.value; refreshSection(section, box, rstate); save();
           } }, "Insert suggested detail");
         box.append(el("div", { class: "r-actions" }, btn));
       }
@@ -4068,6 +4071,116 @@
       box.append(list);
       wrap.append(box);
     }
+    renderReportHeader(); // identity + roll-ups, from the state just rendered
+  }
+
+  /* ------------------------------------------------ the report's own roll-up
+     One pass over the report's state, shared by the sticky document header and
+     the completeness summary at the foot of the pane, so the two can never
+     disagree about how finished this report is. Called on every edit to a
+     section (a tick, a statement, a keystroke in a note), so it groups the
+     included cards by section itself rather than asking includedCardsForSection
+     eleven times over. */
+  function reportRollup() {
+    const bySection = {};
+    if (state.site)
+      sourcesForSite().forEach((src) => {
+        const f = state.findings[src.id] || {};
+        // Same exclusions as includedCardsForSection: internal working items
+        // never reach the report, on screen or in an export.
+        if (src.internal || !cardIncluded(f)) return;
+        const target = targetSectionOf(src, f);
+        if (target) (bySection[target] || (bySection[target] = [])).push({ src, f });
+      });
+    const out = { total: REPORT_SECTIONS.length, reviewed: 0, warnings: [], warnCount: 0,
+      unreviewed: [], noChoice: [], noNote: [], noEvidence: [] };
+    REPORT_SECTIONS.forEach((section) => {
+      const rstate = state.report[section.id] || {};
+      const ev = bySection[section.id] || [];
+      if (rstate.reviewed) out.reviewed++; else out.unreviewed.push(section);
+      const warns = sectionWarnings(section, rstate, ev);
+      if (warns.length) { out.warnings.push({ section, count: warns.length }); out.warnCount += warns.length; }
+      if (section.dropdown && !(rstate.choice || "").trim()) out.noChoice.push(section);
+      if (!(rstate.note || "").trim()) out.noNote.push(section);
+      if (!ev.length) out.noEvidence.push(section);
+    });
+    return out;
+  }
+
+  // The document header: who this report is for, how far through it is, and what
+  // the consistency checker has to say. Text-only updates against markup that is
+  // already in the page, so every path that changes a section can call it without
+  // re-rendering the report itself.
+  function renderReportHeader() {
+    const s = state.site;
+    if (!s || !$("#rdoc-name")) return;
+    $("#rdoc-name").textContent = s.name;
+    // The same identifiers the exported report's front table carries, in the
+    // order an operator reads them out: who, where, when.
+    $("#rdoc-ids").textContent = [
+      s.station_num && `#${s.station_num}`,
+      s.state, s.delivery_group,
+      `${s.lat}, ${s.lon}`,
+      state.date ? `assessed ${formatDate(state.date)}` : null,
+    ].filter(Boolean).join(" · ");
+
+    // The rest of the station record, one disclosure away — it belongs to the
+    // document, but it isn't what tells two open sites apart.
+    const detail = $("#rdoc-detail");
+    if (detail) {
+      detail.innerHTML = "";
+      [["WMO number", s.wmo || "—"],
+        ["Facility", (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "—"],
+        ["Site maintenance", (state.maintenance || "").trim() || "—"],
+      ].forEach(([k, v]) => detail.append(
+        el("div", { class: "rdoc-detail-row" }, el("dt", {}, k), el("dd", {}, v))));
+    }
+
+    const r = reportRollup();
+    const prog = $("#rdoc-progress");
+    if (prog) prog.textContent = `${r.reviewed} of ${r.total} sections reviewed`;
+    const fill = $("#rdoc-fill");
+    if (fill) fill.style.width = `${r.total ? Math.round((r.reviewed / r.total) * 100) : 0}%`;
+
+    // A warning three sections down used to be invisible until you scrolled onto
+    // it. The count lives up here, and takes you to the first one.
+    const warn = $("#btn-rdoc-warnings");
+    if (warn) {
+      warn.hidden = !r.warnCount;
+      if (r.warnCount) {
+        const first = r.warnings[0].section;
+        warn.textContent = `⚠ ${r.warnCount} consistency warning${r.warnCount === 1 ? "" : "s"}`;
+        warn.title = `First: ${first.title} — go to it`;
+        warn.onclick = () => showReportSection(first.id);
+      }
+    }
+    renderReportCompleteness(r);
+  }
+
+  // Where the section list ends: what is still empty. The report used to simply
+  // stop, without ever saying whether it was finished.
+  function renderReportCompleteness(r) {
+    const box = $("#report-complete");
+    if (!box) return;
+    box.innerHTML = "";
+    const gaps = [
+      { list: r.noChoice, text: (n) => `${n} with no statement chosen` },
+      { list: r.noNote, text: (n) => `${n} with an empty comment` },
+      { list: r.noEvidence, text: (n) => `${n} with no evidence included` },
+      { list: r.unreviewed, text: (n) => `${n} still to review` },
+    ].filter((g) => g.list.length);
+    if (!gaps.length) {
+      box.append(el("p", { class: "r-complete-lead is-done" },
+        `All ${r.total} sections carry a statement, a comment and included evidence — and every one is reviewed.`));
+      return;
+    }
+    box.append(el("p", { class: "r-complete-lead" }, `Of ${r.total} sections:`));
+    box.append(el("ul", { class: "r-complete-list" }, gaps.map((g) =>
+      el("li", {}, el("button", {
+        type: "button", class: "r-complete-gap",
+        title: `Go to the first: ${g.list[0].title}`,
+        onclick: () => showReportSection(g.list[0].id),
+      }, g.text(g.list.length))))));
   }
 
   /* --------------------------------------------------- QLD Globe map appendix
@@ -4185,6 +4298,14 @@
       holder.append(el("p", { class: "r-warn" }, "⚠ ", msg)));
   }
 
+  // One section was edited: repaint its warnings, then the header's roll-ups —
+  // the warning count and the completeness summary both just moved. Cheap enough
+  // for a keystroke; nothing here re-renders the report.
+  function refreshSection(section, box, rstate) {
+    renderReportWarnings(section, box, rstate);
+    renderReportHeader();
+  }
+
   // Tracks the operator's "I've reviewed this report section" progress — updated in
   // place (toggling the class + label on the existing nodes) so it never triggers a
   // full renderReport(), which on an image-heavy site would be needlessly expensive.
@@ -4198,6 +4319,7 @@
       const span = label.querySelector("span");
       if (span) span.textContent = rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed";
     }
+    renderReportHeader(); // the "n of 11 reviewed" roll-up moves with every tick
   }
 
   // ---------------------------------------------------------------- persistence
@@ -5250,13 +5372,13 @@
     search.addEventListener("blur", () => setTimeout(() => { $("#bb-results").hidden = true; }, 120));
   }
 
-  // The report toolbar's "More ▾" overflow menu (Print / JSON / Copy summary) —
-  // the export variants, kept out of the way of the one primary on that surface.
-  // Same pattern, and the same keyboard behaviour, as every card's ⋯.
+  // The document header's "Export ▾" menu — every way this report leaves the app,
+  // in one control, handover format first. Same pattern, and the same keyboard
+  // behaviour, as every card's ⋯.
   function wireOverflowMenu() {
-    const menu = $("#report-more-menu");
+    const menu = $("#report-export-menu");
     if (!menu) return;
-    const toggle = $("#btn-report-more");
+    const toggle = $("#btn-report-export");
     const list = menu.querySelector(".menu-list");
     const setOpen = (open) => { list.hidden = !open; toggle.setAttribute("aria-expanded", open ? "true" : "false"); };
     toggle.addEventListener("click", (e) => {
@@ -5453,6 +5575,15 @@
     const card = $("#collection-status");
     const h = card && card.offsetParent ? card.offsetHeight : 0;
     document.documentElement.style.setProperty("--status-h", h + "px");
+  }
+
+  // Same job on the right: the document header pins to the top of the report
+  // pane, so its height is what "go to this section" has to scroll clear of —
+  // otherwise every jump lands the section heading underneath the header.
+  function measureReportHeader() {
+    const head = $("#report .rdoc");
+    const h = head && head.offsetParent ? head.offsetHeight : 0;
+    document.documentElement.style.setProperty("--rdoc-h", h + "px");
   }
 
   // Square off the pinned collection bar against the topbar once it's actually
@@ -5662,8 +5793,18 @@
     // Mirror the two free-text header fields into `state` so state is the single
     // source of truth (saveNow / reportObject read state, not the DOM) — this lets
     // the batch flow persist and review sites whose DOM isn't currently shown.
-    $("#fld-date").addEventListener("change", () => { state.date = $("#fld-date").value; save(); renderSiteHeader(); });
-    $("#fld-maintenance").addEventListener("input", () => { state.maintenance = $("#fld-maintenance").value; save(); });
+    // Both fields are named on the report's document header too, so it repaints
+    // with them — the deliverable's front page and step 2 always agree.
+    $("#fld-date").addEventListener("change", () => { state.date = $("#fld-date").value; save(); renderSiteHeader(); renderReportHeader(); });
+    $("#fld-maintenance").addEventListener("input", () => { state.maintenance = $("#fld-maintenance").value; save(); renderReportHeader(); });
+    const rdocDetail = $("#btn-rdoc-detail");
+    if (rdocDetail) rdocDetail.addEventListener("click", () => {
+      const panel = $("#rdoc-detail");
+      const open = panel.hidden;
+      panel.hidden = !open;
+      rdocDetail.setAttribute("aria-expanded", open ? "true" : "false");
+      rdocDetail.textContent = open ? "Details ▴" : "Details ▾";
+    });
     $("#btn-print").addEventListener("click", doPrint);
     $("#btn-download-html").addEventListener("click", downloadHtml);
     $("#btn-download-json").addEventListener("click", downloadJson);
@@ -5710,11 +5851,15 @@
     }
     measureTopbar();
     measureStatusBar();
-    window.addEventListener("resize", () => { measureTopbar(); measureStatusBar(); });
+    measureReportHeader();
+    window.addEventListener("resize", () => { measureTopbar(); measureStatusBar(); measureReportHeader(); });
     // Keep the pinned collection bar's metrics honest: its height drives where the
     // group headers pin, and its position drives the pinned styling.
     const statusBar = $("#collection-status");
     if (statusBar && "ResizeObserver" in window) new ResizeObserver(measureStatusBar).observe(statusBar);
+    // …and the report's document header, which drives where a jumped-to section lands.
+    const docHead = $("#report .rdoc");
+    if (docHead && "ResizeObserver" in window) new ResizeObserver(measureReportHeader).observe(docHead);
     const colLeft = $("#col-left");
     if (colLeft) {
       let queued = false;
