@@ -2075,6 +2075,23 @@
     });
   }
 
+  // Paint a card's "what came back" panel: an explicit label above the source's
+  // own words, tinted to the result they produced. This is the highest-value text
+  // on the card — it is what the machine actually found — and the label plus the
+  // tint are what stop it being read as the operator's own note or as the static
+  // "what to look for" caption. Used by the card renderer and by the live checks
+  // while they are still in flight (label: "Checking").
+  function paintResult(node, html, opts) {
+    if (!node) return;
+    const o = opts || {};
+    const tint = o.err ? " err"
+      : (o.status && o.status !== STATUS.UNSET) ? ` status-${o.status}` : "";
+    node.className = `src-result show${tint}`;
+    node.replaceChildren(
+      el("span", { class: "src-result-label" }, o.label || "What came back"),
+      el("div", { class: "src-result-body", html: html || "" }));
+  }
+
   function renderSourceCard(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
     if (!f.images) f.images = [];
@@ -2175,6 +2192,9 @@
       photoBlock = el("div", { class: "src-photos" }, zone, wikiRow, input, grid);
     }
 
+    const resultPanel = el("div", { class: "src-result", id: `res-${src.id}` });
+    if (f.result) paintResult(resultPanel, f.result.html, { status: f.status, err: f.result.err });
+
     // card.append() is the native DOM method (not the el() helper), which stringifies
     // a null argument to the literal text "null" instead of skipping it — filter first.
     card.append(...[
@@ -2193,7 +2213,7 @@
         note),
       photoBlock,
       renderIncludeRow(src),
-      el("div", { class: "src-result" + (f.result ? " show" : ""), id: `res-${src.id}`, html: f.result ? f.result.html : "" }),
+      resultPanel,
     ].filter(Boolean));
     return card;
   }
@@ -2346,7 +2366,7 @@
     const s = state.site;
     const radius = (src.api && src.api.radius_km) || 10;
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`; }
-    if (res) { res.className = "src-result show"; res.innerHTML = "Querying Atlas of Living Australia…"; }
+    paintResult(res, "Querying Atlas of Living Australia…", { label: "Checking" });
     try {
       const r = await alaQuery(s.lat, s.lon, radius, src.api && src.api.endpoint);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
@@ -2358,7 +2378,6 @@
       f.status = STATUS.FAILED;
       f.result = { html: `Could not reach the Atlas of Living Australia API (${esc(err.message)}). This is usually a network or browser CORS restriction. Use the <b>Open ↗</b> link to check manually, then set the result.`, err: true, ts: Date.now() };
       save(); refreshCard(src.id);
-      const r = $(`#res-${src.id}`); if (r) r.classList.add("err");
       renderProgress(); renderReport();
     }
   }
@@ -2415,7 +2434,7 @@
     const s = state.site;
     const radius = (src.api && src.api.radius_km) || 10;
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Checking…`; }
-    if (res) { res.className = "src-result show"; res.innerHTML = "Querying Queensland WildNet…"; }
+    paintResult(res, "Querying Queensland WildNet…", { label: "Checking" });
     try {
       const r = await wildnetQuery(s.lat, s.lon, radius, src.api);
       const f = state.findings[src.id] || (state.findings[src.id] = {});
@@ -2427,7 +2446,6 @@
       f.status = STATUS.FAILED;
       f.result = { html: `Could not reach the Queensland WildNet API (${esc(err.message)}). This is usually a network or browser CORS restriction. Use the <b>Open ↗</b> link to run the search in the WildNet app, then set the result.`, err: true, ts: Date.now() };
       save(); refreshCard(src.id);
-      const rr = $(`#res-${src.id}`); if (rr) rr.classList.add("err");
       renderProgress(); renderReport();
     }
   }
