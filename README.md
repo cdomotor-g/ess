@@ -139,16 +139,26 @@ that pane, so the four steps are all you see until you go looking.
      service's own published symbology, so the map can still be read once the
      report is all anyone has. (The ordinary **Open the source ↗** link still opens Queensland
      Globe itself if you need its own tools or legend.)
-5. The **ESS report** section fills with the standardized proforma wording,
-   your collection evidence, and any attached photos. Each section has an
+5. The **ESS report** fills with the standardized proforma wording,
+   your collection evidence, and any attached photos. It opens with a **document
+   header** pinned to the top of the pane — the site, its station number, state,
+   delivery group, coordinates and assessment date (WMO number, facility types
+   and maintenance under **Details**), so the report always says which site it is
+   for, however far down you have scrolled and whichever site a batch has just
+   switched to. Beside that: **n of 11 sections reviewed** and a
+   **consistency-warning count** that takes you to the first warning.
+   Each section has an
    **Insert suggested detail** button that drafts a paragraph from that
    section's evidence plus standard wording (`data/statements.json`), and the tool
    **flags contradictions** — a statement that says "no known…" while the evidence
    came back *Found*, or a "matters present" statement with no supporting detail.
-   Export to **Print/PDF**, **HTML**, or **JSON** (under **More ▾**) — photos and
-   review flags travel with the export (embedded, so the HTML/JSON stay
-   self-contained). Each section carries its own **Reviewed** tick, and at the
-   foot of the report **Check report** copies a
+   One **Export ▾** menu takes the report out of the app — **Print/PDF** (the
+   handover format) first, then **HTML file**, **JSON export**, **Copy summary**;
+   photos and review flags travel with the export (embedded, so the HTML/JSON stay
+   self-contained). Each section carries its own **Reviewed** tick, and where the
+   sections end the report says what is still missing — sections with no statement,
+   an empty comment, no included evidence or no review, each a shortcut to the
+   first one. Next to it, **Check report** copies a
    precise fact-and-consistency-check prompt for that report — paste it into any
    assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) for an independent
    review with a fixed, terse output structure (verdict · issues table · fact-check
@@ -170,7 +180,7 @@ itself, so what's left is on screen without a banner having to say so.
 
 **The two panes.** Collection is on the left, the report on the right, each
 scrolling on its own. The collection bar stays pinned as you scroll — the report's
-export buttons do the same on the right. The two small handles on the seam between the
+document header does the same on the right. The two small handles on the seam between the
 panes **collapse one side and give the other the full width** (one at a time);
 click the highlighted handle to bring the pane back. The choice is remembered.
 The narrow **jump rail** on the far left carries the four steps plus one button

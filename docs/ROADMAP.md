@@ -56,8 +56,10 @@ slice. Each backlog item names the files to touch and how to verify.
   rigid (verdict → issues table → fact-check table → gaps, with word caps) so
   verbose/inconsistent assistants (e.g. 365 Copilot) return a usable review. It
   folds in the tool's own consistency warnings and takes a `reportObject()`-shaped
-  object (`buildReviewPrompt`), so the batch flow reuses it per site. The toolbar's
-  less-used exports (Print / JSON / Copy summary) moved under a **More ▾** menu.
+  object (`buildReviewPrompt`), so the batch flow reuses it per site. It now sits
+  at the foot of the report, beside the completeness summary, while every export
+  (Print/PDF · HTML · JSON · Copy summary) lives in the document header's single
+  **Export ▾** menu.
 - **Agent skill** — `ess-collect` with a deterministic `resolve.py` helper
   (incl. `--template` → the `ess-findings/1` skeleton) and a full playbook,
   emitting the same status taxonomy + JSON.

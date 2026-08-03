@@ -308,7 +308,7 @@
               <b>Signed off</b> segment above counts them. Report sections carry their own separate
               <b>Reviewed</b> tick.</li>
           </ol>
-          <p class="dash-note">Finish this list before exporting: step 5 on the right only shows what you've included here.</p>
+          <p class="dash-note">Finish this list before exporting: the report on the right only shows what you've included here.</p>
         </div>
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
@@ -433,35 +433,56 @@
         </div>
       </div>
 
-      <!-- STEP 5 — report -->
+      <!-- THE REPORT — the deliverable, not a step. -->
       <div id="workspace-right" hidden>
         <section class="card" id="report">
-          <div class="card-head">
-            <h2><span class="step">5</span> ESS report</h2>
-            <!-- One primary on this surface: the export. Everything else here is
-                 an export variant, so it goes in the overflow. "Check report"
-                 used to sit between the two — it copies a review prompt rather
-                 than exporting anything, and now lives with the report's own
-                 review controls at the foot of the pane. -->
-            <div class="head-actions">
-              <button class="btn primary" id="btn-download-html" title="Export the printable HTML report.">Export</button>
-              <div class="menu" id="report-more-menu">
-                <button class="btn tertiary menu-toggle" id="btn-report-more" aria-haspopup="true" aria-expanded="false" title="More export options">More ▾</button>
-                <div class="menu-list" role="menu" hidden>
-                  <button class="menu-item" id="btn-print" role="menuitem">Print page</button>
-                  <button class="menu-item" id="btn-download-json" role="menuitem">JSON export</button>
-                  <button class="menu-item" id="btn-copy-summary" role="menuitem">Copy summary</button>
+          <!-- The document header: the front page of the thing being built. It
+               pins to the top of the pane, so an operator four thousand pixels
+               down the report — or switching sites in a batch, or with the
+               collection pane collapsed — can always see WHICH site's report is
+               on screen, how much of it is done, and whether the consistency
+               checker has anything to say. Everything it names is filled by
+               renderReportHeader(). -->
+          <div class="card-head rdoc">
+            <div class="rdoc-id">
+              <p class="rdoc-kicker">Environmental Site Summary</p>
+              <h2 class="rdoc-name" id="rdoc-name">ESS report</h2>
+              <p class="rdoc-ids" id="rdoc-ids"></p>
+            </div>
+            <div class="rdoc-foot">
+              <!-- The roll-ups: nothing in this report has to be scrolled to be
+                   discovered. -->
+              <div class="rdoc-rollup">
+                <p class="rdoc-progress" id="rdoc-progress" role="status">—</p>
+                <span class="cs-track rdoc-track" aria-hidden="true"><span class="cs-fill" id="rdoc-fill"></span></span>
+                <button class="rdoc-warn-btn" id="btn-rdoc-warnings" type="button" hidden></button>
+              </div>
+              <div class="head-actions">
+                <button class="btn tertiary tiny" id="btn-rdoc-detail" type="button" aria-expanded="false" aria-controls="rdoc-detail"
+                        title="The rest of the station record — WMO number, facility types and site maintenance">Details ▾</button>
+                <!-- ONE export control: every way this report leaves the app, in
+                     one menu, with the handover format (Print/PDF) first. -->
+                <div class="menu" id="report-export-menu">
+                  <button class="btn primary menu-toggle" id="btn-report-export" type="button" aria-haspopup="true" aria-expanded="false" title="Take this report out of the app">Export ▾</button>
+                  <div class="menu-list" role="menu" hidden>
+                    <button class="menu-item" id="btn-print" role="menuitem">Print / PDF</button>
+                    <button class="menu-item" id="btn-download-html" role="menuitem">HTML file</button>
+                    <button class="menu-item" id="btn-download-json" role="menuitem">JSON export</button>
+                    <button class="menu-item" id="btn-copy-summary" role="menuitem">Copy summary</button>
+                  </div>
                 </div>
               </div>
             </div>
+            <dl class="rdoc-detail" id="rdoc-detail" hidden><!-- filled by JS --></dl>
           </div>
           <p class="dash-note">Drop-downs use the exact standardized wording from the current ESS proforma. The auto-suggested option follows your collection results; change it if you disagree.</p>
           <div id="report-sections"><!-- filled by JS --></div>
-          <!-- The last of the report's review controls: each section carries its
-               own Reviewed tick, and this hands the finished set to an assistant
-               for an independent check. -->
+          <!-- Where the report ends: what is still empty, and the last of its
+               review controls — each section carries its own Reviewed tick, and
+               this hands the finished set to an assistant for an independent
+               check. -->
           <div class="r-review">
-            <p class="r-review-lead">Each section above carries its own <b>Reviewed</b> tick. With those done, have an assistant check the finished report against its own evidence.</p>
+            <div class="r-complete" id="report-complete"><!-- filled by JS --></div>
             <button class="btn secondary" id="btn-check-report" title="Copy a precise fact-&amp;-consistency-check prompt for this finished report — paste it into any assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) to have it independently reviewed">Check report</button>
           </div>
         </section>

@@ -245,12 +245,13 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: #fff; font-size: var(--fs-body); font-weight: 700; }
 .head-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 
-/* Floating report toolbar. On the two-column desktop layout the right column
-   scrolls on its own, so pin the ESS-report card head — which holds the four
-   export buttons (Generate Report / Print / JSON / Copy summary) — to the top of
-   that column. They stay reachable no matter how far down the report the operator
-   has scrolled. Scoped to the wide layout; on the stacked mobile layout the page
-   scrolls normally and the topbar is the only sticky element. */
+/* The report's document header. On the two-column desktop layout the right column
+   scrolls on its own, so this pins to the top of that column: the site it is for,
+   how much of it is reviewed, the consistency count and the one export control
+   stay on screen no matter how far down the report the operator has scrolled — or
+   which site a batch has just switched to. Scoped to the wide layout; on the
+   stacked mobile layout the page scrolls normally and the topbar is the only
+   sticky element. */
 @media (min-width: 981px) {
   #report .card-head {
     position: sticky;
@@ -264,6 +265,13 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
     border-radius: var(--radius) var(--radius) 0 0;
     border-bottom: 1px solid var(--line);
   }
+  /* Pulls itself up by the column's top padding (see --col-pad-top) so it pins
+     flush against the topbar, rather than leaving a strip of report sliding past
+     above it. */
+  #report .card-head.rdoc { top: calc(-1 * var(--col-pad-top, 0px)); }
+  /* …so a jumped-to section lands below the header rather than under it. --rdoc-h
+     is measured + published by app.js, the same way --status-h is on the left. */
+  #col-right { scroll-padding-top: calc(var(--rdoc-h, 0px) + var(--sp-1)); }
 }
 
 /* ---------- forms ---------- */
@@ -1257,6 +1265,46 @@ a.photo-credit:hover { text-decoration: underline; }
 .map-msg .map-sub { font-size: var(--fs-meta); opacity: .8; }
 .map-msg-actions { display: flex; gap: var(--sp-2); justify-content: center; flex-wrap: wrap; margin-top: var(--sp-1); }
 
+/* ---------- report — the document header ----------
+   The right pane is the deliverable, and it used to carry no title block at all:
+   an operator scrolled down to "Invasive Animals" was editing an untitled
+   document, and in a batch nothing on this side said which site's report was on
+   screen. This is its front page — identity, then how finished it is — in ~110 px
+   that never scroll away. It states things; the only controls it carries are the
+   ones that act on the document as a whole (Export, Details) and the two
+   roll-ups, which are shortcuts to whatever they are counting. */
+.rdoc-kicker { margin: 0; font-size: var(--fs-micro); font-weight: 700; letter-spacing: .06em;
+  line-height: 1.35; text-transform: uppercase; color: var(--ink-soft); }
+.rdoc-name { font-size: var(--fs-display); line-height: 1.25; margin: var(--sp-0) 0 0; overflow-wrap: anywhere; }
+.rdoc-ids { margin: var(--sp-0) 0 0; font-size: var(--fs-meta); line-height: 1.45; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums; }
+/* .card-head is a flex row; this one is a stacked document header, so the two
+   halves below sit on their own line under the title block. */
+#report .card-head.rdoc { display: block; }
+.rdoc-foot { display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-1); }
+/* Permanent chrome pays for its height: the header's controls run one step tighter
+   than the same buttons elsewhere, which is what keeps the whole block under the
+   ~120 px this pane can afford to give up forever. */
+.rdoc-foot .btn { padding: var(--sp-1) var(--sp-3); }
+.rdoc-rollup { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex: 1 1 220px; }
+.rdoc-progress { margin: 0; font-size: var(--fs-meta); font-weight: 650;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Same two-segment track as the collection bar's — one journey idiom, both panes. */
+.rdoc-track { flex: 0 1 80px; }
+/* A warning three sections down was invisible until you scrolled onto it. */
+.rdoc-warn-btn { font: inherit; font-size: var(--fs-micro); font-weight: 700; white-space: nowrap;
+  color: var(--failed); background: var(--failed-bg); border: 1px solid transparent; border-radius: 999px;
+  padding: var(--sp-0) var(--sp-2); cursor: pointer; }
+.rdoc-warn-btn:hover { border-color: var(--failed); }
+.rdoc-warn-btn[hidden] { display: none; }
+.rdoc-detail { margin: var(--sp-2) 0 0; padding-top: var(--sp-2); border-top: 1px dashed var(--line);
+  display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-meta); }
+.rdoc-detail[hidden] { display: none; }
+.rdoc-detail-row { display: flex; gap: var(--sp-1); min-width: 0; }
+.rdoc-detail dt { color: var(--ink-soft); }
+.rdoc-detail dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
 /* ---------- report ---------- */
 .rsection { border: 1px solid var(--line); border-radius: 10px; padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
 /* Reviewed tints the section so the operator can track progress through the report
@@ -1275,10 +1323,22 @@ a.photo-credit:hover { text-decoration: underline; }
 .btn-mini:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
 /* The report's own review controls are the per-section "Mark section reviewed"
    ticks; "Check report" is the last of them — it copies a review prompt, so it
-   belongs at the end of the reviewing, not in the export cluster at the top. */
+   belongs at the end of the reviewing, not in the export cluster at the top.
+   Beside it, what the report is still missing: the section list used to simply
+   stop, without ever saying whether it was finished. */
 .r-review { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
   flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); border: 1px dashed var(--line); border-radius: 10px; }
-.r-review-lead { margin: 0; flex: 1 1 220px; font-size: var(--fs-meta); line-height: 1.5; color: var(--ink-soft); }
+.r-complete { flex: 1 1 260px; min-width: 0; }
+.r-complete-lead { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--ink-soft); }
+.r-complete-lead.is-done { color: var(--reviewed); font-weight: 650; }
+.r-complete-list { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2);
+  list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
+/* Each gap is a shortcut to the first section that has it — a count you cannot
+   act on is just another number to scroll past. */
+.r-complete-gap { font: inherit; font-size: var(--fs-micro); font-weight: 650; cursor: pointer;
+  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: var(--sp-0) var(--sp-2); }
+.r-complete-gap:hover { border-color: var(--brand); color: var(--brand); }
 .rsection .r-warns:empty { display: none; }
 .rsection .r-warn { font-size: var(--fs-meta); font-weight: 600; color: var(--failed); background: var(--failed-bg); border-radius: 7px; padding: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); }
 .report-map { margin: 0; }
@@ -1397,6 +1457,9 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
   .head-actions, .r-review, .foot, #app > .banner { display: none !important; }
   /* A pane collapsed on screen must not go missing from the printout. */
   .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right { display: block !important; }
+  /* The document header is a title block on paper, not a floating toolbar —
+     a sticky element in a print context repeats down the page in some browsers. */
+  #report .card-head { position: static !important; }
   body { background: #fff; color: #000; }
   main { max-width: none; padding: 0; }
   #print-root { display: block; }
