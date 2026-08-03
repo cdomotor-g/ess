@@ -68,6 +68,13 @@ that pane, so the four steps are all you see until you go looking.
    copy lat/long, web search, jump to the report, clear your note — are on the
    card's **⋯** menu. The **Show only** row filters the list by result, or down to
    **⚠ Needs attention** (Manual / Failed / Not checked) and **☐ Needs review**.
+   The list keeps itself short as you work: a card you've ticked **✓ Reviewed**
+   settles to a single line, one that's answered but not yet reviewed shows a
+   short summary, and only the sources that still need you stay at full size and
+   sort to the top of their category (**Sort: source order** puts the registry
+   order back). Click any collapsed card to open it again. Each category heading
+   says what is inside it — `8 sources · 3 found · 4 need you` — and a category
+   with nothing outstanding folds away to that one line.
    Sources for weeds, pests, disease, threatened species and biosecurity take
    evidence photos — press **＋ Add photo** for a drop / paste / pick zone (paste
    with Ctrl+V straight onto the card) and attach evidence when a check comes back

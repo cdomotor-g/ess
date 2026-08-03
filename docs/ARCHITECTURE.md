@@ -85,6 +85,20 @@ Vanilla JS, no dependencies, no build. It:
   note) are in a per-card `⋯` menu. Everything behind `ⓘ`, `⋯` and `＋ Add photo`
   is **built on first open**, so 23 cards cost 23 buttons rather than 23 copies
   of prose and tooling nobody has asked for yet;
+- renders each card at **one of three densities, derived from its state** and
+  never from what has been clicked (`cardDensity`): a **reviewed** card is one
+  ~36 px line (number, result glyph, name, target section, tick), an **answered
+  but unreviewed** card is a ~120 px summary (identity, two lines of the finding
+  or the operator's note, the result, and the review tick), and anything a human
+  still owns — *Manual*, *Search failed*, *Not checked* — renders in full.
+  Clicking a collapsed card opens it in place; that expansion is transient, so
+  the next full render returns the pane to a picture of state rather than of
+  click history. Within a category, cards sort **attention first**
+  (unset → failed → manual → found → none → reviewed) unless the operator
+  switches the dashboard's `Sort:` control to source order (remembered per
+  browser). Each category header carries its own roll-up — `n sources · n found
+  · n need you` — and a category with nothing outstanding folds to that header;
+  the per-category open/closed choice is remembered per site;
 - calls the one live API (Atlas of Living Australia) directly from the browser;
 - tracks a status per source and assembles a report using the standardized
   wording from `dropdowns.json`;

@@ -44,6 +44,10 @@
   // Whether the "how to work through the list" guide above the dashboard is left
   // open (default) or collapsed — it's read a few times and then just takes up room.
   const LS_GUIDE = "ess-workbench:v1:dash-guide";
+  // Dashboard card ordering: "attention" (default) or "source" (registry order).
+  // A browser preference rather than per-site state — it's a way of working, and an
+  // operator who wants the stable registry order wants it on every site.
+  const LS_CARD_SORT = "ess-workbench:v1:card-sort";
   // Whether the Advanced options card at the foot of the left column is left open.
   // Closed by default: the four numbered steps are the whole primary workflow, and
   // everything in there belongs to a different way of working.
@@ -211,11 +215,56 @@
     filterStatus: null,     // dashboard: show only sources with this one status (found/none/failed/manual/unset)
     filterUnreviewed: false, // dashboard: show only sources not yet ticked "Reviewed"
     showAttention: false,   // show the attention banner (after import / agent run)
+    // Dashboard ordering: "attention" (default — what still needs a human first) or
+    // "source" (the registry order). A browser-wide preference, not per site.
+    cardSort: "attention",
+    // Per-category collapse, but ONLY where the operator has said so explicitly:
+    // catId -> true (open) / false (collapsed). Categories they haven't touched
+    // follow the automatic rule in groupIsOpen(). Persisted per site.
+    groupOpen: {},
     batch: null,            // { generated, keys: [siteKey,…], active: siteKey|null } when a batch is loaded
   };
   const mapGenTokens = {}; // per-slot guard against a stale async render landing after a newer request
   const ATTENTION = ["manual", "failed", "unset"]; // statuses a human still owns
   const cardNumbers = {}; // sourceId -> position in the currently-rendered (filtered) dashboard list
+
+  // ------------------------------------------------------- density + ordering
+  // A card is rendered at one of three densities, derived from state alone —
+  // never from what has been clicked open:
+  //
+  //   line     ~36 px  reviewed: the operator has ticked it off. Settled.
+  //   summary  ~120 px answered (Found / Nothing) but not yet reviewed.
+  //   full     ~260 px Manual / Failed / Not checked — a human still owns it.
+  //
+  // Twelve of a typical site's 23 cards are settled work; at full weight they were
+  // ~5,000 px of "already done" between the operator and the next thing that isn't.
+  function cardDensity(f) {
+    const status = (f && f.status) || STATUS.UNSET;
+    if (ATTENTION.includes(status)) return "full";
+    return f && f.reviewed ? "line" : "summary";
+  }
+  // Default ordering within a category: the operator's next action first, settled
+  // work last. Ties fall back to the registry's own priority, so the order inside a
+  // rank is still the one data/sources.json asks for.
+  const ATTENTION_RANK = { unset: 0, failed: 1, manual: 2, found: 3, none: 4 };
+  function attentionRank(f) {
+    if (f && f.reviewed) return 9; // reviewed sinks below every unreviewed result
+    const r = ATTENTION_RANK[(f && f.status) || STATUS.UNSET];
+    return r === undefined ? 5 : r;
+  }
+  function sortCards(list) {
+    const byPriority = (a, b) => (a.priority || 99) - (b.priority || 99);
+    if (state.cardSort !== "attention") return list.sort(byPriority);
+    return list.sort((a, b) =>
+      (attentionRank(state.findings[a.id]) - attentionRank(state.findings[b.id])) || byPriority(a, b));
+  }
+  // Any dashboard filter narrows what's on screen to a deliberate subset, so the
+  // automatic "this category is finished, fold it away" rule steps aside while one
+  // is on — otherwise filtering to Found would fold every group the filter just
+  // built.
+  function anyFilterOn() {
+    return !!(state.filterStatus || state.filterAttention || state.filterUnreviewed);
+  }
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -973,6 +1022,7 @@
     state.filterStatus = null;
     state.filterUnreviewed = false;
     state.showAttention = false;
+    state.groupOpen = {}; // restore() brings back this site's own collapse choices
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
   }
@@ -1094,6 +1144,7 @@
     state.filterAttention = false;
     state.filterStatus = null;
     state.filterUnreviewed = false;
+    state.groupOpen = {}; // an incoming run answers the categories itself; fold by state
     state.showAttention = true; // surface what the agent left for the human
   }
 
@@ -1834,6 +1885,9 @@
   function renderDashboard() {
     const wrap = $("#dashboard-groups");
     wrap.innerHTML = "";
+    // A full dashboard render is the "next render" that ends every transient card
+    // expansion: the resting view always reflects state, never accumulated clicks.
+    CARD_OPEN.expanded.clear();
     const cats = DATA.sourcesMeta.categories;
     let list = sourcesForSite();
     if (state.filterStatus)
@@ -1846,16 +1900,15 @@
     dashboardCats.length = 0; // rebuilt below, in render order, for the nav rail
     let n = 0;
     for (const cat of cats) {
-      const inCat = list.filter((s) => s.category === cat.id).sort((a, b) => (a.priority || 99) - (b.priority || 99));
+      const inCat = sortCards(list.filter((s) => s.category === cat.id));
       if (!inCat.length) continue;
       // id + --cat are what the nav rail jumps to and colours itself with.
       const group = el("div", { class: "group", "data-cat": cat.id, id: `group-${cat.id}` });
       group.style.setProperty("--cat", `var(--cat-${cat.id})`);
-      group.append(el("div", { class: "group-head" },
-        el("h3", {}, cat.label),
-        el("span", { class: "g-count" }, `${inCat.length}`),
-        el("span", { class: "g-line" })));
-      inCat.forEach((src) => { cardNumbers[src.id] = ++n; group.append(renderSourceCard(src)); });
+      const body = el("div", { class: "group-body", id: `group-body-${cat.id}` });
+      inCat.forEach((src) => { cardNumbers[src.id] = ++n; body.append(renderSourceCard(src)); });
+      group.append(renderGroupHead(cat, inCat, body.id), body);
+      setGroupOpen(group, groupIsOpen(cat.id, groupRollup(inCat)), false);
       wrap.append(group);
       dashboardCats.push(cat.id);
     }
@@ -1866,7 +1919,114 @@
         state.filterUnreviewed ? "✓ Everything has been reviewed." : "No sources for this site."));
     syncStatusFilterBar();
     syncUnreviewedFilterButton();
+    syncSortToggle();
     renderRailNav(); // tracks the groups that survived the filters above
+  }
+
+  // ------------------------------------------------------------- group headers
+  // A collapsed category still has to say what is inside it, so the header carries
+  // its own roll-up: how many sources, how many found, how many still need a human.
+  // Without it, a finished category is indistinguishable from an untouched one
+  // until you have read eight cards.
+  function groupRollup(inCat) {
+    let found = 0, need = 0;
+    for (const src of inCat) {
+      const st = (state.findings[src.id] || {}).status || STATUS.UNSET;
+      if (st === STATUS.FOUND) found++;
+      if (ATTENTION.includes(st)) need++;
+    }
+    return { n: inCat.length, found, need };
+  }
+
+  function rollupText(roll) {
+    const bits = [`${roll.n} source${roll.n === 1 ? "" : "s"}`];
+    if (roll.found) bits.push(`${roll.found} found`);
+    bits.push(roll.need ? `${roll.need} need you` : "nothing outstanding");
+    return bits.join(" · ");
+  }
+
+  function renderGroupHead(cat, inCat, bodyId) {
+    const roll = groupRollup(inCat);
+    const head = el("div", { class: "group-head" },
+      el("h3", {}, cat.label),
+      el("span", { class: "g-roll" + (roll.need ? "" : " is-clear") },
+        roll.need ? null : el("span", { class: "g-tick", "aria-hidden": "true" }, "✓"),
+        rollupText(roll)),
+      el("span", { class: "g-line" }));
+    // The toggle is the header's only control, and it names what it does for a
+    // screen reader — "collapse ▾" on its own says nothing about which category.
+    const toggle = el("button", {
+      type: "button", class: "g-toggle", "aria-controls": bodyId,
+      onclick: (e) => toggleGroup(cat.id, e.currentTarget),
+    }, el("span", { class: "g-caret", "aria-hidden": "true" }, "▾"));
+    toggle.dataset.cat = cat.id;
+    head.append(toggle);
+    return head;
+  }
+
+  // Explicit choice wins; otherwise a category with nothing outstanding folds away
+  // ("you are done here"), and one that still needs a human stays open.
+  function groupIsOpen(catId, roll) {
+    if (anyFilterOn()) return true;
+    const explicit = state.groupOpen[catId];
+    if (typeof explicit === "boolean") return explicit;
+    return roll.need > 0;
+  }
+
+  function setGroupOpen(group, open, focusIn) {
+    const body = group.querySelector(".group-body");
+    const toggle = group.querySelector(".g-toggle");
+    const label = group.querySelector(".group-head h3");
+    group.classList.toggle("is-collapsed", !open);
+    if (body) body.hidden = !open;
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      const name = label ? label.textContent : "this category";
+      toggle.setAttribute("aria-label", `${open ? "Collapse" : "Expand"} ${name}`);
+      toggle.title = toggle.getAttribute("aria-label");
+    }
+    // Cards inside a hidden body measure as zero, so their notes and finding clamps
+    // can only be sized once the body is on screen again.
+    if (open) queueCardMetrics();
+    if (open && focusIn && body) {
+      const first = body.querySelector(".src-line, .src-expand, button, input, select, textarea, a");
+      if (first) first.focus();
+    }
+  }
+
+  function toggleGroup(catId, toggle) {
+    const group = document.getElementById(`group-${catId}`);
+    if (!group) return;
+    const open = group.classList.contains("is-collapsed");
+    state.groupOpen[catId] = open; // an explicit choice from here on, remembered per site
+    save();
+    setGroupOpen(group, open, false);
+    if (toggle && toggle.isConnected) toggle.focus();
+  }
+
+  // Keeps the roll-ups honest on the paths that change a result without rebuilding
+  // the dashboard (a status tick, an auto-check, an agent run). Deliberately does
+  // NOT re-collapse a category the operator has just finished — pulling the cards
+  // out from under them mid-click is worse than one stale-looking group, and the
+  // next full render folds it away.
+  function refreshGroupHeads() {
+    const wrap = $("#dashboard-groups");
+    if (!wrap || !state.site) return;
+    const byId = {};
+    for (const src of sourcesForSite()) (byId[src.category] || (byId[src.category] = [])).push(src);
+    $$("#dashboard-groups .group").forEach((group) => {
+      const cat = group.dataset.cat;
+      const shown = $$(".src", group).map((node) => node.dataset.src).filter(Boolean);
+      const inCat = (byId[cat] || []).filter((src) => shown.includes(src.id));
+      const roll = groupRollup(inCat);
+      const node = group.querySelector(".g-roll");
+      if (!node) return;
+      const kids = [];
+      if (!roll.need) kids.push(el("span", { class: "g-tick", "aria-hidden": "true" }, "✓"));
+      kids.push(document.createTextNode(rollupText(roll)));
+      node.replaceChildren(...kids);
+      node.classList.toggle("is-clear", !roll.need);
+    });
   }
 
   // ---------------------------------------------------------------- nav rail
@@ -2146,6 +2306,135 @@
     }, "Show all"));
   }
 
+  // The card, at whichever of the three densities its state asks for. A card the
+  // operator has answered, routed into the report and ticked off has nothing
+  // actionable left on it, so it stops costing 260 px and a dozen controls; one
+  // click brings the whole card back, and the next full render settles it again.
+  function renderSourceCard(src) {
+    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
+    if (!f.images) f.images = [];
+    const resting = cardDensity(f);
+    if (resting !== "full" && !CARD_OPEN.expanded.has(src.id))
+      return resting === "line" ? renderLineCard(src, f) : renderSummaryCard(src, f);
+    return renderFullCard(src, f, resting !== "full");
+  }
+
+  // The shell every density shares: the status edge, the reviewed tint, the
+  // category colour the monogram picks up, and the id the rail and the report's
+  // cross-pane jumps both scroll to.
+  function cardShell(src, f, density) {
+    const card = el("div", {
+      class: `src status-${f.status} density-${density}${f.reviewed ? " is-reviewed" : ""}`,
+      id: `src-${src.id}`, "data-src": src.id, "data-density": density,
+    });
+    card.style.setProperty("--cat", `var(--cat-${src.category})`);
+    return card;
+  }
+
+  // Status as shape + word, never colour alone: the glyph differs per result, and
+  // the accessible name spells it out.
+  const STATUS_GLYPH = { found: "●", none: "○", failed: "▲", manual: "◆", unset: "◌" };
+  function statusDot(status) {
+    return el("span", { class: `s-dot ${status}`, "aria-hidden": "true" }, STATUS_GLYPH[status] || "◌");
+  }
+  function sectionTitleOf(src, f) {
+    const id = targetSectionOf(src, f);
+    const sec = REPORT_SECTIONS.find((s) => s.id === id);
+    return sec ? sec.title : "the report";
+  }
+
+  // ---- line density — a settled card ------------------------------------
+  // One row: number, result, name, where it lands in the report, and the tick.
+  // The whole row is a button, so it is in the tab order and Enter/Space opens it
+  // (and there is no dropzone on it to silently swallow a pasted screenshot).
+  function renderLineCard(src, f) {
+    const card = cardShell(src, f, "line");
+    const num = cardNumbers[src.id];
+    const sec = sectionTitleOf(src, f);
+    card.append(el("button", {
+      // aria-expanded alone: what expands is the card this button is inside, so
+      // there is no sibling region for aria-controls to point at.
+      type: "button", class: "src-line", "aria-expanded": "false",
+      "aria-label": `${src.name} — ${STATUS_LABEL[f.status]}, reviewed, feeding ${sec}. Expand to change it.`,
+      onclick: () => expandCard(src.id),
+    },
+      el("span", { class: "src-num" }, num ? `${num}` : ""),
+      statusDot(f.status),
+      el("span", { class: "src-line-name" }, src.name),
+      el("span", { class: "src-line-sec" }, `→ ${sec}`),
+      el("span", { class: "src-line-tick", "aria-hidden": "true" }, "✓"),
+      el("span", { class: "src-caret", "aria-hidden": "true" }, "▾")));
+    return card;
+  }
+
+  // ---- summary density — answered, not yet reviewed ----------------------
+  // Identity, the first two lines of what came back, the result, and the one
+  // action that is actually outstanding on this card: ticking it off. Clicking
+  // anywhere that isn't a control opens the full card.
+  function renderSummaryCard(src, f) {
+    const card = cardShell(src, f, "summary");
+    const num = cardNumbers[src.id];
+    const expand = el("button", {
+      type: "button", class: "src-expand", "aria-expanded": "false",
+      "aria-label": `Expand ${src.name} — ${STATUS_LABEL[f.status]}`,
+      onclick: () => expandCard(src.id),
+    }, el("span", { class: "src-caret", "aria-hidden": "true" }, "▾"));
+
+    // Prefer the operator's own words when they've written any — that's what the
+    // report will carry — and fall back to the machine's finding.
+    const own = (f.note || "").trim();
+    const raw = own || (f.result ? f.result.html : "");
+    const mini = raw
+      ? el("div", { class: "src-mini" },
+        el("span", { class: "src-mini-label" }, own ? "Your note" : "What came back"),
+        el("div", { class: "src-mini-body", html: own ? esc(own).replace(/\n/g, " ") : raw }))
+      : null;
+
+    const included = cardIncluded(f);
+    const reviewCb = el("input", { type: "checkbox", onchange: (e) => setReviewed(src.id, e.target.checked) });
+    reviewCb.checked = !!f.reviewed;
+
+    card.append(
+      el("div", { class: "src-top" },
+        el("div", { class: "src-name" },
+          el("span", { class: "src-num" }, num ? `${num}` : ""),
+          renderSourceIcon(src),
+          src.name),
+        el("span", { class: `chip ${f.status}` }, STATUS_LABEL[f.status]),
+        expand),
+      mini,
+      el("div", { class: "src-sum-foot" },
+        el("span", { class: "src-line-sec" }, `→ ${sectionTitleOf(src, f)}`),
+        el("span", { class: "src-sum-inc" + (included ? " is-in" : "") }, included ? "✓ In report" : "not included"),
+        el("label", { class: "review-toggle" }, reviewCb, el("span", {}, "Mark reviewed"))));
+
+    // Anywhere that isn't a control opens the card in place.
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, input, select, textarea, label")) return;
+      expandCard(src.id);
+    });
+    return card;
+  }
+
+  // Transiently open a collapsed card. Nothing about this is persisted: the next
+  // full dashboard render clears it, so the resting view keeps reflecting state
+  // rather than the operator's click history.
+  function expandCard(id) {
+    CARD_OPEN.expanded.add(id);
+    refreshCard(id);
+    const card = $(`#src-${id}`);
+    const back = card && card.querySelector(".src-collapse");
+    if (back) back.focus(); // focus lands inside the card it just opened
+  }
+
+  function collapseCard(id) {
+    CARD_OPEN.expanded.delete(id);
+    refreshCard(id);
+    const card = $(`#src-${id}`);
+    const btn = card && card.querySelector(".src-line, .src-expand");
+    if (btn) btn.focus(); // …and comes back to the card on the way out
+  }
+
   // A source card is read in three zones, in the order the operator forms an
   // opinion — identity → finding → disposition:
   //
@@ -2157,11 +2446,9 @@
   // behind the ⓘ affordance or the ⋯ overflow, and is built only when opened —
   // 23 cards' worth of always-on prose and buttons is what made the pane feel
   // like a wall. Nothing was removed: every capability is one click away.
-  function renderSourceCard(src) {
-    const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
-    if (!f.images) f.images = [];
-    const card = el("div", { class: `src status-${f.status}${f.reviewed ? " is-reviewed" : ""}`, id: `src-${src.id}` });
-    card.style.setProperty("--cat", `var(--cat-${src.category})`); // picked up by the monogram tile
+  function renderFullCard(src, f, collapsible) {
+    const card = cardShell(src, f, "full");
+    if (collapsible) card.classList.add("is-expanded"); // opened above its resting density
     const num = cardNumbers[src.id];
 
     // ---- zone 1: identity ------------------------------------------------
@@ -2238,13 +2525,22 @@
     }
     doRow.append(renderCardMenu(src, note));
 
+    // Only a card opened above its resting density carries a way back — a card that
+    // is full because it still needs a human has nothing to collapse to.
+    const collapseBtn = collapsible ? el("button", {
+      type: "button", class: "src-collapse", "aria-expanded": "true",
+      "aria-label": `Collapse ${src.name}`, title: "Collapse",
+      onclick: () => collapseCard(src.id),
+    }, el("span", { class: "src-caret", "aria-hidden": "true" }, "▴")) : null;
+
     card.append(
       el("div", { class: "src-top" },
         el("div", { class: "src-name" },
           el("span", { class: "src-num" }, num ? `${num}` : ""),
           renderSourceIcon(src),
           src.name),
-        aboutBtn),
+        aboutBtn,
+        collapseBtn),
       about,
       resultPanel,
       noteBlock,
@@ -2255,7 +2551,10 @@
 
   // Which cards have a disclosure open, by source id — survives the card being
   // re-rendered (which happens on every status tick, include toggle and photo).
-  const CARD_OPEN = { about: new Set(), photos: new Set() };
+  // `expanded` is the same idea one level up: a settled card the operator has
+  // opened stays open while they work in it, and renderDashboard() clears the set
+  // so the resting view goes back to being state-driven.
+  const CARD_OPEN = { about: new Set(), photos: new Set(), expanded: new Set() };
 
   // The ⓘ disclosure: jurisdiction, how it's queried, what to look for, the steps
   // and the URL. Built on first open — 23 cards of never-read reference prose is
@@ -2474,10 +2773,22 @@
     renderProgress();
   }
 
+  // Rebuilds one card in place. It re-derives density rather than assuming full,
+  // so the very act of answering a card (or ticking it reviewed) settles it — and
+  // when that changes the density under a keyboard user, focus is handed to the
+  // card's new primary control instead of being dropped on the floor.
   function refreshCard(id) {
     const src = DATA.sources.find((s) => s.id === id);
     const old = $(`#src-${id}`);
-    if (old && src) old.replaceWith(renderSourceCard(src));
+    if (!old || !src) return;
+    const hadFocus = old.contains(document.activeElement);
+    const was = old.dataset.density;
+    const node = renderSourceCard(src);
+    old.replaceWith(node);
+    if (hadFocus && node.dataset.density !== was) {
+      const first = node.querySelector(".src-line, .src-expand, .src-collapse, button, input, select, textarea, a");
+      if (first) first.focus();
+    }
   }
 
   // Clear the notes text for a card (photos + reference images are kept). Handy for
@@ -2793,6 +3104,7 @@
       `<span class="chip reviewed">${reviewed}/${list.length} reviewed</span>`;
     renderAttention();
     refreshRailBadges(); // same counts, shown per category on the nav rail
+    refreshGroupHeads(); // …and per category on each group's roll-up
     // The legend just changed width/wrap, and the card is what the sticky group
     // headers pin under (covers browsers without ResizeObserver too).
     measureProgressBar();
@@ -2840,6 +3152,21 @@
   // share the bar (Needs attention / Needs review) keep their own state.
   function syncStatusFilterBar() {
     $$(".sfb-btn[data-status]").forEach((btn) => btn.classList.toggle("on", btn.dataset.status === state.filterStatus));
+  }
+
+  function syncSortToggle() {
+    $$(".sfb-btn[data-sort]").forEach((btn) => {
+      const on = btn.dataset.sort === state.cardSort;
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+
+  function setCardSort(mode) {
+    if (state.cardSort === mode) return;
+    state.cardSort = mode;
+    try { localStorage.setItem(LS_CARD_SORT, mode); } catch (_) {}
+    renderDashboard();
   }
 
   // ---------------------------------------------------------------- report
@@ -2950,6 +3277,15 @@
       node = document.getElementById(`src-${sourceId}`);
     }
     if (!node) return;
+    // The card may be inside a folded category, or settled down to one line. Being
+    // sent here is a request to see it, so open whatever is in the way.
+    const group = node.closest(".group");
+    if (group && group.classList.contains("is-collapsed")) setGroupOpen(group, true, false);
+    if (node.dataset.density !== "full") {
+      CARD_OPEN.expanded.add(sourceId);
+      refreshCard(sourceId);
+      node = document.getElementById(`src-${sourceId}`);
+    }
     node.scrollIntoView({ behavior: "smooth", block: "start" });
     flashTarget(node);
   }
@@ -3513,6 +3849,9 @@
       qldMap: qldMapTextState(),
       date: state.date,
       maintenance: state.maintenance,
+      // Presentation state that belongs to this site rather than the browser:
+      // which categories the operator has explicitly folded away or kept open.
+      ui: { groups: state.groupOpen },
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -3609,6 +3948,7 @@
         : { selection: null, capture: null };
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
+      state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
       // (v1) for sites saved before the split, then mark dirty so the next save
       // migrates them out of the text key.
@@ -4853,6 +5193,12 @@
       if (state.filterStatus) state.filterAttention = false;
       renderDashboard(); renderAttention(); syncFilterButton();
     }));
+    try {
+      const saved = localStorage.getItem(LS_CARD_SORT);
+      if (saved === "attention" || saved === "source") state.cardSort = saved;
+    } catch (_) {}
+    $$(".sfb-btn[data-sort]").forEach((btn) => btn.addEventListener("click", () => setCardSort(btn.dataset.sort)));
+    syncSortToggle();
     // Mirror the two free-text header fields into `state` so state is the single
     // source of truth (saveNow / reportObject read state, not the DOM) — this lets
     // the batch flow persist and review sites whose DOM isn't currently shown.
