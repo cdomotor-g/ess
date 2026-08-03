@@ -220,6 +220,11 @@
     // Dashboard ordering: "attention" (default — what still needs a human first) or
     // "source" (the registry order). A browser-wide preference, not per site.
     cardSort: "attention",
+    // Step 3's three sub-steps: which of them this site has already had done.
+    // Only the next un-run one carries a filled button (see syncFlowSteps), so
+    // the card answers "what now" once instead of three times. Persisted per
+    // site alongside the filter and the group collapses.
+    flow: { auto: false, prompt: false, applied: false },
     // Per-category collapse, but ONLY where the operator has said so explicitly:
     // catId -> true (open) / false (collapsed). Categories they haven't touched
     // follow the automatic rule in groupIsOpen(). Persisted per site.
@@ -1053,6 +1058,7 @@
     state.maintenance = "";
     state.filter = "all";  // restore() brings back this site's own filter choice
     state.groupOpen = {};  // …and its own collapse choices
+    state.flow = freshFlow(); // …and how far it got through step 3
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
   }
@@ -1070,6 +1076,7 @@
     const ph = $("#report-placeholder"); if (ph) ph.hidden = true;
     measureTopbar();
     resetRunChecks(); // step 3 talks about one site at a time
+    syncFlowSteps();  // …and points at this site's next un-run sub-step
     renderSummary();
     renderSiteImages();
     renderMapsSections();
@@ -1096,6 +1103,7 @@
     // reply comes back, and an assistant that skips a source must not undo them.
     const prevSite = state.site;
     const prevFindings = state.findings || {};
+    const prevFlow = state.flow;
     const lat = parseFloat(si.lat), lon = parseFloat(si.lon);
     if (isNaN(lat) || isNaN(lon)) throw new Error("The findings file has no valid site latitude/longitude.");
     const st = si.state || stateFromCoords(lat, lon);
@@ -1134,7 +1142,12 @@
         images: importImages(c.images),
       };
     });
-    if (isSameSite(prevSite, state.site)) mergePrevious(prevFindings);
+    const sameSite = isSameSite(prevSite, state.site);
+    if (sameSite) mergePrevious(prevFindings);
+    // Step 3's progress belongs to the site, not the file: a reply for the site
+    // already open confirms the round trip the operator just made, while a file
+    // for a different site starts that sequence again.
+    state.flow = sameSite ? normalizeFlow(prevFlow) : freshFlow();
     state.report = {};
     (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
     // Seed jurisdiction-specific section defaults (e.g. the QLD GBO text) where the
@@ -2538,8 +2551,12 @@
       photos ? photos.body : null);
 
     // ---- zone 3: disposition ---------------------------------------------
+    // The card's ONE primary. Whatever else a card can do, going and looking at
+    // the source is what the operator opened it for — and the click copies the
+    // coordinates on the way out, so the site's search box can be filled by
+    // paste. Every other action here is secondary, tertiary or in the ⋯.
     const link = el("a", {
-      href: buildUrl(src), target: "_blank", rel: "noopener", class: "btn tiny",
+      href: buildUrl(src), target: "_blank", rel: "noopener", class: "btn tiny primary",
       onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
     }, "Open the source ↗");
 
@@ -2560,12 +2577,16 @@
       },
     }, "Result", el("span", { class: "do-lead-mark", "aria-hidden": "true" }, "ⓘ"));
 
+    // The specialist tools — a map, a live API, an Excel import. They appear on
+    // one to three cards in a whole assessment, so they earn their place in the
+    // row, but they are alternatives to "open the source", not the point of the
+    // card: secondary, never a second filled button competing with the primary.
     const doRow = el("div", { class: "do-row" }, resultLead, renderStatusControl(src, f), link);
     if (src.id === "qld-globe" && state.site.state === "QLD") {
-      doRow.append(el("button", { type: "button", class: "btn tiny primary", onclick: () => openQldGlobeMap(src) }, "🗺 Open site map"));
+      doRow.append(el("button", { type: "button", class: "btn tiny secondary", onclick: () => openQldGlobeMap(src) }, "Open site map"));
     }
     const runner = apiRunnerFor(src);
-    if (runner) doRow.append(el("button", { class: "btn tiny primary", id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
+    if (runner) doRow.append(el("button", { class: "btn tiny secondary", id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
     // PMST card: upload the tool's Excel export and extract the MNES summary in-browser.
     if (src.xlsx_import === "pmst_mnes") {
       const fileInput = el("input", {
@@ -2573,9 +2594,9 @@
         onchange: (e) => { const file = e.target.files && e.target.files[0]; if (file) importPmstXlsx(src.id, file, importBtn); e.target.value = ""; },
       });
       const importBtn = el("button", {
-        type: "button", class: "btn tiny primary",
+        type: "button", class: "btn tiny secondary",
         onclick: () => fileInput.click(),
-      }, "⬆ Import PMST Excel");
+      }, "Import PMST Excel");
       doRow.append(importBtn, fileInput);
     }
     doRow.append(renderCardMenu(src, note));
@@ -2668,30 +2689,35 @@
     return slot;
   }
 
-  // Per-card ⋯ overflow: the utilities that were competing with "go look" and
-  // "record the answer" at identical weight in the old action row. Items are built
-  // on first open, so a resting card carries one button rather than five.
+  // Per-card ⋯ overflow — the fourth action tier. The utilities that were
+  // competing with "go look" and "record the answer" at identical weight in the
+  // old action row: rare, recoverable, or duplicating something the card already
+  // does. Items are built on first open, so a resting card carries one button
+  // rather than five, and they are plain text — the ⋯ has already said "more".
   function renderCardMenu(src, note) {
     const list = el("div", { class: "menu-list", role: "menu", hidden: true });
     const toggle = el("button", {
-      type: "button", class: "btn tiny menu-toggle", "aria-haspopup": "true", "aria-expanded": "false",
+      type: "button", class: "btn tiny tertiary menu-toggle", "aria-haspopup": "true", "aria-expanded": "false",
       "aria-label": `More actions for ${src.name}`,
       onclick: (e) => {
         e.stopPropagation();
         if (!list.childElementCount) {
           list.append(el("button", { class: "menu-item", role: "menuitem",
-            onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Lat/Lon copied") }, "⧉ Copy lat/long"));
+            onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Lat/Lon copied") }, "Copy lat/long"));
           if (src.web_search) {
             const q = encodeURIComponent(fillTemplate(src.web_search));
-            list.append(el("a", { class: "menu-item", role: "menuitem", href: `https://www.google.com/search?q=${q}`, target: "_blank", rel: "noopener" }, "🔎 Web search ↗"));
+            list.append(el("a", { class: "menu-item", role: "menuitem", href: `https://www.google.com/search?q=${q}`, target: "_blank", rel: "noopener" }, "Web search ↗"));
           }
           list.append(el("button", { class: "menu-item", role: "menuitem",
-            onclick: () => showReportSection(targetSectionOf(src)) }, "⇢ Show in the report"));
+            onclick: () => showReportSection(targetSectionOf(src)) }, "Show in the report"));
+          // Destructive, and no undo — ruled off and coloured as such (.danger).
           list.append(el("button", { class: "menu-item danger", role: "menuitem",
-            onclick: () => clearNote(src.id, note) }, "✕ Clear my note"));
+            onclick: () => clearNote(src.id, note) }, "Clear my note"));
           list.addEventListener("click", () => setCardMenuOpen(toggle, list, false));
+          wireMenuKeys(toggle, list, (open) => setCardMenuOpen(toggle, list, open));
         }
         setCardMenuOpen(toggle, list, list.hidden);
+        if (!list.hidden) focusFirstMenuItem(list);
       },
     }, "⋯");
     return el("div", { class: "menu card-menu" }, toggle, list);
@@ -2701,6 +2727,38 @@
     if (open) closeCardMenus();
     list.hidden = !open;
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  // Keyboard behaviour shared by both overflow menus (the report toolbar's
+  // "More ▾" and every card's ⋯): ↑/↓ walk the items, Home/End jump the ends,
+  // and Esc closes and puts focus back on the trigger it came from — a menu that
+  // strands focus on a detached node is worse than no menu.
+  function focusFirstMenuItem(list) {
+    const first = list.querySelector(".menu-item");
+    if (first) first.focus();
+  }
+  function wireMenuKeys(toggle, list, setOpen) {
+    list.addEventListener("keydown", (e) => {
+      const items = [...list.querySelectorAll(".menu-item")];
+      if (!items.length) return;
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        items[(i + step + items.length) % items.length].focus();
+      } else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
+      else if (e.key === "End") { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (e.key === "Escape" || e.key === "Tab") {
+        // Esc closes deliberately; Tab closes because focus is leaving anyway —
+        // only Esc hands focus back, so tabbing on still moves forward.
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); }
+        setOpen(false);
+        if (e.key === "Escape") toggle.focus();
+      }
+    });
+    toggle.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" && list.hidden) { e.preventDefault(); toggle.click(); }
+    });
   }
   // One delegated pair of listeners for every card menu ever rendered — cards are
   // re-rendered constantly (every status tick rebuilds one), and per-card document
@@ -2766,10 +2824,10 @@
       list: useList ? listId : null,
       "aria-label": "Fetch a reference image from Wikipedia by name",
     });
-    const fetchBtn = el("button", { type: "button", class: "btn tiny", onclick: () => fetchWikiImage(src.id, inp, fetchBtn) }, "🔎 Fetch");
+    const fetchBtn = el("button", { type: "button", class: "btn tiny secondary", onclick: () => fetchWikiImage(src.id, inp, fetchBtn) }, "Fetch");
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fetchWikiImage(src.id, inp, fetchBtn); } });
     const searchRow = el("div", { class: "wiki-row collapsed" },
-      el("span", { class: "wiki-lead" }, "🌐 From Wikipedia:"), inp, fetchBtn);
+      el("span", { class: "wiki-lead" }, "From Wikipedia:"), inp, fetchBtn);
     if (useList) {
       const dl = el("datalist", { id: listId });
       DATA.weeds.forEach((w) => dl.append(el("option", { value: w })));
@@ -2777,13 +2835,13 @@
     }
     // Auto-fetch: scan this card's notes for species/subjects and fetch a photo for
     // each (also runs on note blur when the global "Auto-fetch" preference is on).
-    const autoBtn = el("button", { type: "button", class: "btn tiny",
+    const autoBtn = el("button", { type: "button", class: "btn tiny tertiary",
       title: "Scan this card's notes and fetch a labelled Wikipedia photo for every species/subject detected",
-      onclick: () => autoFetchFromNotes(src.id, autoBtn) }, "✨ Reference image from notes");
+      onclick: () => autoFetchFromNotes(src.id, autoBtn) }, "Reference image from notes");
     // Reveal the manual search field on demand — keeps the resting card uncluttered.
-    const searchToggle = el("button", { type: "button", class: "btn tiny",
+    const searchToggle = el("button", { type: "button", class: "btn tiny tertiary",
       title: "Search Wikipedia for a reference image by typing a species/subject name",
-      onclick: () => { const collapsed = searchRow.classList.toggle("collapsed"); if (!collapsed) inp.focus(); } }, "🔎 Search by name…");
+      onclick: () => { const collapsed = searchRow.classList.toggle("collapsed"); if (!collapsed) inp.focus(); } }, "Search by name…");
     const tools = el("div", { class: "wiki-tools" }, autoBtn, searchToggle);
     return el("div", {}, tools, searchRow);
   }
@@ -3018,7 +3076,13 @@
   async function runAllAuto(e) {
     const btn = (e && e.currentTarget) || $("#btn-run-auto");
     const list = sourcesForSite().filter(apiRunnerFor);
-    if (!list.length) { setFlowStatus("#auto-status", "No live-data sources apply to this site — go straight to the prompt below.", "warn"); return; }
+    if (!list.length) {
+      // Nothing to run here, so the sequence moves on rather than leaving a filled
+      // button pointing at a step this site can never complete.
+      setFlowStatus("#auto-status", "No live-data sources apply to this site — go straight to the prompt below.", "warn");
+      markFlowDone("auto");
+      return;
+    }
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking…'; }
     let done = 0;
     setFlowStatus("#auto-status", `Checking ${list.length} live source${list.length > 1 ? "s" : ""}…`);
@@ -3028,7 +3092,7 @@
       try { await apiRunnerFor(src)(src); } catch (_) {}
       setFlowStatus("#auto-status", `Checked ${++done} of ${list.length}…`);
     }
-    if (btn) { btn.disabled = false; btn.innerHTML = "⚡ Run auto-checks"; }
+    if (btn) { btn.disabled = false; btn.innerHTML = "Run auto-checks"; }
     const tally = { found: 0, none: 0, failed: 0, manual: 0, unset: 0 };
     list.forEach((s) => tally[(state.findings[s.id] || {}).status || "unset"]++);
     const bits = [];
@@ -3038,6 +3102,7 @@
     setFlowStatus("#auto-status",
       `✓ ${list.length} live source${list.length > 1 ? "s" : ""} checked${bits.length ? " — " + bits.join(", ") : ""}.`,
       tally.failed ? "warn" : "ok");
+    markFlowDone("auto");
   }
 
   // ------------------------------------------------------ step 3 (run the checks)
@@ -3054,6 +3119,38 @@
     if (!n) return;
     n.textContent = msg || "";
     n.className = "flow-status" + (tone ? " is-" + tone : "");
+  }
+
+  // Step 3 is a sequence, so exactly one of its three sub-steps carries a filled
+  // button: the next one that hasn't been run. The ones behind it demote to
+  // secondary and swap their letter for a ✓ — done, but never disabled, because
+  // re-running the auto-checks or re-copying the prompt is entirely legitimate.
+  const FLOW_STEPS = [["auto", "#btn-run-auto"], ["prompt", "#btn-copy-prompt"], ["applied", "#btn-paste-apply"]];
+  function freshFlow() { return { auto: false, prompt: false, applied: false }; }
+  function normalizeFlow(saved) {
+    const f = freshFlow();
+    if (saved && typeof saved === "object") FLOW_STEPS.forEach(([k]) => { f[k] = !!saved[k]; });
+    return f;
+  }
+  function markFlowDone(step) {
+    if (!state.flow) state.flow = freshFlow();
+    if (state.flow[step]) return;
+    state.flow[step] = true;
+    save();
+    syncFlowSteps();
+  }
+  function syncFlowSteps() {
+    const flow = state.flow || (state.flow = freshFlow());
+    const next = FLOW_STEPS.find(([key]) => !flow[key]);
+    FLOW_STEPS.forEach(([key, sel]) => {
+      const step = $(`.flow-step[data-flow="${key}"]`);
+      if (step) step.classList.toggle("is-done", !!flow[key]);
+      const btn = $(sel);
+      if (!btn) return;
+      const lead = !!next && next[0] === key;
+      btn.classList.toggle("primary", lead);
+      btn.classList.toggle("secondary", !lead);
+    });
   }
 
   // Wipe step 3 back to its resting state — called whenever a different site is
@@ -3114,6 +3211,7 @@
       setFlowStatus("#paste-status", kind === "batch"
         ? "✓ Batch loaded — pick a site from the tray above."
         : `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}. Anything left over is in step 4 below.`, "ok");
+      markFlowDone("applied");
       // renderWorkspace() parks at the top of the workspace; the operator's next
       // move is the list of what's left, so land them there instead.
       if (kind === "site") requestAnimationFrame(() => {
@@ -3545,7 +3643,7 @@
   }
 
   // Assemble a suggested detail paragraph for a section from its FOUND evidence
-  // plus the standardized templates — the "✨ Insert suggested detail" button.
+  // plus the standardized templates — the "Insert suggested detail" button.
   // Returns "" when there's nothing useful to offer.
   function sectionNarrative(section) {
     const S = STMT(), site = state.site || {};
@@ -3702,7 +3800,7 @@
             const cur = (ta.value || "").trim();
             ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
             rstate.note = ta.value; renderReportWarnings(section, box, rstate); save();
-          } }, "✨ Insert suggested detail");
+          } }, "Insert suggested detail");
         box.append(el("div", { class: "r-actions" }, btn));
       }
 
@@ -3954,7 +4052,7 @@
       // Presentation state that belongs to this site rather than the browser: which
       // categories the operator has explicitly folded away or kept open, and which
       // slice of the list they were working — so reopening a site keeps their place.
-      ui: { groups: state.groupOpen, filter: state.filter },
+      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow },
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -4053,6 +4151,7 @@
       state.maintenance = d.maintenance || "";
       state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
       state.filter = (d.ui && FILTERS[d.ui.filter]) ? d.ui.filter : "all";
+      state.flow = normalizeFlow(d.ui && d.ui.flow);
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
       // (v1) for sites saved before the split, then mark dirty so the next save
       // migrates them out of the text key.
@@ -4943,16 +5042,23 @@
     search.addEventListener("blur", () => setTimeout(() => { $("#bb-results").hidden = true; }, 120));
   }
 
-  // The report toolbar's "More ▾" overflow menu (Print / JSON / Copy summary).
-  // Keeps the toolbar uncluttered now that Generate Report + Check report lead.
+  // The report toolbar's "More ▾" overflow menu (Print / JSON / Copy summary) —
+  // the export variants, kept out of the way of the one primary on that surface.
+  // Same pattern, and the same keyboard behaviour, as every card's ⋯.
   function wireOverflowMenu() {
     const menu = $("#report-more-menu");
     if (!menu) return;
     const toggle = $("#btn-report-more");
     const list = menu.querySelector(".menu-list");
     const setOpen = (open) => { list.hidden = !open; toggle.setAttribute("aria-expanded", open ? "true" : "false"); };
-    toggle.addEventListener("click", (e) => { e.stopPropagation(); setOpen(list.hidden); });
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = list.hidden;
+      setOpen(open);
+      if (open) focusFirstMenuItem(list);
+    });
     list.addEventListener("click", () => setOpen(false)); // close after choosing an item
+    wireMenuKeys(toggle, list, setOpen);
     document.addEventListener("click", (e) => { if (!menu.contains(e.target)) setOpen(false); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
     // The same two gestures for every source card's ⋯ menu. Registered once, here,
@@ -4970,9 +5076,12 @@
     if (run) run.addEventListener("click", runAllAuto);
     const copyBtn = $("#btn-copy-prompt");
     if (copyBtn) copyBtn.addEventListener("click", (e) => {
-      copyFullPrompt(e).then((ok) => setFlowStatus("#prompt-status", ok
-        ? "Copied — paste it into your assistant, then bring its reply back below."
-        : "The browser blocked the copy. Try again, or use ⬇ JSON export and work from that.", ok ? "ok" : "err"));
+      copyFullPrompt(e).then((ok) => {
+        setFlowStatus("#prompt-status", ok
+          ? "Copied — paste it into your assistant, then bring its reply back below."
+          : "The browser blocked the copy. Try again, or use JSON export (under More) and work from that.", ok ? "ok" : "err");
+        if (ok) markFlowDone("prompt"); // a copy that failed hasn't advanced anything
+      });
     });
     const apply = $("#btn-paste-apply");
     if (apply) apply.addEventListener("click", applyPastedJson);
@@ -5061,7 +5170,7 @@
     const btn = $("#btn-theme");
     if (!btn) return;
     const dark = themeIsDark();
-    btn.textContent = dark ? "☀️ Light" : "🌙 Dark";
+    btn.textContent = dark ? "Light" : "Dark";
     btn.title = dark ? "Switch to light theme" : "Switch to dark theme";
   }
   function toggleTheme() {

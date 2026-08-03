@@ -34,7 +34,7 @@ Opening `index.html` directly with `file://` will **not** work (browsers block
 
 The left pane is the workflow, numbered in the order you work it. Everything
 belonging to another way of working — batches, file imports, the in-browser
-agent, display preferences — is folded into **⚙ Advanced options** at the foot of
+agent, display preferences — is folded into **Advanced options** at the foot of
 that pane, so the four steps are all you see until you go looking.
 
 1. **Choose a site.** Type a station name/number, or switch to
@@ -48,11 +48,14 @@ that pane, so the four steps are all you see until you go looking.
    a file, or use the file picker. The map and photos travel with the report and
    every export.
 3. **Run the checks** — the two automated passes, in one card so the round trip
-   to an assistant never needs a scroll:
-   * **⚡ Run auto-checks** answers every source with a public data API (Atlas of
+   to an assistant never needs a scroll. It is a sequence, so only the sub-step
+   you haven't done yet carries a filled button; the ones behind it are ticked
+   off and quietened, but stay clickable — re-running the checks or re-copying
+   the prompt is always allowed:
+   * **Run auto-checks** answers every source with a public data API (Atlas of
      Living Australia, Queensland WildNet) live in your browser, and reports what
      it found next to the button.
-   * **📋 Copy prompt** copies a complete, self-contained prompt for this site.
+   * **Copy prompt** copies a complete, self-contained prompt for this site.
      Paste it into any assistant (ChatGPT, Gemini, Claude, Copilot…).
    * **Paste its reply back here** takes the JSON the assistant returns — code
      fences and surrounding commentary and all — and fills the dashboard.
@@ -80,15 +83,15 @@ that pane, so the four steps are all you see until you go looking.
    **Found**. On the species cards (weeds, feral animals, disease, threatened
    species) the same panel lets you type a name and hit **🔎 Fetch image** to pull
    a labelled reference photo straight from Wikipedia — no hunting for one — with
-   its licensing credit attached. Or hit **✨ Reference image from notes** and the
+   its licensing credit attached. Or hit **Reference image from notes** and the
    tool reads the species/subjects out of that card's findings text and fetches a
-   photo for each; with **Auto-fetch reference images** on (⚙ Advanced options →
+   photo for each; with **Auto-fetch reference images** on (Advanced options →
    Display options) this also happens automatically on **Import** and during
    agent runs.
    * The **EPBC PMST** card's **Open the source ↗** link bakes the site's lat/long into
      the URL, so the Protected Matters Search Tool loads straight onto the
      location with its export panel open. Draw the buffer, generate the **Excel**
-     report, then click **⬆ Import PMST Excel** on the card: the tool reads the
+     report, then click **Import PMST Excel** on the card: the tool reads the
      workbook entirely in your browser (no upload, no dependency) and renders the
      **Matters of National Environmental Significance** down to a text summary in
      the notes — heritage, Ramsar, GBRMP and marine areas in full; threatened
@@ -97,7 +100,7 @@ that pane, so the four steps are all you see until you go looking.
      Fauna section narratives** from that split (communities → habitat, plants →
      flora, animals + migratory → fauna), so the report body reads like a
      hand-written one — without overwriting anything you've already typed.
-   * At Queensland sites, the **Queensland Globe** card has an **🗺 Open site map**
+   * At Queensland sites, the **Queensland Globe** card has an **Open site map**
      button. It opens a full interactive map of the site *inside the workbench* —
      Queensland aerial imagery drawn from the same government spatial services
      Queensland Globe itself uses, with the ESS environmental layer stack over it
@@ -114,7 +117,7 @@ that pane, so the four steps are all you see until you go looking.
      against each service's live layer list at open time, so a layer that can't be
      found is struck through and named rather than silently missing, and a **Map
      diagnostics** panel says exactly which service worked. When the map looks
-     right press **📸 Capture map for the report** — one press takes the picture
+     right press **Capture map for the report** — one press takes the picture
      *and* puts it in the report, and the thumbnail below the button is your
      receipt. The picture goes on the card and travels through the report, HTML,
      JSON and Print/PDF exports — rendered **full width** and **clickable for a
@@ -127,13 +130,14 @@ that pane, so the four steps are all you see until you go looking.
      Globe itself if you need its own tools or legend.)
 5. The **ESS report** section fills with the standardized proforma wording,
    your collection evidence, and any attached photos. Each section has an
-   **✨ Insert suggested detail** button that drafts a paragraph from that
+   **Insert suggested detail** button that drafts a paragraph from that
    section's evidence plus standard wording (`data/statements.json`), and the tool
    **flags contradictions** — a statement that says "no known…" while the evidence
    came back *Found*, or a "matters present" statement with no supporting detail.
    Export to **Print/PDF**, **HTML**, or **JSON** (under **More ▾**) — photos and
    review flags travel with the export (embedded, so the HTML/JSON stay
-   self-contained). When the report is finished, **🔍 Check report** copies a
+   self-contained). Each section carries its own **Reviewed** tick, and at the
+   foot of the report **Check report** copies a
    precise fact-and-consistency-check prompt for that report — paste it into any
    assistant (ChatGPT, Gemini, Claude, Microsoft 365 Copilot…) for an independent
    review with a fixed, terse output structure (verdict · issues table · fact-check
@@ -167,7 +171,7 @@ The `ess-collect` agent can research every source and fill the tool's dashboard
 for you. Two ways to run it — both produce the same `ess-findings/1` object and
 feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT-MODE.md)):
 
-- **File handoff (any LLM).** Load the site and click **📋 Copy prompt** to copy
+- **File handoff (any LLM).** Load the site and click **Copy prompt** to copy
   a complete, self-contained, model-agnostic prompt; paste it into any assistant
   (ChatGPT, Gemini, Claude, Copilot…), then paste the JSON it returns straight
   into the **Paste its reply back here** box in the same step 3 card. No key in
@@ -175,8 +179,8 @@ feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT
   Best for batches. *(In a Claude Code session in this repo, the prompt's top
   note lets you run the `ess-collect` skill instead — same JSON — or just ask
   "Run an ESS for WOODGATE ALERT".)*
-  * **Batches.** Two ways to start a batch. In the browser, open **⚙ Advanced
-    options** at the foot of the left pane and click **🗂 Batch multiple sites**
+  * **Batches.** Two ways to start a batch. In the browser, open **Advanced
+    options** at the foot of the left pane and click **Batch multiple sites**
     to pick a list — search-and-add
     stations, or paste names/numbers or `lat,lon[,name]`, one per line — and
     **Start batch**. Or scaffold them all outside the browser with
@@ -185,10 +189,10 @@ feed the same review/export surface (full guide: [docs/AGENT-MODE.md](docs/AGENT
     fill and **Advanced options → Import a findings file** to load. Either way the tool shows a **batch
     picker bar**: one chip per site (with its found / still-needs-you counts,
     remembered across visits), each opening into the same review/export surface,
-    plus a **🔍 Check all** button that copies one combined
+    plus a **Check all** button that copies one combined
     fact-and-consistency-check prompt covering every site. Ask a Claude Code
     session to "run an ESS for these sites: …" and it does the whole batch.
-- **BYOK in-browser (beta).** In **⚙ Advanced options**, click **🔑 Agent
+- **BYOK in-browser (beta).** In **Advanced options**, click **Agent
   mode…**, paste your **own** Anthropic
   API key, and **Run full assessment**. The browser drives Claude directly
   (Anthropic's server-side web search/fetch bypass CORS) and fills the dashboard

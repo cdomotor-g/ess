@@ -298,14 +298,35 @@ textarea { resize: vertical; min-height: 62px; }
 .ac-meta { font-size: var(--fs-meta); color: var(--ink-soft); white-space: nowrap; }
 .ac-empty { padding: var(--sp-2); color: var(--ink-soft); font-size: var(--fs-body); }
 
-/* ---------- buttons ---------- */
+/* ---------- buttons: four tiers, defined once ----------
+   Every action on the page sits in exactly one of these, so a surface can be
+   scanned rather than read:
+
+     .primary    the ONE thing to do here — filled brand. Never more than one
+                 visible per source card, per pane header, per flow step.
+     .secondary  the common alternatives — outlined. This is the bare .btn, so
+                 an action that states no tier is safely a secondary one.
+     .tertiary   rare but needed — text weight, no border until it is hovered.
+     overflow    everything else, inside a ⋯ .menu (see .menu-list below).
+
+   `.tiny` is a SIZE, not a tier: it composes with all three. Emoji are not a
+   tier either — a button that carries a text label carries no pictograph, and
+   the glyphs that remain (✓ ▾ ⋯ ↗ ⓘ) are the app's monochrome mark language,
+   shared with the status dots and the carets. */
 .btn { font: inherit; font-weight: 600; border-radius: 8px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .btn:hover { border-color: var(--brand); }
 .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
 .btn.primary:hover { filter: brightness(1.08); }
-.btn.ghost { background: transparent; }
+/* Named for the markup's benefit — identical to the bare .btn, but saying
+   "secondary" out loud is how a demoted action stays demoted through an edit. */
+.btn.secondary { background: var(--surface); border-color: var(--line); color: var(--ink); }
+.btn.tertiary { background: transparent; border-color: transparent; color: var(--ink-soft); font-weight: 650; }
+.btn.tertiary:hover { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
 .btn.tiny { padding: var(--sp-1) var(--sp-2); font-size: var(--fs-meta); }
 .btn:disabled { opacity: .5; cursor: default; }
+/* An action that happens to be a link is still an action — the ↗ says it leaves
+   the page, so it does not also need an underline through a filled button. */
+a.btn { display: inline-block; text-decoration: none; }
 .inline-check { font-size: var(--fs-meta); color: var(--ink-soft); display: inline-flex; align-items: center; gap: var(--sp-1); cursor: pointer; }
 
 /* Click feedback: a quick flash used to confirm "copied to clipboard" */
@@ -320,7 +341,10 @@ textarea { resize: vertical; min-height: 62px; }
   .btn.flash { animation-duration: .3s; }
 }
 
-/* ---------- overflow menu (report toolbar "More ▾") ---------- */
+/* ---------- overflow menu — the fourth tier ----------
+   One implementation, used by the report toolbar's "More ▾" and by every source
+   card's ⋯. Items are plain text commands: the ⋯ already says "more", so they
+   carry no glyphs of their own. */
 .menu { position: relative; display: inline-flex; }
 .menu-list {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
@@ -336,6 +360,12 @@ textarea { resize: vertical; min-height: 62px; }
 }
 .menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
 a.menu-item { display: block; text-decoration: none; }
+/* Destructive items read as destructive at rest, not only under the pointer —
+   "Clear my note" wipes text with no undo, and it used to be styled exactly like
+   "Copy lat/long". Ruled off from the reversible items above it. */
+.menu-item.danger { color: var(--failed); margin-top: var(--sp-1); padding-top: calc(var(--sp-2) + 1px);
+  border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; }
+.menu-item.danger:hover, .menu-item.danger:focus-visible { background: var(--failed-bg); color: var(--failed); }
 
 /* ---------- batch bar (imported multi-site picker) ---------- */
 #batch-bar .batch-count { color: var(--ink-soft); font-weight: 600; font-size: .8em; }
@@ -704,6 +734,11 @@ body.qm-open { overflow: hidden; }
   border: 1px solid var(--line);
   font-size: var(--fs-micro); font-weight: 800;
 }
+/* A sub-step that has been run swaps its letter for a tick and steps back — its
+   button demotes to secondary at the same time, so only the step the operator
+   has not done yet carries a filled button. */
+.flow-step.is-done::before { content: "✓"; background: var(--reviewed-bg); color: var(--reviewed); border-color: var(--reviewed); }
+.flow-step.is-done .flow-text b { color: var(--ink-soft); }
 .flow-text { flex: 1 1 260px; min-width: 0; }
 .flow-text b { display: block; font-size: var(--fs-body); line-height: 1.4; }
 .flow-text span { display: block; font-size: var(--fs-meta); line-height: 1.5; color: var(--ink-soft); margin-top: var(--sp-0); }
@@ -1051,7 +1086,6 @@ body.qm-open { overflow: hidden; }
 /* The ⋯ overflow sits at the end of the action row and pushes nothing around. */
 .card-menu { margin-left: auto; }
 .card-menu .menu-toggle { line-height: 1; }
-.card-menu .menu-item.danger:hover, .card-menu .menu-item.danger:focus-visible { color: var(--failed); }
 
 /* The card's sign-off — the operator's own judgement, on a separate axis from the
    Found/None/Failed/Manual result. Rendered as a PRESSED PILL, and worded "sign
@@ -1178,6 +1212,12 @@ a.photo-credit:hover { text-decoration: underline; }
 .rsection .r-actions { margin: calc(-1 * var(--sp-1)) 0 var(--sp-2); }
 .btn-mini { font: inherit; font-size: var(--fs-meta); font-weight: 600; border-radius: 7px; padding: var(--sp-1) var(--sp-2); border: 1px dashed var(--line); background: var(--surface-2); color: var(--ink-soft); cursor: pointer; }
 .btn-mini:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+/* The report's own review controls are the per-section "Mark section reviewed"
+   ticks; "Check report" is the last of them — it copies a review prompt, so it
+   belongs at the end of the reviewing, not in the export cluster at the top. */
+.r-review { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); border: 1px dashed var(--line); border-radius: 10px; }
+.r-review-lead { margin: 0; flex: 1 1 220px; font-size: var(--fs-meta); line-height: 1.5; color: var(--ink-soft); }
 .rsection .r-warns:empty { display: none; }
 .rsection .r-warn { font-size: var(--fs-meta); font-weight: 600; color: var(--failed); background: var(--failed-bg); border-radius: 7px; padding: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); }
 .report-map { margin: 0; }
@@ -1293,7 +1333,7 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 #print-root { display: none; }
 @media print {
   .topbar, .railnav, .pane-divider, #site-picker, #run-checks, #advanced, #dashboard, #collection-status,
-  .head-actions, .foot, #app > .banner { display: none !important; }
+  .head-actions, .r-review, .foot, #app > .banner { display: none !important; }
   /* A pane collapsed on screen must not go missing from the printout. */
   .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right { display: block !important; }
   body { background: #fff; color: #000; }

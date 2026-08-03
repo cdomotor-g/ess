@@ -34,7 +34,7 @@ slice. Each backlog item names the files to touch and how to verify.
   entries.
 - **Batch mode** — a `ess-findings-batch/1` envelope (`{ sites: [ <ess-findings/1>,
   … ] }`) runs end-to-end, with two entry points into the same **batch picker bar**.
-  (1) **In the browser** — a **🗂 Batch multiple sites** button in **⚙ Advanced
+  (1) **In the browser** — a **Batch multiple sites** button in **Advanced
   options** opens a modal (`#batch-builder`) to multi-select sites (search-and-add stations,
   or paste a `resolve.py`-style list of names/numbers or `lat,lon[,name]`);
   `createBatchFromSites` scaffolds a blank per-site state for each and opens the
@@ -43,14 +43,14 @@ slice. Each backlog item names the files to touch and how to verify.
   reported on stderr), the `ess-collect` skill fills each, and the browser's Import
   JSON tab detects the array. Either way the tray shows one chip per site with live
   found / needs-attention counts, persisted across visits, each opening into the
-  same review/export surface. **🔍 Check all** copies one combined
+  same review/export surface. **Check all** copies one combined
   fact/consistency-check prompt for every site; **Clear batch** drops the grouping
   but keeps each site's saved work. To keep a large batch inside the localStorage
   quota, a loaded batch keeps each site's auto-generated satellite maps **in memory
   only** (they still render and travel into every export) and regenerates them when
   a site is reopened, rather than persisting two large map JPEGs per visited site;
   single-site work persists maps as before.
-- **Report self-check prompt** — a **🔍 Check report** button (report toolbar)
+- **Report self-check prompt** — a **Check report** button (report toolbar)
   builds a self-contained fact-and-consistency-check prompt for the finished
   report and copies it for any assistant. The output contract is deliberately
   rigid (verdict → issues table → fact-check table → gaps, with word caps) so
@@ -147,7 +147,7 @@ query it server-side.
       SSE stream; still needs the credential home from the proxy above.
 - [ ] **Streaming UX** for the BYOK agent (token-level progress) — currently
       updates per turn.
-- [ ] **One-click "run everything the browser can"** already exists (⚡ Run
+- [ ] **One-click "run everything the browser can"** already exists (Run
       auto-checks); extend as more `api` sources land.
 - [ ] **Scheduled re-assessment** — re-run a site periodically and diff findings
       (new outbreak zone, new listing) using the JSON export as the baseline.
