@@ -713,6 +713,10 @@ body.qm-open { overflow: hidden; }
 .sfb-btn.on[data-status=manual] { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
 .sfb-btn.on[data-flag=attention] { background: var(--manual-bg); border-color: var(--manual); color: var(--manual); }
 .sfb-btn.on[data-flag=unreviewed] { background: var(--reviewed-bg); border-color: var(--reviewed); color: var(--reviewed); }
+/* Ordering is a different question from filtering, so it sits at the far end of
+   the bar rather than in the run of filter buttons. */
+.status-filter-bar .sfb-sort { display: flex; align-items: center; gap: var(--sp-1); margin-left: auto; }
+.sfb-btn.on[data-sort] { background: var(--surface-2); border-color: var(--brand); color: var(--brand); }
 /* The dashboard is eight groups and up to ~30 expandable cards in a column that
    scrolls on its own, so the category heading sticks to the top of that column —
    whatever you're reading is always named on screen. Alternate groups are banded
@@ -731,9 +735,30 @@ body.qm-open { overflow: hidden; }
   border-bottom: 1px solid var(--line);
 }
 .group:nth-of-type(even) > .group-head { background: var(--surface-2); margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); }
-.group-head h3 { font-size: var(--fs-title); }
-.group-head .g-count { font-size: var(--fs-meta); color: var(--ink-soft); }
+.group-head h3 { font-size: var(--fs-title); white-space: nowrap; }
+/* The header is the summary surface for the whole category — a folded group has
+   to say what is inside it without being opened, which is the difference between
+   "finished" and "never started". */
+.group-head .g-roll { font-size: var(--fs-meta); color: var(--ink-soft); white-space: nowrap; }
+.group-head .g-roll.is-clear { color: var(--reviewed); }
+.group-head .g-tick { font-weight: 800; margin-right: var(--sp-1); }
 .group-head .g-line { flex: 1; height: 1px; background: var(--line); }
+.group-head .g-toggle {
+  flex: 0 0 auto; width: 24px; height: 22px; padding: 0; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+  font: inherit; line-height: 1; cursor: pointer;
+}
+.group-head .g-toggle:hover { border-color: var(--brand); color: var(--brand); }
+.group-head .g-caret { display: inline-block; font-size: var(--fs-micro); transition: transform .15s; }
+.group.is-collapsed .g-caret { transform: rotate(-90deg); }
+/* A folded category is one line: the head keeps its own bottom margin from the
+   cards it no longer has, so groups stay evenly spaced either way. */
+.group.is-collapsed { margin-bottom: var(--sp-3); }
+.group.is-collapsed > .group-head { margin-bottom: 0; }
+.group-body[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .group-head .g-caret { transition: none; }
+}
 /* Category accent — --cat is set per group in renderDashboard(). */
 .group-head h3::before {
   content: ""; display: inline-block; width: 3px; height: 13px;
@@ -768,6 +793,69 @@ body.qm-open { overflow: hidden; }
 /* Reviewed tints the whole card so progress is visible at a glance; the
    border-left above still tracks the Found/None/Failed/Manual category. */
 .src.is-reviewed { background: var(--reviewed-bg); }
+
+/* ---------- density ----------
+   The card's height is a function of its state, not of what has been clicked:
+
+     .density-line     reviewed — one ~36 px row, nothing left to do here
+     .density-summary  answered, not yet reviewed — identity, finding, the tick
+     .density-full     Manual / Failed / Not checked — the whole card
+
+   Twelve of a 23-source site are settled work. At full weight that is ~5,000 px
+   of "already done" between the operator and the next thing that isn't; here it
+   is ~500 px, and one click on any of them brings the full card back. */
+.src.density-line { padding: 0; gap: 0; }
+.src-line {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%;
+  min-height: 34px; padding: var(--sp-1) var(--sp-2);
+  border: 0; border-radius: 9px; background: none; color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.src-line:hover { background: var(--surface-2); }
+.src-line-name { flex: 1; min-width: 0; font-size: var(--fs-body); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-line-sec { font-size: var(--fs-micro); color: var(--ink-soft); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.src-line-tick { color: var(--reviewed); font-weight: 800; font-size: var(--fs-meta); }
+.src-caret { color: var(--ink-soft); font-size: var(--fs-micro); }
+/* Status as a shape as well as a colour — a filled disc, a hollow one, a triangle
+   and a diamond read apart in greyscale and to anyone who can't separate the
+   hues. The word itself is in the row's accessible name. */
+.s-dot { flex: 0 0 auto; width: 12px; font-size: var(--fs-micro); line-height: 1; text-align: center; }
+.s-dot.found { color: var(--found); }
+.s-dot.none { color: var(--none); }
+.s-dot.failed { color: var(--failed); }
+.s-dot.manual { color: var(--manual); }
+.s-dot.unset { color: var(--ink-soft); }
+
+/* Summary: what the card says and the one thing still outstanding on it. */
+.src.density-summary { cursor: pointer; }
+.src.density-summary .src-top { align-items: center; }
+.src.density-summary .src-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-expand, .src-collapse {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+  font: inherit; line-height: 1; cursor: pointer;
+}
+.src-expand:hover, .src-collapse:hover { border-color: var(--brand); color: var(--brand); }
+/* Two lines of the finding (or of the operator's own words, when they've written
+   any — that is what the report will carry). */
+.src-mini { font-size: var(--fs-meta); color: var(--ink); }
+.src-mini-label { display: block; font-size: var(--fs-micro); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); }
+.src-mini-body { display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.src-mini-body b { font-weight: 700; }
+.src-sum-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.src-sum-inc { font-size: var(--fs-micro); color: var(--ink-soft); }
+.src-sum-inc.is-in { color: var(--reviewed); font-weight: 700; }
+.src-sum-foot .review-toggle { margin-left: auto; }
+/* A card opened above its resting density fades its content in — no height
+   animation, and none at all when reduced motion is asked for. */
+@media (prefers-reduced-motion: no-preference) {
+  .src.is-expanded { animation: src-open .16s ease-out; }
+  @keyframes src-open { from { opacity: .4; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+}
 .src-top { display: flex; justify-content: space-between; gap: var(--sp-2); align-items: baseline; }
 .src-name { font-size: var(--fs-title); font-weight: 650; }
 .src-num { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;

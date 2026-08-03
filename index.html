@@ -250,6 +250,12 @@
           <span class="sfb-sep" aria-hidden="true"></span>
           <button class="btn tiny sfb-btn" id="btn-filter-attention" data-flag="attention" title="Show only sources still needing a human (Manual / Failed / Not checked)">⚠ Needs attention</button>
           <button class="btn tiny sfb-btn" id="btn-filter-unreviewed" data-flag="unreviewed" title="Show only sources you haven't ticked Reviewed yet">☐ Needs review</button>
+          <!-- Ordering, not filtering, so it sits apart at the end of the bar. -->
+          <span class="sfb-sort" role="group" aria-label="Card order">
+            <span class="sfb-label">Sort:</span>
+            <button class="btn tiny sfb-btn" data-sort="attention" title="What still needs you first, settled sources last">attention</button>
+            <button class="btn tiny sfb-btn" data-sort="source" title="The order the source registry lists them in">source order</button>
+          </span>
         </div>
         <div id="dashboard-groups"><!-- filled by JS --></div>
       </section>
