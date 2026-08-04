@@ -2233,6 +2233,10 @@
   }
 
   function renderRailNav() {
+    // The rail's narrow-layout counterpart is rebuilt from the same state, on the
+    // same trigger, so the two can never drift apart. It handles the no-site case
+    // itself, hence the call before the early return below.
+    renderMobileNav();
     const rail = $("#railnav");
     if (!rail) return;
     if (railObserver) { railObserver.disconnect(); railObserver = null; }
@@ -2271,7 +2275,7 @@
       rail.append(btn);
     }
 
-    wireRailSpy(rail, targets);
+    wireRailSpy(targets);
   }
 
   // Attention counts come from the site's whole source list, not the filtered view,
@@ -2315,13 +2319,16 @@
   // header pins, so the rail always agrees with the heading on screen. (A mid-column
   // band reads badly here: sections shorter than half a screen never reach it, so
   // clicking a rail button could leave the button below it marked.)
-  function wireRailSpy(rail, targets) {
+  function wireRailSpy(targets) {
     if (!("IntersectionObserver" in window)) return;
     const nodes = targets.map((id) => document.getElementById(id)).filter(Boolean);
     if (!nodes.length) return;
 
+    // One spy, two navigations: the rail on the wide layout and the chip row on the
+    // narrow one both mean "you are here", so they are marked from the same place
+    // rather than each growing an observer of its own.
     const setActive = (id) => {
-      rail.querySelectorAll(".rail-btn").forEach((b) => {
+      $$(".rail-btn, .mjump-btn").forEach((b) => {
         const on = b.dataset.target === id;
         b.classList.toggle("is-active", on);
         if (on) b.setAttribute("aria-current", "true");
@@ -2350,8 +2357,22 @@
         pick = id; pickDepth = depth[id];
       }
       if (pick) setActive(pick);
-    }, { root: $("#col-left"), rootMargin: "0px 0px -85% 0px", threshold: 0 });
+    }, spyBand());
     nodes.forEach((node) => railObserver.observe(node));
+  }
+
+  // Where "you are here" is measured. On the wide layout the left column is its own
+  // scroll container, so it is the root and the band is the top of that column.
+  // Below 981px the page scrolls instead: the root is the viewport, and the band
+  // has to start below the topbar and the tab shell — otherwise the marker names
+  // whichever section is hidden *behind* them rather than the first one on screen.
+  // Rebuilt on the breakpoint change (see syncNarrowRoles) so it never observes
+  // against the layout the window has just left.
+  function spyBand() {
+    if (!narrowLayout()) return { root: $("#col-left"), rootMargin: "0px 0px -85% 0px", threshold: 0 };
+    const px = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+    const top = Math.round(px("--topbar-h") + px("--mshell-h"));
+    return { root: null, rootMargin: `-${top}px 0px -75% 0px`, threshold: 0 };
   }
 
   /* ------------------------------------------------------- Queensland Globe map
@@ -3506,6 +3527,7 @@
     if (!activeFilter().seg) setStatusDetailOpen(true);
     else if (!$("#cs-detail").hidden) renderStatusDetail();
     refreshRailBadges(); // same definition of "outstanding", shown per category on the rail
+    refreshMobileNav();  // …on the Collect tab and its chips, below 981px
     refreshGroupHeads(); // …and per category on each group's roll-up
     renderStarvedSections(); // …and which report sections are still empty, from over here
     // The sentence just changed width/wrap, and this card is what the sticky group
@@ -6006,11 +6028,192 @@
 
   // Anything that lives in the left column and can be summoned from outside it
   // (the agent panel, from the topbar key button) has to bring the column back
-  // first, or it opens into a hidden pane.
-  function revealLeftPane() { if (paneMode === "hide-left") setPaneMode("split"); }
+  // first, or it opens into a hidden pane. Below 981px "hidden" means the other
+  // tab is showing, so both layouts are handled in the one call — every existing
+  // cross-pane jump keeps working on a phone without knowing about tabs.
+  function revealLeftPane() { if (paneMode === "hide-left") setPaneMode("split"); showMobileTab("collect"); }
   // …and the same for the report, so an include receipt, a starved-section name
   // or the card's "Show in the report" never points into a collapsed pane.
-  function revealRightPane() { if (paneMode === "hide-right") setPaneMode("split"); }
+  function revealRightPane() { if (paneMode === "hide-right") setPaneMode("split"); showMobileTab("report"); }
+
+  // ---------------------------------------------------------------- narrow layout
+  // Below 981px the panes are tabs rather than a stack (see .mshell in the CSS).
+  // Two things make that a real switch and not just a hide: each tab keeps its own
+  // scroll position, and the tab you are not on still tells you what it is holding
+  // — the outstanding count on Collect, the site name on both.
+  const NARROW_MQ = "(max-width: 980px)";
+  const narrowLayout = () => !!(window.matchMedia && window.matchMedia(NARROW_MQ).matches);
+  const M_TABS = [
+    { tab: "collect", btn: "#mtab-collect", col: "col-left" },
+    { tab: "report", btn: "#mtab-report", col: "col-right" },
+  ];
+  let mTab = "collect";
+  // Page scroll offsets, one per tab. Switching without these lands you at
+  // whatever offset the other pane happened to be at — on a 6,000px report that
+  // is worse than the stack it replaced.
+  const mScroll = { collect: 0, report: 0 };
+  // Whether the tabs are in play at all: they need a site, and a narrow window.
+  const mShellLive = () => { const s = $("#mshell"); return !!s && !s.hidden; };
+
+  function setMobileTab(tab, { remember = true } = {}) {
+    tab = tab === "report" ? "report" : "collect";
+    const live = mShellLive();
+    if (live && remember && narrowLayout()) mScroll[mTab] = window.scrollY;
+    const changed = tab !== mTab;
+    mTab = tab;
+    const split = $(".split");
+    if (split) {
+      split.classList.toggle("mtab-collect", live && mTab === "collect");
+      split.classList.toggle("mtab-report", live && mTab === "report");
+    }
+    for (const t of M_TABS) {
+      const btn = $(t.btn);
+      if (!btn) continue;
+      const on = t.tab === mTab;
+      btn.classList.toggle("is-active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+      // Roving tabindex: the tablist is one tab stop, arrows move within it.
+      btn.tabIndex = on ? 0 : -1;
+    }
+    // The category jumps belong to the collection pane's structure; on the report
+    // tab they would scroll a pane that isn't on screen.
+    const jump = $("#mjump");
+    if (jump) jump.hidden = mTab !== "collect" || !jump.childElementCount;
+    if (live && changed && narrowLayout()) restoreMobileScroll(mScroll[mTab] || 0);
+    measureMobileShell();
+  }
+
+  // The pane being switched to was display:none until a line ago. Its height is in
+  // the layout tree immediately, but the scrollable area behind it is not always
+  // resized in time for a synchronous scrollTo to land — a restore deep into a
+  // long pane silently clamps to 0. So ask once now (correct in the common case,
+  // and no visible jump) and again on the next frame, once layout has settled.
+  function restoreMobileScroll(top) {
+    window.scrollTo({ top, behavior: "auto" });
+    requestAnimationFrame(() => window.scrollTo({ top, behavior: "auto" }));
+  }
+
+  // Used by revealLeftPane / revealRightPane: bring a tab forward, but never
+  // record the scroll position of a jump we are about to overwrite anyway.
+  function showMobileTab(tab) {
+    if (!narrowLayout() || !mShellLive() || mTab === tab) return;
+    setMobileTab(tab);
+  }
+
+  // The shell's height is the second sticky band a jump has to clear (--topbar-h
+  // is the first), so the stylesheet reads it the same way.
+  function measureMobileShell() {
+    const shell = $("#mshell");
+    const h = shell && shell.offsetParent ? shell.offsetHeight : 0;
+    document.documentElement.style.setProperty("--mshell-h", h + "px");
+  }
+
+  // Built from the same three sources the wide layout uses — the site record, the
+  // dashboard's category order and railAttentionCounts() — so the two navigations
+  // can never disagree about what is left.
+  function renderMobileNav() {
+    const shell = $("#mshell");
+    if (!shell) return;
+    const live = !!state.site && !$("#workspace").hidden;
+    shell.hidden = !live;
+    if (!live) {
+      // No site: no tabs, and the two panes go back to stacking (picker above,
+      // report placeholder below), which is the right shape for that state.
+      const split = $(".split");
+      if (split) split.classList.remove("mtab-collect", "mtab-report");
+      measureMobileShell();
+      return;
+    }
+
+    const s = state.site;
+    $("#msite-name").textContent = s.name || "";
+    $("#msite-ids").textContent = [s.station_num && `#${s.station_num}`, s.state].filter(Boolean).join(" · ");
+
+    const catById = {};
+    for (const c of (DATA.sourcesMeta && DATA.sourcesMeta.categories) || []) catById[c.id] = c;
+    const attention = railAttentionCounts();
+    const jump = $("#mjump");
+    jump.replaceChildren(...dashboardCats.map((id) => {
+      const cat = catById[id];
+      if (!cat) return null;
+      const n = attention[id] || 0;
+      // .hidden as a property, not an attribute: el() would write hidden="false"
+      // for a category with something outstanding, and any hidden attribute hides.
+      const count = el("span", { class: "mjump-count", "aria-hidden": "true" }, `${n}`);
+      count.hidden = !n;
+      const btn = el("button", {
+        type: "button", class: "mjump-btn", "data-target": `group-${id}`, "data-cat": id,
+        onclick: () => railScrollTo(`group-${id}`),
+      }, el("span", { class: "mjump-glyph", "aria-hidden": "true" }, CAT_GLYPH[id] || "•"),
+         el("span", {}, cat.label), count);
+      btn.style.setProperty("--cat", `var(--cat-${id})`);
+      setMobileJumpLabel(btn, cat.label, n);
+      return btn;
+    }).filter(Boolean));
+
+    setMobileTab(mTab, { remember: false });
+    refreshMobileNav();
+  }
+
+  // Same wording as the rail's tooltip, for the same reason: the count is a badge
+  // for the eye, so the accessible name has to state it in words.
+  function setMobileJumpLabel(btn, label, n) {
+    btn.setAttribute("aria-label", label + (n ? ` — ${n} still need you` : ""));
+  }
+
+  // Count-only refresh, run from renderCollectionStatus() beside refreshRailBadges()
+  // so every path that changes a result keeps both navigations live.
+  function refreshMobileNav() {
+    if (!mShellLive()) return;
+    const c = statusCounts();
+    const badge = $("#mtab-badge");
+    if (badge) {
+      badge.hidden = !c.outstanding;
+      badge.textContent = c.outstanding ? `${c.outstanding}` : "";
+    }
+    const collect = $("#mtab-collect");
+    if (collect) collect.setAttribute("aria-label",
+      c.outstanding ? `Collect — ${c.outstanding} of ${c.n} still need you` : "Collect — nothing outstanding");
+    const catById = {};
+    for (const cat of (DATA.sourcesMeta && DATA.sourcesMeta.categories) || []) catById[cat.id] = cat;
+    const attention = railAttentionCounts();
+    $$("#mjump .mjump-btn").forEach((btn) => {
+      const cat = catById[btn.dataset.cat];
+      if (!cat) return;
+      const n = attention[btn.dataset.cat] || 0;
+      const count = btn.querySelector(".mjump-count");
+      if (count) { count.hidden = !n; count.textContent = n ? `${n}` : ""; }
+      setMobileJumpLabel(btn, cat.label, n);
+    });
+    measureMobileShell();
+  }
+
+  // The columns are only tab panels while the tabs exist. Announcing them as
+  // panels on the wide layout — where both are on screen at once and there is no
+  // tablist — would be a lie to assistive tech, so the roles come and go with the
+  // breakpoint.
+  function syncNarrowRoles() {
+    const narrow = narrowLayout();
+    for (const t of M_TABS) {
+      const col = document.getElementById(t.col);
+      if (!col) continue;
+      if (narrow) { col.setAttribute("role", "tabpanel"); col.setAttribute("aria-labelledby", t.btn.slice(1)); }
+      else { col.removeAttribute("role"); col.removeAttribute("aria-labelledby"); }
+    }
+    if (!narrow) setTopbarMenuOpen(false);
+    measureMobileShell();
+    // The scroll-spy is bound to one layout's scroll container — rebuild both
+    // navigations so it re-binds to the one now in force.
+    renderRailNav();
+  }
+
+  // The topbar's ⋯ popover — the same three controls the wide layout shows inline.
+  function setTopbarMenuOpen(open) {
+    const menu = $("#topbar-meta"), btn = $("#btn-topbar-more");
+    if (!menu || !btn) return;
+    menu.classList.toggle("open", !!open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
 
   // ---------------------------------------------------------------- scroll sync
   // Optional: keep the two panes roughly aligned by report section while
@@ -6294,6 +6497,43 @@
     // The two panes teach each other by highlight rather than by 43 "find the
     // other half of this" buttons.
     wirePaneLinking();
+
+    // narrow layout — the tab switcher that stands in for the pane handles below
+    // 981px, plus the topbar's ⋯ popover.
+    for (const t of M_TABS) {
+      const btn = $(t.btn);
+      if (btn) btn.addEventListener("click", () => setMobileTab(t.tab));
+    }
+    const mtabs = $("#mtabs");
+    if (mtabs) mtabs.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault();
+      const next = e.key === "Home" ? "collect"
+        : e.key === "End" ? "report"
+        : mTab === "collect" ? "report" : "collect";
+      setMobileTab(next);
+      const btn = $(M_TABS.find((t) => t.tab === next).btn);
+      if (btn) btn.focus();
+    });
+    const moreBtn = $("#btn-topbar-more");
+    if (moreBtn) moreBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setTopbarMenuOpen(!$("#topbar-meta").classList.contains("open"));
+    });
+    // Clicking one of the three actions is a decision — the popover has served its
+    // purpose either way, so it closes on any click inside it or outside it.
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".topbar-meta-wrap") || e.target.closest(".topbar-meta")) setTopbarMenuOpen(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !$("#topbar-meta").classList.contains("open")) return;
+      setTopbarMenuOpen(false);
+      if (moreBtn) moreBtn.focus();
+    });
+    syncNarrowRoles();
+    if (window.matchMedia) {
+      try { window.matchMedia(NARROW_MQ).addEventListener("change", syncNarrowRoles); } catch (_) {}
+    }
     // agent.js opens its panel from the topbar; the panel is in the left column.
     const agentBtn = $("#btn-agent-settings");
     if (agentBtn) agentBtn.addEventListener("click", revealLeftPane);
@@ -6308,7 +6548,8 @@
     measureTopbar();
     measureStatusBar();
     measureReportHeader();
-    window.addEventListener("resize", () => { measureTopbar(); measureStatusBar(); measureReportHeader(); });
+    measureMobileShell();
+    window.addEventListener("resize", () => { measureTopbar(); measureStatusBar(); measureReportHeader(); measureMobileShell(); });
     // Keep the pinned collection bar's metrics honest: its height drives where the
     // group headers pin, and its position drives the pinned styling.
     const statusBar = $("#collection-status");
@@ -6316,6 +6557,9 @@
     // …and the report's document header, which drives where a jumped-to section lands.
     const docHead = $("#report .rdoc");
     if (docHead && "ResizeObserver" in window) new ResizeObserver(measureReportHeader).observe(docHead);
+    // …and the narrow-layout shell, whose height does the same job below 981px.
+    const shell = $("#mshell");
+    if (shell && "ResizeObserver" in window) new ResizeObserver(measureMobileShell).observe(shell);
     const colLeft = $("#col-left");
     if (colLeft) {
       let queued = false;

@@ -134,7 +134,11 @@ a { color: var(--brand); }
 .brand-mark { font-size: 28px; }
 .topbar h1 { font-size: var(--fs-app); line-height: 1.1; }
 .tagline { margin: var(--sp-0) 0 0; font-size: var(--fs-meta); opacity: .85; }
+.topbar-meta-wrap { position: relative; display: flex; align-items: center; }
 .topbar-meta { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-body); flex-wrap: wrap; justify-content: flex-end; }
+/* The ⋯ that stands in for the three of them below 981px — see the narrow-layout
+   block at the foot of this file. */
+.topbar-more { display: none; }
 .ghost-link { color: var(--brand-ink); opacity: .9; text-decoration: none; border: 1px solid rgba(255,255,255,.35); padding: var(--sp-1) var(--sp-3); border-radius: 999px; background: transparent; font: inherit; line-height: 1.2; cursor: pointer; appearance: none; -webkit-appearance: none; }
 .ghost-link:hover { opacity: 1; background: rgba(255,255,255,.12); }
 .ghost-link:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
@@ -167,10 +171,24 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   .split.pane-hide-left > .railnav { display: none; }
   .split.pane-hide-right > .col-right { display: none; }
 }
+/* Below the breakpoint the two panes are TABS, not a stack: one column, one pane
+   at a time, switched from .mshell above. Stacking them put the report — the
+   deliverable — beneath the entire collection pane, so reaching its first line
+   meant scrolling past every source card and then scrolling back to change
+   anything. The classes are set by app.js and are inert on the wide layout, so
+   nothing has to be unset when the window grows. Before a site is loaded neither
+   class is applied and the two stack exactly as they always did: with no site
+   there is only the picker to see. */
 @media (max-width: 980px) {
   .split { flex-direction: column; }
   .col { width: 100%; }
   .col-right { margin-top: var(--sp-1); }
+  .split.mtab-collect > .col-right { display: none; }
+  .split.mtab-report > .col-left { display: none; }
+  /* Page scroll, with two sticky bands above it (topbar + shell) — so a jump has
+     to clear both or it lands the target underneath them. --mshell-h is measured
+     and published by app.js, the same way --topbar-h is. */
+  html { scroll-padding-top: calc(var(--topbar-h, 64px) + var(--mshell-h, 0px) + var(--sp-2)); }
 }
 
 /* ---------- pane collapse handles ---------- */
@@ -254,8 +272,90 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   font-size: var(--fs-micro); font-weight: 800; display: grid; place-items: center;
 }
 .rail-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }
-/* No room for it in the stacked layout — the column is normal page scroll there. */
+/* No room for a 44px gutter in one column — .mjump below carries the same jumps
+   and the same counts, as a scrolling row instead of a column. */
 @media (max-width: 980px) { .railnav { display: none; } }
+
+/* ---------- narrow layout: the tab shell ----------
+   Sits between the topbar and the panes below 981px, and is the whole of the
+   narrow-screen navigation: which pane, which site, which category. Sticky under
+   the topbar so all three stay answerable from anywhere in a 8,000px column.
+   display:none at ≥981px — the wide layout has the pane handles and the rail. */
+.mshell { display: none; }
+@media (max-width: 980px) {
+  .mshell {
+    display: flex; flex-direction: column; gap: var(--sp-1);
+    position: sticky; top: var(--topbar-h, 64px); z-index: 15;
+    margin: calc(-1 * var(--sp-5)) calc(-1 * var(--sp-5)) var(--sp-3);
+    padding: var(--sp-2) var(--sp-4) var(--sp-1);
+    background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: var(--shadow);
+  }
+  .mshell[hidden] { display: none; }
+}
+/* The pane switcher. A segmented control, because the two are one choice — the
+   same relationship the pane handles state on the wide layout. */
+.mtabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.mtab {
+  flex: 1 1 0; min-height: 44px; padding: var(--sp-2) var(--sp-3);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  font: inherit; font-size: var(--fs-body); font-weight: 650; line-height: 1.2;
+  border: 0; border-left: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+  cursor: pointer;
+}
+.mtab:first-child { border-left: 0; }
+.mtab:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
+/* Selected: fill + weight + aria-selected. Never the fill alone. */
+.mtab.is-active { background: var(--brand); color: #fff; }
+/* The mobile equivalent of the rail badges — what is still outstanding, on the
+   tab you would leave to go and do it. */
+.mtab-badge {
+  min-width: 18px; height: 18px; padding: 0 var(--sp-1); border-radius: 9px;
+  display: inline-grid; place-items: center;
+  background: var(--manual); color: var(--cat-ink);
+  font-size: var(--fs-micro); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.mtab-badge[hidden] { display: none; }
+.mtab.is-active .mtab-badge { background: #fff; color: var(--brand); }
+
+/* Site identity — visible on both tabs, so neither pane is ever anonymous. The
+   report's own document header states it too, but only the Report tab can see
+   that one. */
+.msite { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0;
+  font-size: var(--fs-meta); color: var(--ink-soft); }
+/* The station number and state are short, and are what disambiguates two sites
+   with similar names — so they never shrink, and the name takes the ellipsis. */
+.msite-name { min-width: 0; flex: 0 1 auto; font-size: var(--fs-title); font-weight: 650; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msite-ids { flex: 0 0 auto; white-space: nowrap; }
+
+/* Category jump — the nav rail's job, laid on its side. Scrolls horizontally
+   inside itself so a long list never widens the page. Only on the Collect tab:
+   the categories are collection's structure, not the report's. */
+.mjump { display: flex; gap: var(--sp-1); overflow-x: auto; overflow-y: hidden;
+  margin: 0 calc(-1 * var(--sp-4)); padding: var(--sp-1) var(--sp-4);
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.mjump::-webkit-scrollbar { display: none; }
+.mjump[hidden] { display: none; }
+.mjump-btn {
+  flex: 0 0 auto; min-height: 44px; padding: var(--sp-1) var(--sp-3);
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink-soft);
+  font: inherit; font-size: var(--fs-meta); font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.mjump-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+/* "You are here" — the left edge marker the rail uses, turned into a filled dot
+   so it survives being a pill rather than a square. */
+.mjump-btn.is-active { background: var(--surface-2); border-color: var(--cat, var(--brand)); color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--cat, var(--brand)); }
+.mjump-glyph { font-size: var(--fs-title); line-height: 1; }
+.mjump-count {
+  min-width: 17px; height: 17px; padding: 0 var(--sp-0); border-radius: 9px;
+  display: inline-grid; place-items: center;
+  background: var(--found-edge); color: var(--cat-ink, #fff);
+  font-size: var(--fs-micro); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.mjump-count[hidden] { display: none; }
 
 /* Right-column placeholder shown until a site is loaded. The explicit display
    here would otherwise beat the [hidden] user-agent rule, so re-assert it. */
@@ -1567,21 +1667,120 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 .foot a { color: var(--ink-soft); }
 
 /* ---------- responsive ---------- */
+/* Everything below 981px is a touch layout on one column. Three jobs, in order:
+   keep the header to one row, bring every control the operator actually presses
+   up to a 44px target, and let anything that used to rely on side-by-side width
+   wrap instead of widening the page. */
+@media (max-width: 980px) {
+  /* ONE ROW. nowrap is what guarantees it — the meta controls have left the flow
+     into the ⋯ popover, and the brand shrinks rather than pushing them down. */
+  .topbar-inner { flex-wrap: nowrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); }
+  .brand { min-width: 0; }
+  .brand > div { min-width: 0; }
+  .topbar h1, .tagline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar-more { display: inline-flex; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; padding: 0 var(--sp-2); font-size: var(--fs-app); line-height: 1; }
+  /* The three of them, as a popover on the page surface rather than the brand
+     bar — so they read as a menu and not as more header. */
+  .topbar-meta {
+    display: none; position: absolute; right: 0; top: calc(100% + var(--sp-2)); z-index: 60;
+    flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: var(--sp-0);
+    min-width: 190px; padding: var(--sp-1);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+  }
+  .topbar-meta.open { display: flex; }
+  .topbar-meta .ghost-link {
+    color: var(--ink); opacity: 1; border-color: transparent; border-radius: 7px;
+    min-height: 44px; display: flex; align-items: center; justify-content: flex-start;
+    padding: var(--sp-2) var(--sp-3); font-size: var(--fs-body); font-weight: 600;
+  }
+  .topbar-meta .ghost-link:hover { background: var(--surface-2); }
+  .topbar-meta .ghost-link:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+  /* Destructive, and irreversible — ruled off from the two preferences above it,
+     the same way .menu-item.danger is on the card menus. */
+  #btn-cache-blaster { color: var(--failed); }
+
+  /* ---- 44px targets ----
+     Everything the operator presses to get through a site. Sized by min-height
+     rather than padding so the label keeps its type step and the row keeps its
+     rhythm; inline-flex where the element was inline, or min-height does nothing. */
+  .btn, .tab, .menu-item, .signoff, .review-toggle, .result-chip, .inc-btn, .inc-change,
+  .cs-seg, .cs-res, .cs-sort, .cs-more, .g-toggle, .src-expand, .src-collapse, .src-info,
+  .src-result-more, .rdoc-warn-btn, .sd-thumb, .bb-close {
+    min-height: 44px;
+  }
+  .btn, .tab, .signoff, .review-toggle, .result-chip, .cs-seg, .cs-res, .cs-sort, .cs-more,
+  .g-toggle, .src-info, .src-result-more {
+    display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1);
+  }
+  .menu-item { display: flex; align-items: center; }
+  .g-toggle { width: 44px; }
+  .guide-btn { width: 44px; border-radius: 50%; }
+  .bb-close { min-width: 44px; }
+  /* The thumbnail is the target, so it grows to fill the taller box rather than
+     sitting letterboxed inside it. */
+  .sd-thumb img { height: 42px; }
+  /* Drag-and-drop and paste are not phone gestures — "choose a file" is the only
+     way in here, so on touch it stops being a word in a sentence and becomes the
+     button it has always behaved as. */
+  .dropzone .pick-btn {
+    display: block; margin: var(--sp-2) auto 0; min-height: 44px; padding: 0 var(--sp-4);
+    border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+    color: var(--brand); text-decoration: none;
+  }
+  /* Four squeezed cells in a 320px column is a 55px-wide target per result. Two
+     rows of two gives each answer a real button without a horizontal scroll. */
+  .status-select { display: grid; grid-template-columns: 1fr 1fr; }
+  .status-select button { min-height: 44px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .status-select button:nth-child(2n) { border-right: 0; }
+  .status-select button:nth-child(n+3) { border-bottom: 0; }
+  .result-slot { min-width: 210px; }
+  .result-slot .status-select { width: 100%; }
+
+  /* ---- wrap, don't widen ----
+     Rows built for a 700px column have to fold on a 320px one, or the page grows
+     a horizontal scrollbar and every card is read through a keyhole. */
+  .group-head { flex-wrap: wrap; }
+  .group-head h3 { white-space: normal; min-width: 0; overflow-wrap: anywhere; }
+  .group-head .g-roll { white-space: normal; }
+  .group-head .g-line { display: none; }
+  .group-head .g-toggle { margin-left: auto; }
+  .card-head, .sd-head, .do-row, .include-row, .flow-step, .adv-actions { min-width: 0; }
+  .src-name, .src-line-name { overflow-wrap: anywhere; }
+  input[type=file] { max-width: 100%; }
+  /* The collection bar and the report's document header are both one-line
+     toolbars built for a 700px pane; on one column they have to fold. */
+  .cs-row { flex-wrap: wrap; }
+  .rdoc-rollup { flex-wrap: wrap; }
+  .rdoc-progress, .rdoc-warn-btn { white-space: normal; text-align: left; }
+  .rsec-head { flex-wrap: wrap; }
+  .review-toggle { min-width: 0; }
+  /* Report prose carries source URLs; a long one must break rather than push the
+     whole pane sideways. */
+  #report a, .r-ev-item, .rsec-body { overflow-wrap: anywhere; }
+}
 @media (max-width: 720px) {
   .coord-grid { grid-template-columns: repeat(2, 1fr); }
   .summary-grid { grid-template-columns: 1fr; }
   .topbar h1 { font-size: var(--fs-display); }
-  .topbar-meta { gap: var(--sp-2); font-size: var(--fs-meta); }
   .ghost-link { padding: var(--sp-1) var(--sp-2); }
+  /* Below this the brand cannot hold both lines and still leave the site strip
+     any width — and the shell right underneath now says what the app is doing. */
+  .tagline { display: none; }
+}
+@media (max-width: 420px) {
+  .coord-grid { grid-template-columns: 1fr; }
 }
 
 /* ---------- print ---------- */
 #print-root { display: none; }
 @media print {
-  .topbar, .railnav, .pane-divider, #site-picker, #run-checks, #advanced, #dashboard, #collection-status,
+  .topbar, .railnav, .pane-divider, .mshell, #site-picker, #run-checks, #advanced, #dashboard, #collection-status,
   .head-actions, .r-review, .foot, #app > .banner { display: none !important; }
-  /* A pane collapsed on screen must not go missing from the printout. */
-  .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right { display: block !important; }
+  /* A pane collapsed on screen — by a pane handle on the wide layout, or by the
+     tab switcher on the narrow one — must not go missing from the printout. */
+  .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right,
+  .split.mtab-collect > .col-right, .split.mtab-report > .col-left { display: block !important; }
   /* The document header is a title block on paper, not a floating toolbar —
      a sticky element in a print context repeats down the page in some browsers. */
   #report .card-head { position: static !important; }

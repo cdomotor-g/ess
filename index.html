@@ -26,15 +26,48 @@
           <p class="tagline">Environmental Site Summary — desktop assessment assistant</p>
         </div>
       </div>
-      <div class="topbar-meta" id="topbar-meta">
-        <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">Dark</button>
-        <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">Clear cache</button>
-        <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
+      <!-- Maintenance and preferences — never the work. On the wide layout they sit
+           inline; below 981px the same three controls become a ⋯ popover, so the
+           header is one row and "Clear cache" (destructive, no undo) is not one
+           mis-tap away from a half-finished assessment. The same nodes move rather
+           than being duplicated, so there is still only one theme button to keep
+           in sync. -->
+      <div class="topbar-meta-wrap">
+        <button class="ghost-link topbar-more" id="btn-topbar-more" type="button"
+                aria-expanded="false" aria-controls="topbar-meta"
+                aria-label="Theme, cache and documentation" title="Theme, cache and documentation">⋯</button>
+        <div class="topbar-meta" id="topbar-meta">
+          <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">Dark</button>
+          <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">Clear cache</button>
+          <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
+        </div>
       </div>
     </div>
   </header>
 
   <main id="app">
+   <!-- NARROW-LAYOUT SHELL — below 981px the two columns cannot sit side by side,
+        and stacking them buries the report under the whole of collection. So the
+        panes become tabs instead of a stack: the same three-state relationship the
+        pane handles express on the wide layout, said in one column. Everything in
+        here is display:none at ≥981px, and hidden outright until a site is loaded
+        (with no site there is only one pane worth showing).
+
+        Three rows, each answering something the stacked layout could not:
+          the tabs      which pane am I in, and how much is still outstanding
+          the site strip which site is this — neither pane is ever anonymous
+          the jump row   the categories, with counts — the rail is hidden here -->
+   <div class="mshell" id="mshell" hidden>
+     <div class="mtabs" id="mtabs" role="tablist" aria-label="Workspace">
+       <button class="mtab is-active" id="mtab-collect" type="button" role="tab" data-mtab="collect"
+               aria-selected="true" aria-controls="col-left">Collect<span class="mtab-badge" id="mtab-badge" hidden></span></button>
+       <button class="mtab" id="mtab-report" type="button" role="tab" data-mtab="report"
+               aria-selected="false" aria-controls="col-right" tabindex="-1">Report</button>
+     </div>
+     <p class="msite" id="msite"><b class="msite-name" id="msite-name"></b><span class="msite-ids" id="msite-ids"></span></p>
+     <div class="mjump" id="mjump" role="group" aria-label="Jump to a category" hidden><!-- filled by JS: renderMobileNav() --></div>
+   </div>
+
    <div class="split">
     <!-- Narrow jump rail — the four numbered steps, then one button per visible
          dashboard group. Sits outside #col-left so it never scrolls away and never
