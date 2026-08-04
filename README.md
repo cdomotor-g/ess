@@ -78,9 +78,12 @@ that pane, so the four steps are all you see until you go looking.
    source's own words, labelled and tinted to the result), then **your note**,
    then what you do about it — set a **Result** (Found / Nothing / Failed /
    Manual; the **ⓘ** beside it says how Result and sign-off relate), **Open the
-   source ↗**, choose the **Report** section and **＋ Include**, and **Sign off**
-   last. Utilities you need occasionally — copy lat/long, web search, jump to the
-   report, clear your note — are on the card's **⋯** menu.
+   source ↗**, then **＋ Include**, and **Sign off** last. The **Report** line
+   names the section this card feeds — press **change** if it belongs somewhere
+   else. Including it confirms where it went (**✓ Added to Threatened Habitat**),
+   and that name takes you straight there. Utilities you need occasionally — copy
+   lat/long, web search, jump to the report, clear your note — are on the card's
+   **⋯** menu.
    The list keeps itself short as you work: a card you've **signed off**
    settles to a single line, one that's answered but not yet signed off shows a
    short summary, and only the sources that still need you stay at full size and
@@ -195,6 +198,15 @@ panes **collapse one side and give the other the full width** (one at a time);
 click the highlighted handle to bring the pane back. The choice is remembered.
 The narrow **jump rail** on the far left carries the four steps plus one button
 per source category, badged with how many sources in it still need a human.
+
+**The two halves show you they belong together.** Hover (or tab to) a source card
+and the report section it feeds lights up; hover a report section and every card
+feeding it lights up — no scrolling, nothing moves. In the report, a source's
+**name** is the way back to its card. The collection bar names any **report
+sections with no evidence yet**, so you find an empty section from the side you
+are collecting on rather than by scrolling the report. The third handle on the
+seam (**⇄**) **links the two panes' scrolling** so each follows the other by
+section; it is off until you turn it on, and then remembered.
 
 ### Let the agent do the collection
 

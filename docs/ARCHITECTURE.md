@@ -263,6 +263,43 @@ Vanilla JS, no dependencies, no build. It:
   section lands below the pinned box rather than underneath it. The handles on
   the seam collapse either column so the other takes the full width — one at a
   time, remembered in `localStorage`;
+- **joins the two columns**, which the layout could express for free and was
+  instead paying for in chrome. The only join used to be a repeated card number
+  plus two buttons per pairing whose entire job was *find the other half of this*.
+  Every card carries `data-section` (its target) and every report section carries
+  the same value, and from that one attribute:
+  **hover or focus either half tints the other** (`linkPartners` /
+  `setLinkHighlight`, `.is-linked`) — one delegated `pointerover`/`focusin` pair
+  on the document rather than listeners per card, because both panes re-render
+  constantly. A card lights its one section; a section lights every card feeding
+  it. Pure accent change — a tint, a left accent bar and a `⇢`/`⇠` marker on the
+  heading, so there is nothing to suppress under `prefers-reduced-motion` and
+  nothing lost in greyscale;
+  **`＋ Include` says where it went** (`INCLUDE_FLASH`, `.inc-receipt`,
+  `role="status"`) — the most causal action in the tool used to land three
+  thousand pixels down the other pane with no feedback at all. The receipt names
+  the destination and the name is the link, and the destination section wears the
+  same `.is-linked` accent for a moment. Transient and deliberately unpersisted:
+  it is feedback on an action, not card state;
+  **the destination reads as text** (`renderIncludeTarget`) — a 200 px `<select>`
+  carrying all eleven sections, on every card, permanently, was heavy machinery
+  for a choice the default gets right nearly every time. The full `<select>` is
+  one click behind *change*, and leaving it without choosing is a cancel;
+  **report evidence names are the way back** — the standing `⇠ Show` on every
+  entry, whose visible label never said where it went, is gone; the source name
+  is the control, the same pattern the collapsed strips already used;
+  **starved sections are visible from the left** (`starvedSections`,
+  `renderStarvedSections`) — an empty section used to be discoverable only by
+  scrolling the report. A section counts only when a source that applies to this
+  site belongs to one of its categories, so a site with no permits sources is
+  never told that *Permits and permissions* is empty; and
+  **linked scrolling** (`alignPanes`, third handle on the seam) keeps the panes
+  aligned by section, matching the topmost thing in view in the pane being
+  scrolled to its counterpart in the other. Off until asked for — moving a pane
+  nobody touched is a surprise — remembered in `localStorage`, stood down (and
+  visibly disabled) whenever a pane is collapsed or the layout has stacked. A
+  short timestamp lock swallows the echo each programmatic scroll raises, and an
+  8 px deadband stops it fighting the operator's own scrolling;
 - persists per-site state in `localStorage`, split across two keys per site: a
   small **text** key (findings text, report, prefs — rewritten on every keystroke)
   and a larger `…:img` key holding the photos + satellite map data URLs (rewritten

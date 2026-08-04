@@ -48,6 +48,11 @@
      --failed's red belongs to a contradiction, not to an unfinished check. */
   --caution:    light-dark(#8a6d1a, #e0c25a);
   --caution-bg: light-dark(#f9f3e0, #2e2712);
+  /* The join between the two panes. Worn by a collection card and the report
+     section it feeds while either half is hovered or focused — deliberately the
+     brand hue rather than any status colour, because it says "these two are the
+     same thing", not "this is a result". */
+  --link-bg:   light-dark(#e9f2f9, #14293a);
   /* light-dark() resolves colours, not whole shadow lists, so the geometry is
      shared and only the two shadow colours switch per theme. */
   --shadow-near: light-dark(rgba(16,32,48,.06), rgba(0,0,0,.30));
@@ -193,6 +198,27 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 /* The collapsed side's handle is the way back — mark it so which pane is hidden
    is readable at a glance. */
 .pane-btn[aria-expanded="false"] { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+/* Linked scrolling. Ruled off from the two collapse handles above — it answers a
+   different question ("do the panes move together") from theirs ("which panes are
+   open") — and its on state is a fill plus a solid border, not a hue alone. */
+.pane-sync { margin-top: var(--sp-2); border-style: dashed; }
+.pane-sync.on { background: var(--brand); border-color: var(--brand); border-style: solid; color: var(--brand-ink); }
+.pane-sync:disabled { opacity: .35; cursor: default; }
+.pane-sync:disabled:hover { color: var(--ink-soft); border-color: var(--line); }
+
+/* ---------- the join between the two panes ---------- */
+/* Hover or focus either half and the other lights up. No scrolling, no layout
+   shift, no motion — an accent bar and a tint, so it costs nothing to suppress
+   under prefers-reduced-motion and nothing to read in greyscale: the bar is a
+   change of shape, and the ⇢ / ⇠ marker on the heading is a change of content. */
+.src.is-linked, .rsection.is-linked {
+  background: var(--link-bg);
+  box-shadow: inset 5px 0 0 var(--brand);
+}
+/* Non-colour partner for the tint — the arrow points at the other pane. */
+.src.is-linked .src-name::after,
+.src.is-linked .src-line-name::after { content: " ⇢"; color: var(--brand); font-weight: 700; }
+.rsection.is-linked .rsec-head h3::after { content: " ⇠"; color: var(--brand); font-weight: 700; }
 
 /* ---------- section rail ---------- */
 /* A narrow fixed column of jump buttons pinned to the split, not to the scrolling
@@ -760,6 +786,22 @@ body.qm-open { overflow: hidden; }
 .cs-res.unset.on { background: var(--surface-2); border-color: var(--ink-soft); color: var(--ink); }
 .cs-res.on b { color: inherit; }
 
+/* Report sections still starved of evidence, named from the collection pane —
+   the only place the operator is while the evidence is being gathered. One
+   wrapping line at the type floor; it removes itself as sections fill up. */
+.cs-starved { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-0) var(--sp-1);
+  margin: var(--sp-2) 0 0; padding-top: var(--sp-2); border-top: 1px dashed var(--line);
+  font-size: var(--fs-micro); color: var(--ink-soft); }
+.cs-starved[hidden] { display: none; }
+.cs-starved-lead { font-weight: 650; display: inline-flex; align-items: baseline; gap: var(--sp-1); }
+/* An empty ring, so "nothing in it yet" is a shape and not only a muted colour. */
+.cs-starved-mark { color: var(--caution); font-size: var(--fs-meta); }
+.cs-starved-sec { font: inherit; font-size: var(--fs-micro); font-weight: 600; color: var(--brand);
+  background: transparent; border: 0; border-radius: 5px; padding: 0 var(--sp-0); cursor: pointer; text-align: left; }
+.cs-starved-sec:hover { text-decoration: underline; }
+.cs-starved-sec:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.cs-starved-rest { font-style: italic; }
+
 /* ---------- step 3 — run the checks ---------- */
 /* Three sub-steps in one card: auto-check, copy the prompt, paste the reply back.
    They are numbered and stacked so the round trip out to an assistant and back
@@ -1241,10 +1283,31 @@ a.photo-credit:hover { text-decoration: underline; }
    The last row of the card: where it lands in the report, and then the sign-off —
    last control on the card, in DOM order and on screen, which is what the
    instructions have always said ("sign off last"). */
-.include-row .inc-target { flex: 1; min-width: 130px; width: auto; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-meta); }
 .include-row .inc-btn { white-space: nowrap; }
 .include-row .inc-btn.on { background: var(--reviewed); border-color: var(--reviewed); color: #fff; }
 .include-row .signoff { margin-left: auto; }
+/* The destination reads as text — a 200px <select> on all 23 cards was heavy
+   machinery for a choice the default gets right nearly every time. The full
+   <select> is one click behind "change" (.inc-where swaps it in). */
+.inc-where { flex: 1; min-width: 130px; display: inline-flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.inc-dest { font-size: var(--fs-meta); font-weight: 650; color: var(--ink);
+  display: inline-flex; align-items: baseline; gap: var(--sp-1); }
+.inc-dest-arrow { color: var(--ink-soft); }
+.inc-change { flex: none; }
+.inc-where .inc-target { flex: 1; min-width: 130px; width: auto; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-meta); }
+/* The flight path: where the card just landed, said on the card that sent it.
+   Full-width, so it wraps to its own line under the row it belongs to. */
+.inc-receipt { flex: 0 0 100%; margin: var(--sp-0) 0 0; font-size: var(--fs-micro); color: var(--ink-soft);
+  display: flex; align-items: baseline; gap: var(--sp-1); flex-wrap: wrap; }
+.inc-receipt-tick { color: var(--reviewed); font-weight: 700; }
+.inc-receipt-arrow { color: var(--brand); }
+/* The section name is the link — the trip to the report is offered at the one
+   moment it is relevant, rather than parked on every card forever. */
+.inc-dest-link { font: inherit; font-size: var(--fs-micro); font-weight: 650; color: var(--brand);
+  background: transparent; border: 0; border-radius: 5px; padding: 0; cursor: pointer;
+  text-align: left; text-decoration: underline; }
+.inc-dest-link:hover { text-decoration: none; }
+.inc-dest-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* ---------- site map ---------- */
 /* Two locator maps stacked in the (narrow) collection column; they render side by
@@ -1418,12 +1481,19 @@ a.photo-credit:hover { text-decoration: underline; }
    collection cards, so a found matter stands out in the report column too. */
 .r-inc-item.status-found { border-left-color: var(--found-edge); border-left-width: 4px; }
 .r-inc-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.r-inc-name { font-weight: 650; font-size: var(--fs-meta); }
+/* The source name IS the way back to its card — it replaced a standing "⇠ Show"
+   button on every entry, whose visible label never said where it went. Styled as
+   text until hovered, so the entry still reads as a finding rather than a row of
+   controls. */
+.r-inc-name { font: inherit; font-weight: 650; font-size: var(--fs-meta); color: var(--ink);
+  background: transparent; border: 0; border-radius: 5px; padding: 0; cursor: pointer; text-align: left; }
+.r-inc-name:hover { color: var(--brand); text-decoration: underline; }
+.r-inc-name:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .r-inc-head .chip { font-size: var(--fs-micro); }
 /* "Show" + "Remove" sit together at the right of an included-source block. Show
    jumps the collection (left column) to the originating source card. */
 .r-inc-actions { margin-left: auto; display: flex; gap: var(--sp-1); }
-.r-inc-show, .r-inc-remove { font-size: var(--fs-micro); padding: var(--sp-0) var(--sp-2); }
+.r-inc-remove { font-size: var(--fs-micro); padding: var(--sp-0) var(--sp-2); }
 .r-inc-note { font-size: var(--fs-meta); color: var(--ink); margin: var(--sp-1) 0 0; white-space: pre-wrap; }
 /* A finding's prose shows its first three lines; the rest is one click away. A
    PMST result runs to a dozen lines of matter types, and four of those in a row
