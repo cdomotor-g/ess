@@ -162,10 +162,12 @@ that pane, so the four steps are all you see until you go looking.
    **flags contradictions** — a statement that says "no known…" while the evidence
    came back *Found*, a "matters present" statement with no supporting detail, or
    a section asserting a conclusion while some of its sources have not been
-   checked.
+   checked. Those flags are scaffolding for **you**, so they stay in the app: they
+   are not written into the handover document, and exporting with any of them
+   still open says so first, naming the count and offering to go and review them.
    One **Export ▾** menu takes the report out of the app — **Print/PDF** (the
    handover format) first, then **HTML file**, **JSON export**, **Copy summary**;
-   photos and review flags travel with the export (embedded, so the HTML/JSON stay
+   photos travel with the export (embedded, so the HTML/JSON stay
    self-contained), and the printed and exported reports carry the same
    findings / nothing-found / not-yet-checked split, so the person receiving the
    report sees the caveat too. Each section carries its own **Reviewed** tick, and where the

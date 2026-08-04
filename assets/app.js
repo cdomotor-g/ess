@@ -5194,11 +5194,20 @@
           + ` — these sources have not been checked, so the statement above is not yet fully evidenced.</p>`);
       return `<div class="pr-ev">${rows.join("")}</div>`;
     };
+    // `sec.warnings` is deliberately NOT rendered into the artefact. The
+    // consistency checker talks to the *operator* about their own draft — second
+    // person, "reconsider the statement", "add the specifics" — and this file is
+    // the deliverable, read by someone who cannot act on that instruction. The
+    // warnings keep working everywhere they face the operator (the on-screen
+    // .r-warns strip, the header count, the Check report prompt, and
+    // `sections[].warnings` in the JSON interop object), and
+    // confirmExportWithWarnings() stops unresolved ones leaving unnoticed.
+    // The "⚠ Not yet checked" caveat in evNotesHtml is the opposite case — a fact
+    // about the assessment, addressed to the reader — and stays.
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${nl2br(sec.detail)}</p>` : ""}
       ${sec.note ? `<p>${nl2br(sec.note)}</p>` : ""}
-      ${(sec.warnings || []).map((wn) => `<p class="pr-warn">⚠ Review: ${esc(wn)}</p>`).join("")}
       ${evNotesHtml(sec)}
       ${photosHtml(sec.images, false, interactive)}</div>`).join("");
     // Internal / login-only sources are operator working items — keep their
@@ -5244,7 +5253,35 @@
       </div>`).join("")}</div></div>`;
   }
 
+  /* The consistency warnings no longer travel in the artefact, which makes it
+     possible to hand over a report carrying three unresolved contradictions and
+     never notice. So the artefact paths ask first: the count, the fact that it
+     will not appear in the export, and a way back to the first one.
+
+     Returns true if the export should go ahead. At zero warnings it never
+     interrupts, so the common path is untouched. Cancel is "review them first"
+     and lands the operator on the offending section, exactly where the header's
+     warning count sends them.
+
+     Only the two handover artefacts (Print/PDF, HTML file) are gated. The JSON
+     export still carries `sections[].warnings` — nothing is hidden there — and
+     Copy summary is a working-state paste, not a document; interrupting either
+     would put a dialog in the middle of the round trip to an assistant. */
+  function confirmExportWithWarnings() {
+    const r = reportRollup();
+    if (!r.warnCount) return true;
+    const n = r.warnCount;
+    const first = r.warnings[0].section;
+    const ok = confirm(
+      `${n} consistency warning${n === 1 ? " is" : "s are"} unresolved.\n\n`
+      + `${n === 1 ? "It" : "They"} will not appear in the exported report.\n\n`
+      + `OK = export anyway.\nCancel = review ${n === 1 ? "it" : "them"} first (takes you to ${first.title}).`);
+    if (!ok) showReportSection(first.id);
+    return ok;
+  }
+
   function doPrint() {
+    if (!confirmExportWithWarnings()) return;
     $("#print-root").innerHTML = buildReportHtml(true);
     window.print();
   }
@@ -5258,6 +5295,7 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
   function downloadHtml() {
+    if (!confirmExportWithWarnings()) return;
     const css = document.getElementById("print-styles-inline");
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ESS — ${esc(state.site.name)}</title>
       <style>body{font:13px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#111}
@@ -5283,7 +5321,6 @@
       .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
       .pr-map-img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid #bbb;border-radius:6px}
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}
-      .pr-warn{font-size:11px;font-weight:600;color:#b3261e;background:#fbe6e4;border-radius:5px;padding:5px 8px;margin:6px 0 0}
       .pr-appendix{page-break-before:always;break-before:page}
       .pr-appendix-blurb{font-size:11.5px;color:#444;margin:0 0 10px}
       .pr-appendix-cols{column-count:2;column-gap:22px}

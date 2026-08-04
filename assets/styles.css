@@ -1963,7 +1963,6 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 #print-root .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
 #print-root .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
 #print-root .pr .pr-map-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
-#print-root .pr .pr-warn { font-size: 10px; font-weight: 700; color: #b3261e; background: #fbe6e4; border-radius: 4px; padding: var(--sp-1) var(--sp-2); margin: var(--sp-1) 0 0; }
 /* Appendix A — the Queensland Globe layer list. Starts its own page (it is an
    annexure, not part of the findings) and runs in two columns so forty layers
    take one page instead of four. Groups never split across a column break. */

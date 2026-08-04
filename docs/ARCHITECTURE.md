@@ -306,7 +306,12 @@ Vanilla JS, no dependencies, no build. It:
   only when images change). This keeps note editing fast on image-heavy sites;
   legacy single-key saves are migrated to the split layout on first edit;
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
-  are embedded inline in all three.
+  are embedded inline in all three. The consistency warnings are **not** written
+  into the two handover artefacts (Print/PDF, HTML): they address the operator
+  about their own draft, and the recipient cannot act on them. They stay
+  on-screen, in the header count, in the *Check report* prompt and in the JSON
+  (working state, not a document), and `confirmExportWithWarnings()` guards both
+  artefact paths so unresolved ones can't leave unnoticed.
 
 ### Queensland Globe site map (`assets/qldmap.js`)
 A separate, lazily-initialised module behind `window.ESSQldMap`. It draws a
