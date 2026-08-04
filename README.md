@@ -45,9 +45,17 @@ file, so the choice is only about how you like to work.
   that section is put in front of you for review, and then the flow moves on to
   the next section's sources. **All steps ▾** opens the whole ordered list, with
   what each step still needs, and jumps to any of them; **Skip for now** is always
-  there. Where you got to is remembered per site. *Focus is still being built out
-  — steps that don't yet have their own controls say what they are for and hand
-  you to the workbench, so nothing is out of reach.*
+  there. Where you got to is remembered per site.
+
+  The opening run of steps is the site itself: the station record read back for
+  confirmation (with the assessment date, and one **Correct these details** if the
+  Bureau's record is wrong), the two locator maps, any site photos, and then —
+  straight away, while it is all still fresh — **the report's front page as it now
+  reads**, to be checked and ticked off. The three automated passes follow, one per
+  step; applying an assistant's reply says what it answered and drops you at the
+  first source that still needs a human. *Focus is still being built out — steps
+  that don't yet have their own controls say what they are for and hand you to the
+  workbench, so nothing is out of reach.*
 - **Workbench** — the two-pane view described in the rest of this README:
   everything reachable at once, and you choose what to look at next.
 
