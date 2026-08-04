@@ -195,6 +195,10 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
    single column (normal page scroll) on narrow screens. --topbar-h is measured +
    set by app.js. */
 .split { display: flex; gap: var(--sp-5); align-items: flex-start; }
+/* A `display` declaration outranks the UA's [hidden] rule, so the two top-level
+   views have to opt back in explicitly — otherwise Focus mode's stashed (and now
+   empty) columns would still occupy the page, pane handles and all. */
+.split[hidden], .focus[hidden] { display: none; }
 .col { min-width: 0; }                 /* min-width:0 lets flex children shrink instead of overflowing */
 .col-left { flex: 1 1 50%; }
 .col-right { flex: 1 1 50%; }
@@ -207,8 +211,9 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
      up by it so they pin flush under the topbar instead of leaving a strip of
      card scrolling past above them. */
   .col { --col-pad-top: var(--sp-4); height: 100%; overflow-y: auto; overflow-x: hidden; padding: var(--col-pad-top) var(--sp-2) var(--sp-7); scrollbar-gutter: stable; }
-  /* Focus mode — one pane collapsed, the other taking the whole width. The nav
-     rail goes with the left column, since that's all it navigates. */
+  /* Pane collapse — one pane folded away, the other taking the whole width. The
+     nav rail goes with the left column, since that's all it navigates. (Not to be
+     confused with Focus mode below, which replaces the split entirely.) */
   .split.pane-hide-left > .col-left,
   .split.pane-hide-left > .railnav { display: none; }
   .split.pane-hide-right > .col-right { display: none; }
@@ -232,6 +237,115 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
      and published by app.js, the same way --topbar-h is. */
   html { scroll-padding-top: calc(var(--topbar-h, 64px) + var(--mshell-h, 0px) + var(--sp-2)); }
 }
+
+/* ---------- Focus mode ----------
+   The other way through the same tool, and the default view: one column, one step
+   per screen. It REPLACES .split rather than covering it — app.js empties the two
+   columns while this is live — so there is no cockpit underneath to leak in at the
+   edges, and the browser's own focus management, scrolling and Back all still work.
+
+   The whole mode is deliberately narrow. A step that needs a scrollbar to answer
+   its own question is the wrong step, so the column is capped at a comfortable
+   reading measure and the chrome around the body is three thin rows: where you
+   are, what is being asked, and one way forward.
+
+   Everything here resolves to the same tokens as the panes — this is a different
+   route through the app, not a second design system. */
+.focus { display: block; max-width: 720px; margin: 0 auto; padding: var(--sp-5) var(--sp-2) var(--sp-8); }
+.fx-shell { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* ---- said once, on a first Focus session, and never again. */
+.fx-intro { display: flex; align-items: center; gap: var(--sp-3); margin: 0;
+  font-size: var(--fs-meta); line-height: 1.5; color: var(--ink);
+  background: var(--link-bg); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3); }
+.fx-intro > span { flex: 1 1 auto; }
+.fx-intro > .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ---- where you are. Two lines at most, and never more prominent than the step
+   itself: this is a position report, not the content. */
+.fx-chrome { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.fx-where { grid-area: 1 / 1; margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.fx-phase { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--brand); }
+.fx-of { font-size: var(--fs-meta); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.fx-list-btn { grid-area: 1 / 2; justify-self: end; }
+.fx-track { grid-area: 2 / 1 / 3 / 3; flex: none; width: 100%; }
+
+/* ---- the step list: Focus mode's answer to the nav rail, and what keeps "the
+   tool proposes an order, it does not impose one" true. Every step, its state,
+   and a jump to it. */
+/* display:flex beats the UA [hidden] rule, so a closed list would sit there as an
+   empty bordered box — the same re-assertion every other disclosure here makes. */
+.fx-list[hidden] { display: none; }
+.fx-list { display: flex; flex-direction: column; gap: var(--sp-hair); max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  padding: var(--sp-2); box-shadow: var(--shadow); }
+.fx-list-phase { margin: var(--sp-2) 0 var(--sp-0); font-size: var(--fs-micro); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink-soft); }
+.fx-list-phase:first-child { margin-top: 0; }
+.fx-list-item { display: grid; grid-template-columns: 1.2em 1fr auto; align-items: baseline; gap: var(--sp-2);
+  width: 100%; text-align: left; font: inherit; font-size: var(--fs-body); color: var(--ink);
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: var(--sp-1) var(--sp-2); cursor: pointer; }
+.fx-list-item:hover { background: var(--surface-2); }
+.fx-list-item.is-here { border-color: var(--brand); background: var(--link-bg); font-weight: 650; }
+.fx-list-name { min-width: 0; overflow-wrap: anywhere; }
+.fx-list-state { font-size: var(--fs-micro); color: var(--ink-soft); white-space: nowrap; }
+/* State is carried by the mark AND the word, never by colour alone — the same rule
+   the source cards' status glyphs follow. */
+.fx-list-mark { font-size: var(--fs-micro); text-align: center; }
+.fx-list-item[data-state="done"] .fx-list-mark { color: var(--reviewed); }
+.fx-list-item[data-state="needs-you"] .fx-list-mark { color: var(--caution); }
+.fx-list-item[data-state="blocked"] .fx-list-mark,
+.fx-list-item[data-state="not-reached"] .fx-list-mark { color: var(--ink-soft); }
+.fx-list-item[data-state="done"] .fx-list-name,
+.fx-list-item[data-state="not-reached"] .fx-list-name { color: var(--ink-soft); }
+
+/* ---- the step itself. One card, one question. */
+.fx-step { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: var(--sp-5); }
+.fx-kicker { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-1); }
+/* Do vs Review — a data-entry step and a sign-off step are different work, and
+   saying which one this is costs a word. */
+.fx-kind { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--fill-ink); background: var(--ink-soft); border-radius: 999px; padding: var(--sp-hair) var(--sp-2); }
+.fx-step[data-kind="output"] .fx-kind { background: var(--brand); }
+.fx-step-state { font-size: var(--fs-micro); font-weight: 650; color: var(--ink-soft); }
+.fx-step-state[data-state="done"] { color: var(--reviewed); }
+.fx-step-state[data-state="needs-you"] { color: var(--caution); }
+.fx-title { margin: 0 0 var(--sp-3); font-size: var(--fs-display); line-height: 1.25; }
+.fx-title:focus-visible { border-radius: 6px; }
+.fx-body { display: flex; flex-direction: column; gap: var(--sp-3); }
+.fx-lede { margin: 0; font-size: var(--fs-body); color: var(--ink-soft); line-height: 1.5; }
+.fx-facts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; }
+.fx-fact { font-size: var(--fs-meta); color: var(--ink-soft); }
+.fx-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* A blocked section names what is holding it, and each name is the way to it. */
+.fx-waiting { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); }
+.fx-waiting-src { font: inherit; font-size: var(--fs-meta); color: var(--brand); background: transparent;
+  border: 1px dashed var(--line); border-radius: 999px; padding: var(--sp-hair) var(--sp-2); cursor: pointer; }
+.fx-waiting-src:hover { border-color: var(--brand); background: var(--link-bg); }
+/* A borrowed workbench node (the site picker) sits in the body as itself — the
+   card chrome around it would be a second frame inside the step's own. */
+.fx-adopt > .card { border: 0; box-shadow: none; padding: 0; margin: 0; background: transparent; }
+.fx-adopt > .card > .card-head { display: none; }
+
+/* ---- one way forward. Back and Skip are demoted; Continue is the only primary
+   action on the surface. */
+.fx-nav { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.fx-nav-gap { flex: 1 1 auto; }
+
+@media (max-width: 620px) {
+  .focus { padding: var(--sp-3) 0 var(--sp-7); }
+  .fx-step { padding: var(--sp-4) var(--sp-3); }
+  /* Continue keeps the end of the row; Back and Skip share the start of it. */
+  .fx-nav #fx-next { flex: 1 1 100%; order: -1; }
+}
+
+/* The mode switch is navigation, not a preference, so it is the one control in the
+   top bar's meta row that reads as a button. */
+.topbar-mode { font-weight: 650; border-color: rgba(255,255,255,.6); }
+.topbar-mode:hover { background: rgba(255,255,255,.18); }
 
 /* ---------- pane collapse handles ---------- */
 /* Hidden on the stacked layout: with the columns above/below each other there are
@@ -1382,7 +1496,8 @@ body.qm-open { overflow: hidden; }
 .s-dot.manual::before,  .chip.manual::before,
 .src-result.status-manual .src-result-label::before,
 .status-select button.on[data-s=manual]::before  { content: var(--glyph-manual) / ""; }
-.s-dot.unset::before { content: var(--glyph-unset) / ""; }
+.s-dot.unset::before, .chip.unset::before { content: var(--glyph-unset) / ""; }
+.chip.unset::before { margin-right: var(--sp-1); font-weight: 700; font-style: normal; }
 /* The dot IS the glyph, so it carries no spacing of its own. */
 .s-dot::before { margin: 0; }
 
@@ -1391,6 +1506,7 @@ body.qm-open { overflow: hidden; }
 .chip.none { background: var(--none-bg); color: var(--none); }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
+.chip.unset { background: var(--surface-2); color: var(--ink-soft); }
 
 /* ---------- disposition zone ----------
    What the operator does about the finding, in the order they do it: record the

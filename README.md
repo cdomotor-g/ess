@@ -32,6 +32,27 @@ python3 -m http.server 8000
 Opening `index.html` directly with `file://` will **not** work (browsers block
 `fetch()` of the JSON data from the filesystem). Serve it, or publish to Pages.
 
+### Two views of the same assessment
+
+There are two ways through the tool, and one button in the header switches
+between them at any point without losing anything — the label always names where
+it goes. Both render the same work, save to the same place and export the same
+file, so the choice is only about how you like to work.
+
+- **Focus** *(the default)* — one column, one step per screen, and the tool
+  decides what comes next. The report is built into the flow rather than sitting
+  beside it: once every source feeding, say, *Invasive Plants* has an answer,
+  that section is put in front of you for review, and then the flow moves on to
+  the next section's sources. **All steps ▾** opens the whole ordered list, with
+  what each step still needs, and jumps to any of them; **Skip for now** is always
+  there. Where you got to is remembered per site. *Focus is still being built out
+  — steps that don't yet have their own controls say what they are for and hand
+  you to the workbench, so nothing is out of reach.*
+- **Workbench** — the two-pane view described in the rest of this README:
+  everything reachable at once, and you choose what to look at next.
+
+The walkthrough below describes the **workbench**.
+
 The left pane is the workflow, numbered in the order you work it. Everything
 belonging to another way of working — batches, file imports, the in-browser
 agent, display preferences — is folded into **Advanced options** at the foot of
