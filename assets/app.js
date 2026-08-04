@@ -753,6 +753,24 @@
   // Editable thumbnail (remove button + caption field) — used in the picker galleries.
   // Auto-sourced images (from Wikipedia) also carry a read-only `credit` line so
   // the licensing attribution stays attached to the photo everywhere it appears.
+  // A photo you can open with the keyboard. These were bare <img onclick>: not in
+  // the tab order at all, so the zoom/pan viewer and the Wikipedia source page
+  // behind them were mouse-only, and what a click would do was said solely in a
+  // `title` — invisible on touch, unreliable in a screen reader, and impossible to
+  // reach by keyboard, which is the whole problem. A real button carries the
+  // action, and the accessible name says which of the two things it does.
+  function photoOpener(im, altFallback) {
+    const alt = im.caption || altFallback || "";
+    const source = !!im.source_url;
+    return el("button", {
+      type: "button", class: "photo-open",
+      "aria-label": (alt ? `${alt} — ` : "") + (source ? "open the source page" : "view larger, with zoom and pan"),
+      onclick: () => activateImage(im),
+    }, el("img", {
+      src: im.dataUrl, alt: alt || "Photo", loading: "lazy", decoding: "async",
+    }));
+  }
+
   function renderPhotoThumb(im, onRemove, onCaption) {
     // oninput saves as-you-type; onchange (fires on blur) refreshes the report
     // preview's figcaption — re-rendering on every keystroke would rebuild the
@@ -761,8 +779,7 @@
       oninput: (e) => onCaption(e.target.value), onchange: () => renderReport() });
     cap.value = im.caption || "";
     return el("figure", { class: "photo-thumb" },
-      el("img", { src: im.dataUrl, alt: im.caption || "Photo", loading: "lazy", decoding: "async",
-        title: im.source_url ? "Open the source page" : "Click to view — zoom & pan", onclick: () => activateImage(im) }),
+      photoOpener(im),
       el("button", { type: "button", class: "photo-remove", title: "Remove photo", onclick: onRemove }, "×"),
       cap,
       im.credit ? creditNode(im) : null);
@@ -772,8 +789,7 @@
   function photoFigure(im, altFallback, onRemove) {
     const cap = im.caption || altFallback || "";
     return el("figure", { class: "photo-thumb view" },
-      el("img", { src: im.dataUrl, alt: cap || "Photo", loading: "lazy", decoding: "async",
-        title: im.source_url ? "Open the source page" : "Click to view — zoom & pan", onclick: () => activateImage(im) }),
+      photoOpener(im, cap),
       onRemove ? el("button", { type: "button", class: "photo-remove", title: "Remove this photo from the report", onclick: onRemove }, "×") : null,
       (cap || im.credit) ? el("figcaption", {}, cap, im.credit ? creditNode(im) : null) : null);
   }
@@ -1073,11 +1089,15 @@
     restore(); // pull any saved progress for this site
   }
 
-  function loadSite(site) {
+  // `focus: false` for the one caller that isn't a person choosing a site —
+  // restoreBatch() re-opens the last site at boot, and taking focus into the
+  // workspace on page load is exactly the behaviour renderWorkspace()'s jump is
+  // there to avoid.
+  function loadSite(site, opts) {
     flushSave(); // persist any pending debounced edit for the previous site before switching
     loadSiteState(site);
     syncBatchActive(); // highlight the matching chip if this site belongs to the loaded batch
-    renderWorkspace();
+    renderWorkspace(opts);
   }
 
   // Step 1 folds away once a site is open (see renderWorkspace). It is shown again
@@ -1090,11 +1110,11 @@
   }
   function showSitePicker() {
     setSitePickerOpen(true);
-    $("#site-picker").scrollIntoView({ behavior: "smooth", block: "start" });
+    jumpTo($("#site-picker"));
     $("#station-search").focus();
   }
 
-  function renderWorkspace() {
+  function renderWorkspace(opts) {
     $("#workspace").hidden = false;
     // The picker has done its job — the site header names the site and carries
     // Change site, so leaving a 230 px search card above the workspace is a third
@@ -1115,7 +1135,12 @@
     renderReport();
     $("#fld-date").value = state.date;
     $("#fld-maintenance").value = state.maintenance;
-    $("#workspace").scrollIntoView({ behavior: "smooth", block: "start" });
+    // Choosing a site is a jump like any other, so focus follows it to the site
+    // header — otherwise the operator picks a station and their next Tab restarts
+    // from the top bar. The exception is the boot-time batch restore, which passes
+    // focus:false: nobody asked for it, and it must not take focus off a page that
+    // has only just loaded.
+    jumpTo($("#site-summary") || $("#workspace"), { focus: !opts || opts.focus !== false });
   }
 
   function isFindingsObject(json) {
@@ -1668,6 +1693,7 @@
     (MAP_SLOT_BY_KEY[slot].presets || []).forEach((km) => {
       wrap.append(el("button", {
         type: "button", class: "map-preset btn tiny" + (km === ms.km ? " on" : ""),
+        "aria-pressed": km === ms.km ? "true" : "false",
         onclick: () => setMapKm(slot, km),
       }, `${km} km`));
     });
@@ -2200,6 +2226,43 @@
     });
   }
 
+  // ------------------------------------------------------------------- tabs
+  // Step 1's "By station name / By coordinates" pair. The class swap and the ARIA
+  // are done in one place, so a tab can never look selected while announcing that
+  // it isn't — which is what happened while this was three lines of classList in
+  // wire().
+  //
+  // Roving tabindex, per the ARIA tabs pattern: Tab reaches the tablist once and
+  // lands on the selected tab, then ←/→ move between them (wrapping) and Home/End
+  // jump the ends. Without it a two-tab strip costs two Tab presses to walk past
+  // and gives no key that means "the other one".
+  function wireTabs() {
+    const tabs = $$(".tab");
+    if (!tabs.length) return;
+    const select = (tab, focus) => {
+      tabs.forEach((t) => {
+        const on = t === tab;
+        t.classList.toggle("is-active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        // Only the selected tab is in the tab order.
+        if (on) t.removeAttribute("tabindex"); else t.setAttribute("tabindex", "-1");
+      });
+      $$(".tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === tab.dataset.tab));
+      if (focus) tab.focus();
+    };
+    tabs.forEach((t) => t.addEventListener("click", () => select(t)));
+    tabs.forEach((t) => t.addEventListener("keydown", (e) => {
+      const i = tabs.indexOf(t);
+      const to = e.key === "ArrowRight" ? (i + 1) % tabs.length
+        : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length
+        : e.key === "Home" ? 0
+        : e.key === "End" ? tabs.length - 1 : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      select(tabs[to], true);
+    }));
+  }
+
   // ---------------------------------------------------------------- nav rail
   // The narrow jump rail on the left edge of the split: the four numbered steps,
   // then one button per visible dashboard group, each carrying a count of the
@@ -2227,9 +2290,9 @@
     const target = document.getElementById(id);
     if (!target) return;
     // #col-left is the scroll container on the wide layout, so this scrolls the
-    // column rather than the page.
-    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    // column rather than the page. jumpTo() carries the focus move and the
+    // reduced-motion check.
+    jumpTo(target);
   }
 
   function renderRailNav() {
@@ -2253,10 +2316,12 @@
     const targets = [];
     const railBtn = (id, label, body, act) => {
       const btn = el("button", {
-        type: "button", class: "rail-btn", "data-target": id,
-        title: label, "aria-label": label,
+        type: "button", class: "rail-btn", "data-target": id, "aria-label": label,
         onclick: act || (() => railScrollTo(id)),
-      }, body);
+      }, body,
+      // The visible name, on hover AND on focus — see .rail-label. aria-hidden
+      // because the button's aria-label already says the same thing.
+      el("span", { class: "rail-label", "aria-hidden": "true" }, label));
       targets.push(id);
       return btn;
     };
@@ -2288,15 +2353,19 @@
     return counts;
   }
 
-  // A rail of bare emoji is unusable, so the label carries the category name and the
-  // count for the tooltip and for screen readers — the badge itself is decoration.
+  // A rail of bare emoji is unusable, so the category name and the count are said
+  // twice over: in the accessible name, and in the fly-out label that appears on
+  // hover or keyboard focus. The badge itself is decoration — it repeats a number
+  // both of those already carry.
   function setRailBadge(btn, label, n) {
     const old = btn.querySelector(".rail-badge");
     if (old) old.remove();
-    if (n) btn.append(el("span", { class: "rail-badge", "aria-hidden": "true" }, `${n}`));
     const full = label + (n ? ` — ${n} still need you` : "");
-    btn.title = full;
     btn.setAttribute("aria-label", full);
+    const flyout = btn.querySelector(".rail-label");
+    if (flyout) flyout.textContent = full;
+    // After the label, so the badge keeps its place as the last child.
+    if (n) btn.append(el("span", { class: "rail-badge", "aria-hidden": "true" }, `${n}`));
   }
 
   // Badge-only refresh, run from renderCollectionStatus() so every path that changes a
@@ -2548,10 +2617,12 @@
   }
 
   // Status as shape + word, never colour alone: the glyph differs per result, and
-  // the accessible name spells it out.
-  const STATUS_GLYPH = { found: "●", none: "○", failed: "▲", manual: "◆", unset: "◌" };
+  // the accessible name spells it out. The shapes themselves live in styles.css
+  // (--glyph-*, drawn by .s-dot::before) so that this dot, the status chips, the
+  // finding panel's label and the result picker cannot end up using the same
+  // shape for two different results.
   function statusDot(status) {
-    return el("span", { class: `s-dot ${status}`, "aria-hidden": "true" }, STATUS_GLYPH[status] || "◌");
+    return el("span", { class: `s-dot ${STATUS_LABEL[status] ? status : "unset"}`, "aria-hidden": "true" });
   }
   function sectionTitleOf(src, f) {
     const id = targetSectionOf(src, f);
@@ -2826,15 +2897,56 @@
   // job of that card, and it stays one click.
   function renderStatusControl(src, f) {
     const slot = el("div", { class: "result-slot" });
+    // A radiogroup, not four buttons: the four are mutually exclusive and exactly
+    // one of them is the card's answer, which `aria-pressed` on four independent
+    // toggles cannot say. As four buttons a screen reader announced "Found,
+    // button" four times over with nothing tying them together or naming the
+    // current choice; as a radiogroup it announces "Result — Nothing, radio
+    // button, 2 of 4, selected".
+    //
+    // Roving tabindex + arrow keys come with the pattern: the group is one Tab
+    // stop, ←/→/↑/↓ move through it (wrapping) and select as they go, which is
+    // what a keyboard operator answering 23 of these in a row needs. The short
+    // visible labels are fine sighted — they sit under a "Result" lead — but
+    // read bare in a screen reader's forms list, so each radio carries the full
+    // wording as its accessible name.
+    const CHOICES = [
+      [STATUS.FOUND, "Found", "Found — there is something here"],
+      [STATUS.NONE, "Nothing", "Nothing found — checked, and there is nothing"],
+      [STATUS.FAILED, "Failed", "Search failed — the check could not be completed"],
+      [STATUS.MANUAL, "Manual", "Needs manual check — a human has to drive it"],
+    ];
     const picker = () => {
-      const sel = el("div", { class: "status-select", role: "group", "aria-label": "Result for this source" });
-      [[STATUS.FOUND, "Found"], [STATUS.NONE, "Nothing"], [STATUS.FAILED, "Failed"], [STATUS.MANUAL, "Manual"]].forEach(([s, lab]) => {
-        sel.append(el("button", {
-          type: "button", "data-s": s, class: f.status === s ? "on" : "",
-          "aria-pressed": f.status === s ? "true" : "false",
-          onclick: () => setStatus(src.id, s),
-        }, lab));
+      const sel = el("div", { class: "status-select", role: "radiogroup", "aria-label": `Result for ${src.name}` });
+      const radios = CHOICES.map(([s, lab, full], i) => el("button", {
+        type: "button", "data-s": s, class: f.status === s ? "on" : "",
+        role: "radio", "aria-checked": f.status === s ? "true" : "false",
+        "aria-label": full,
+        // One Tab stop for the group: the chosen radio, or the first when the
+        // card is still unanswered.
+        tabindex: (f.status === s || (f.status === STATUS.UNSET && i === 0)) ? "0" : "-1",
+        onclick: () => setStatus(src.id, s),
+      }, lab));
+      sel.addEventListener("keydown", (e) => {
+        const i = radios.indexOf(document.activeElement);
+        if (i < 0) return;
+        const to = (e.key === "ArrowRight" || e.key === "ArrowDown") ? (i + 1) % radios.length
+          : (e.key === "ArrowLeft" || e.key === "ArrowUp") ? (i - 1 + radios.length) % radios.length
+          : e.key === "Home" ? 0
+          : e.key === "End" ? radios.length - 1 : -1;
+        if (to < 0) return;
+        e.preventDefault();
+        // Arrows SELECT; they never toggle. setStatus un-answers a card when it is
+        // handed the result it already holds — which is the right thing for a
+        // click (it is how you take back an answer) and the wrong thing for a
+        // radiogroup, where End on the last option would silently clear the card.
+        // Read the live status rather than the closure's `f`, which goes stale the
+        // moment the card is re-rendered underneath us.
+        const want = CHOICES[to][0];
+        if (want !== (state.findings[src.id] || {}).status) setStatus(src.id, want);
+        refocusStatus(src.id, want);
       });
+      sel.append(...radios);
       return sel;
     };
     if (f.status === STATUS.UNSET) { slot.append(picker()); return slot; }
@@ -2849,6 +2961,23 @@
       },
     }, STATUS_LABEL[f.status]));
     return slot;
+  }
+
+  // Arrowing through the radiogroup answers the card, and answering a card settles
+  // it: the picker collapses to its result chip, and the card itself drops from
+  // `full` density to `summary` — so on the very first ← the group the operator is
+  // still walking is gone, and focus lands on "Show more". Hold the card open (the
+  // same transient set a click on "Show more" uses), put the picker back, and
+  // return focus to the radio they just landed on, so ←/→ walk all four.
+  function refocusStatus(id, status) {
+    CARD_OPEN.expanded.add(id);
+    refreshCard(id);
+    const card = $(`#src-${id}`);
+    if (!card) return;
+    const chip = card.querySelector(".result-slot .result-chip");
+    if (chip) chip.click(); // swaps the chip back for the picker (see renderStatusControl)
+    const radio = card.querySelector(`.status-select [data-s="${status}"]`);
+    if (radio) radio.focus();
   }
 
   // Per-card ⋯ overflow — the fourth action tier. The utilities that were
@@ -3443,10 +3572,7 @@
       markFlowDone("applied", answered ? `${answered} source${answered > 1 ? "s" : ""} answered` : "Response applied");
       // renderWorkspace() parks at the top of the workspace; the operator's next
       // move is the list of what's left, so land them there instead.
-      if (kind === "site") requestAnimationFrame(() => {
-        const d = $("#dashboard");
-        if (d) d.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      if (kind === "site") requestAnimationFrame(() => jumpTo($("#dashboard")));
     } catch (err) {
       setFlowStatus("#paste-status", "Couldn't apply that: " + err.message, "err");
     }
@@ -3753,6 +3879,34 @@
   // The two columns scroll independently (desktop) or the page scrolls (narrow),
   // so scrollIntoView() targets the right scroll container automatically. A brief
   // highlight helps the eye land on whatever was jumped to.
+  //
+  // EVERY jump in the app goes through jumpTo(), because scrolling on its own is
+  // only half of a jump. It moves the viewport and leaves the keyboard exactly
+  // where it was, so the next Tab carries on from whatever the operator jumped
+  // FROM — they have been moved visually but not logically, and for a screen
+  // reader user nothing has happened at all. Moving focus to the landing section
+  // makes the two agree: the heading is announced, the ring says where focus now
+  // is, and Tab continues from there.
+  function jumpTo(node, opts) {
+    if (!node) return;
+    const o = opts || {};
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    node.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: o.block || "start" });
+    // Sections and group wrappers are not focusable on their own. -1 keeps them
+    // out of the tab order while allowing focus(); preventScroll stops the focus
+    // call fighting the smooth scroll that is still running.
+    //
+    // `focus: false` is for the scrolls that are a side effect of a re-render
+    // rather than a jump the operator asked for — restoring a saved batch does one
+    // on page load, and taking focus there would be a worse bug than the one this
+    // whole function exists to fix.
+    if (o.focus !== false) {
+      if (!node.hasAttribute("tabindex")) node.setAttribute("tabindex", "-1");
+      node.focus({ preventScroll: true });
+    }
+    if (o.flash) flashTarget(node);
+  }
+
   function flashTarget(node) {
     if (!node) return;
     node.classList.remove("flash-target");
@@ -3767,8 +3921,7 @@
     const node = document.getElementById(`rsec-${sectionId}`);
     if (!node) return;
     revealRightPane();
-    node.scrollIntoView({ behavior: "smooth", block: "start" });
-    flashTarget(node);
+    jumpTo(node, { flash: true });
   }
   // A report evidence name → scroll the collection (left) to the source card. The
   // card may be hidden by the active dashboard filter, so drop back to "All" and
@@ -3794,8 +3947,7 @@
       refreshCard(sourceId);
       node = document.getElementById(`src-${sourceId}`);
     }
-    node.scrollIntoView({ behavior: "smooth", block: "start" });
-    flashTarget(node);
+    jumpTo(node, { flash: true });
   }
 
   // ------------------------------------------------- reciprocal pane highlight
@@ -3870,6 +4022,7 @@
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     const included = cardIncluded(f);
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
+      "aria-pressed": included ? "true" : "false",
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
 
     const row = el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
@@ -5579,14 +5732,68 @@
     state.batch = b;
     renderBatchBar();
     const site = siteFromKey(b.active);
-    if (site) loadSite(site); // resume where the user left off
+    if (site) loadSite(site, { focus: false }); // resume where the user left off — silently, on boot
   }
+
+  // ------------------------------------------------------------- focus trap
+  // Everything with role="dialog" and aria-modal="true" in this app — the batch
+  // builder, the photo lightbox, the Queensland Globe modal — told assistive tech
+  // it was modal and then wasn't: Tab walked straight out of the dialog and into
+  // the page underneath, which is covered by a scrim and so is inert to the eye
+  // but not to the keyboard. Focus vanished behind the overlay with nothing to say
+  // where it had gone, and closing the dialog dropped it on <body>, so the next
+  // Tab restarted from the top of the document rather than from the control that
+  // opened the thing.
+  //
+  // trapFocus() fixes both halves: Tab and Shift+Tab wrap inside the dialog, and
+  // the returned release() hands focus back to whatever opened it. Escape is
+  // deliberately NOT handled here — all three dialogs already own their key
+  // handling (the map modal's Escape closes its layer probe before the modal, and
+  // the lightbox's also drives zoom), and a second handler would fight them.
+  //
+  // Exposed on window because assets/qldmap.js is a separate module with the same
+  // problem; it is only ever opened from in here, so app.js has always run first.
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),' +
+    ' textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+  function trapFocus(dialog) {
+    if (!dialog) return () => {};
+    const opener = document.activeElement;
+    const onKey = (e) => {
+      if (e.key !== "Tab" || e.defaultPrevented) return;
+      // Re-read every time: these dialogs grow and shrink as you use them (the
+      // batch builder's chips, the map's layer groups), so a list cached on open
+      // goes stale immediately. getClientRects() rather than offsetParent —
+      // offsetParent is null inside a position:fixed overlay.
+      const items = $$(FOCUSABLE, dialog).filter((n) => n.getClientRects().length);
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      // The `!dialog.contains` arms matter as much as the ends: clicking the
+      // backdrop leaves activeElement on <body>, and without them the next Tab
+      // would land in the page behind rather than back in the dialog.
+      const here = document.activeElement;
+      if (e.shiftKey ? (here === first || !dialog.contains(here)) : (here === last || !dialog.contains(here))) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    // Capture, so a dialog's own keydown handlers don't get to swallow Tab first.
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      // Not if the opener has been re-rendered away underneath us — focusing a
+      // detached node silently drops focus on <body>, the exact bug this fixes.
+      if (opener && document.contains(opener) && opener.focus) opener.focus();
+    };
+  }
+  window.ESSFocusTrap = trapFocus;
 
   // -------------------------------------------------- batch builder (modal)
   // In-browser multi-site picker: search + add stations (or paste a list), then
   // "Start batch" hands the collected site objects to createBatchFromSites.
   let bbSel = [];          // selected site objects, in add order
   let bbAcMatches = [], bbAcIndex = -1;
+  let bbRelease = null;    // trapFocus() teardown while the dialog is open
 
   function openBatchBuilder() {
     bbSel = [];
@@ -5599,6 +5806,7 @@
     bbRenderSelected();
     ov.hidden = false;
     ov.classList.add("show");
+    bbRelease = trapFocus(ov.querySelector(".bb-dialog"));
     setTimeout(() => $("#bb-search").focus(), 0);
   }
   function closeBatchBuilder() {
@@ -5607,6 +5815,8 @@
     ov.classList.remove("show");
     ov.hidden = true;
     $("#bb-results").hidden = true;
+    // Releases the Tab trap and puts focus back on "Batch multiple sites".
+    if (bbRelease) { bbRelease(); bbRelease = null; }
   }
 
   function bbChipMeta(site) {
@@ -5917,10 +6127,26 @@
       .catch(() => { toast("Couldn't copy — select the text and copy it by hand"); return false; });
   }
   let toastTimer;
+  // Every "Copied", "Findings imported" and "Map added to the report" in the app
+  // comes through here, and until it carried a live region all of them were
+  // silent: the one confirmation that a copy actually reached the clipboard was
+  // visible for 1.4 seconds and announced never.
+  //
+  // role="status" (polite) rather than "alert": these are confirmations of
+  // something the operator just did, so they wait for a gap rather than cutting
+  // across whatever is being read. The node is created empty and filled after,
+  // because a live region only announces changes made while it is in the
+  // document — building it with the text already in it announces nothing.
   function toast(msg) {
     let t = $("#toast");
-    if (!t) { t = el("div", { id: "toast", style: "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#17242e;color:#fff;padding:9px 16px;border-radius:8px;z-index:99;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.3)" }); document.body.append(t); }
+    if (!t) {
+      t = el("div", { id: "toast", role: "status", "aria-live": "polite",
+        style: "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#17242e;color:#fff;padding:9px 16px;border-radius:8px;z-index:99;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.3)" });
+      document.body.append(t);
+    }
     t.textContent = msg; t.style.opacity = "1";
+    // Only the tint fades — clearing the text would re-fire the live region with
+    // an empty string on every toast.
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.opacity = "0"; }, 1400);
   }
 
@@ -6294,6 +6520,7 @@
   // blank page. Wikipedia reference photos instead open their source article
   // (decided in activateImage, since that's a real navigable page).
   let LB = null;
+  let lbRelease = null; // trapFocus() teardown while the viewer is open
   function ensureLightbox() {
     if (LB) return LB;
     const img = el("img", { class: "lb-img", alt: "" });
@@ -6305,7 +6532,10 @@
     const zoomIn = el("button", { class: "lb-btn", title: "Zoom in", onclick: (e) => { e.stopPropagation(); zoomBy(1.3); } }, "+");
     const controls = el("div", { class: "lb-controls" }, zoomOut, zoomReset, zoomIn);
     const hint = el("div", { class: "lb-hint" }, "Scroll to zoom · drag to pan · double-click to toggle");
-    const overlay = el("div", { class: "lb-overlay", id: "img-modal" }, cap, closeBtn, controls, hint, stage);
+    // A modal in every respect except that it never said so: the scrim makes the
+    // page behind inert to the eye, so it has to be inert to the keyboard too.
+    const overlay = el("div", { class: "lb-overlay", id: "img-modal", role: "dialog",
+      "aria-modal": "true", "aria-label": "Photo viewer" }, cap, closeBtn, controls, hint, stage);
     document.body.append(overlay);
     LB = { overlay, img, stage, cap, scale: 1, tx: 0, ty: 0, drag: null };
     LB.apply = () => { img.style.transform = `translate(${LB.tx}px, ${LB.ty}px) scale(${LB.scale})`; };
@@ -6345,12 +6575,17 @@
     lb.scale = 1; lb.tx = 0; lb.ty = 0; lb.apply();
     lb.overlay.classList.add("show");
     document.addEventListener("keydown", lbKeydown);
+    // Before the trap, so it records the thumbnail that opened this as the node
+    // to hand focus back to.
+    lbRelease = trapFocus(lb.overlay);
+    lb.overlay.querySelector(".lb-close").focus();
   }
   function hideLightbox() {
     if (!LB) return;
     LB.overlay.classList.remove("show");
     LB.img.src = "";
     document.removeEventListener("keydown", lbKeydown);
+    if (lbRelease) { lbRelease(); lbRelease = null; } // …and back to the thumbnail
   }
   function lbKeydown(e) {
     if (e.key === "Escape") hideLightbox();
@@ -6369,11 +6604,7 @@
 
   // ---------------------------------------------------------------- wiring
   function wire() {
-    // tabs
-    $$(".tab").forEach((t) => t.addEventListener("click", () => {
-      $$(".tab").forEach((x) => x.classList.toggle("is-active", x === t));
-      $$(".tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === t.dataset.tab));
-    }));
+    wireTabs();
     // autocomplete
     const search = $("#station-search");
     search.addEventListener("input", () => renderAcList(searchStations(search.value)));

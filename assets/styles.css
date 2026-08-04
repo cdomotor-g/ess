@@ -23,18 +23,43 @@
   --ink:       light-dark(#17242e, #e7eef3);
   --ink-soft:  light-dark(#52616b, #9fb0bc);
   --line:      light-dark(#d9e0e6, #2a3a45);
-  --brand:     light-dark(#12507b, #2b7fb8);
-  --brand-ink: #ffffff;
+  /* Two brand colours, because the brand does two jobs that pull opposite ways on
+     the dark theme:
+
+       --brand         everything that sits ON a surface — links, active tab text,
+                       the focus ring, and component fills (primary buttons, the
+                       step badges, the pressed segment). It has to clear 4.5:1 as
+                       text on --surface/--surface-2 AND 3:1 as a fill against
+                       them, so on dark it goes light and takes --fill-ink on top.
+       --brand-chrome  the top bar, which is a band of app chrome rather than a
+                       component on a surface. It stays deep in both themes and
+                       carries white.
+
+     One token could not do both: the old single #2b7fb8 was 3.46:1 as text on
+     --surface-2 (fails AA for the tab labels, the starved-section links and every
+     <a> in the report) and 4.35:1 under white in the top bar (fails for the
+     tagline and the ghost-link row). Splitting it clears both ends. */
+  --brand:     light-dark(#12507b, #5cb0e6);
+  --brand-chrome:     #12507b;
+  --brand-chrome-ink: #ffffff;
+  /* THE ink for any saturated fill — brand, accent, reviewed, a category tile.
+     White on light, near-black on dark, because every fill in this palette
+     lightens on the dark theme (see --cat-* below) and white on a light fill is
+     the one combination that can't clear AA. Anything that sets a background to
+     a palette colour takes its foreground from here rather than hard-coding
+     #fff, which is how the dark theme drifted to 2.4:1 in the first place. */
+  --fill-ink:  light-dark(#ffffff, #08131c);
+  --brand-ink: var(--fill-ink);
   --accent:    light-dark(#1f7a4d, #46b17d);
   /* "Found" is deliberately NOT green — a found result can mean caution is
      needed on site (e.g. a protected species), not "all clear". Green is
      reserved for the operator's own review-complete state (--reviewed). */
-  --found:     light-dark(#b5570f, #f0a860);
+  --found:     light-dark(#a54f0d, #f0a860);
   --found-bg:  light-dark(#fbe9d4, #3a2410);
   /* Cherry edge used to make a "Found" result jump out — a found matter often
      needs caution on site, so it's deliberately the loudest marking. */
   --found-edge: light-dark(#c1123c, #ff5d7e);
-  --none:      light-dark(#8a6d1a, #e0c25a);
+  --none:      light-dark(#7e6317, #e0c25a);
   --none-bg:   light-dark(#f6efd8, #332b10);
   --failed:    light-dark(#b3261e, #f0938c);
   --failed-bg: light-dark(#fbe6e4, #3a1512);
@@ -46,7 +71,7 @@
      checked" caveat is what wears it. Deliberately its own token rather than a
      reuse of --none: every status above means a source HAS been answered, and
      --failed's red belongs to a contradiction, not to an unfinished check. */
-  --caution:    light-dark(#8a6d1a, #e0c25a);
+  --caution:    light-dark(#7e6317, #e0c25a);
   --caution-bg: light-dark(#f9f3e0, #2e2712);
   /* The join between the two panes. Worn by a collection card and the report
      section it feeds while either half is hovered or focused — deliberately the
@@ -63,8 +88,8 @@
      header bar, the nav-rail marker and the monogram tile on each card. Hues sit
      away from the status palette above (found/none/failed/manual/reviewed) so a
      category accent is never mistaken for a result. They lighten on dark so they
-     still read as accents against the dark surface; --cat-ink, the text that sits
-     on top of a saturated fill, flips to near-black to stay legible.
+     still read as accents against the dark surface, so the text on top of one
+     comes from --fill-ink like every other fill in the palette.
      --cat-national is the tile fill for national (as against state) sources. */
   --cat-permits:             light-dark(#6d4aff, #a48cff);
   --cat-biosecurity:         light-dark(#0d7a8a, #4fc3d4);
@@ -74,7 +99,7 @@
   --cat-invasive_animals:    light-dark(#a04a7a, #e08cbd);
   --cat-disease:             light-dark(#b03a5b, #f08fa6);
   --cat-additional:          light-dark(#566b7a, #9fb0bc);
-  --cat-ink:                 light-dark(#ffffff, #0e1519);
+  --cat-ink:                 var(--fill-ink);
   --cat-national:            light-dark(#12507b, #6fb2e0);
 
   /* ---- type ramp ----
@@ -106,6 +131,17 @@
   --sp-6: 32px;
   --sp-7: 48px;
   --sp-8: 64px;
+
+  /* ---- focus ----
+     One ring, declared once, worn by everything. --brand clears 6.85:1 against
+     --surface on dark and 8.54:1 on light, so the ring is well past the 3:1 that
+     a non-text indicator needs in either theme. Components that sit flush inside
+     a clipping parent set --focus-offset locally rather than redefining the ring;
+     nothing overrides `outline` itself, so there is exactly one place to change
+     how focus looks. */
+  --focus: var(--brand);
+  --focus-ring: 2px solid var(--focus);
+  --focus-offset: 2px;
 }
 /* The explicit choice from the top-bar toggle. Setting color-scheme is all that
    is needed — every token above resolves through it. */
@@ -113,6 +149,10 @@
 :root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
+/* Keyboard focus is visible on EVERY focusable thing, not on the handful that
+   remembered to ask. :focus-visible means a mouse press still doesn't draw a ring,
+   so this costs pointer users nothing. */
+:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 html, body { margin: 0; }
 /* --fs-body is the base: everything that doesn't name a step inherits the body
    step rather than a 15px default that no component actually asked for. That is
@@ -127,7 +167,7 @@ h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -.01em; }
 a { color: var(--brand); }
 
 /* ---------- top bar ---------- */
-.topbar { background: var(--brand); color: var(--brand-ink); box-shadow: var(--shadow); position: sticky; top: 0; z-index: 20; }
+.topbar { background: var(--brand-chrome); color: var(--brand-chrome-ink); box-shadow: var(--shadow); position: sticky; top: 0; z-index: 20; }
 .topbar-inner { max-width: none; margin: 0 auto; padding: var(--sp-3) var(--sp-5); display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3) var(--sp-4); flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: var(--sp-3); }
 /* Decorative glyph marks — sized as iconography, not as text on the ramp. */
@@ -139,9 +179,11 @@ a { color: var(--brand); }
 /* The ⋯ that stands in for the three of them below 981px — see the narrow-layout
    block at the foot of this file. */
 .topbar-more { display: none; }
-.ghost-link { color: var(--brand-ink); opacity: .9; text-decoration: none; border: 1px solid rgba(255,255,255,.35); padding: var(--sp-1) var(--sp-3); border-radius: 999px; background: transparent; font: inherit; line-height: 1.2; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.ghost-link { color: var(--brand-chrome-ink); opacity: .9; text-decoration: none; border: 1px solid rgba(255,255,255,.35); padding: var(--sp-1) var(--sp-3); border-radius: 999px; background: transparent; font: inherit; line-height: 1.2; cursor: pointer; appearance: none; -webkit-appearance: none; }
 .ghost-link:hover { opacity: 1; background: rgba(255,255,255,.12); }
-.ghost-link:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
+/* The top bar is the one place --brand isn't the right ring: it IS a brand-
+   coloured band, so the ring borrows the chrome's own ink (8.5:1 on it). */
+.ghost-link:focus-visible { --focus: var(--brand-chrome-ink); }
 
 /* ---------- layout ---------- */
 /* Use the full window width (no centred max-width) so the two columns get all the
@@ -212,7 +254,7 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   font: inherit; font-size: var(--fs-micro); line-height: 1; cursor: pointer;
 }
 .pane-btn:hover { color: var(--ink); border-color: var(--brand); }
-.pane-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.pane-btn:focus-visible { --focus-offset: 1px; }
 /* The collapsed side's handle is the way back — mark it so which pane is hidden
    is readable at a glance. */
 .pane-btn[aria-expanded="false"] { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
@@ -253,7 +295,7 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   font: inherit; font-size: var(--fs-title); line-height: 1; cursor: pointer; padding: 0;
 }
 .rail-btn:hover { background: var(--surface-2); color: var(--ink); }
-.rail-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.rail-btn:focus-visible { --focus-offset: 1px; }
 .rail-btn.is-active { background: var(--surface); border-color: var(--line); color: var(--ink); box-shadow: var(--shadow); }
 /* Left edge marker in the category colour — the "you are here" cue. */
 .rail-btn.is-active::before {
@@ -268,9 +310,32 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .rail-badge {
   position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px;
   border-radius: 8px; padding: 0 var(--sp-0);
-  background: var(--found-edge); color: var(--cat-ink, #fff);
+  background: var(--found-edge); color: var(--fill-ink);
   font-size: var(--fs-micro); font-weight: 800; display: grid; place-items: center;
 }
+/* The rail's eight category buttons are single pictographs, and 🦎 for "Threatened
+   species" is a guess even before you account for how differently platforms draw
+   it. The name used to live only in `title`, which is unavailable on touch,
+   unreliable in screen readers and — the point here — never reachable by keyboard
+   at all: a sighted keyboard user tabbing the rail got eight emoji and no words.
+   So the label is a real element that flies out on hover AND on focus, and the
+   title attribute is gone (setRailBadge keeps the aria-label, which is what the
+   screen reader was already using).
+
+   It overlays the column rather than widening the rail, because the rail's 44px
+   is a budget: horizontal space in the left column belongs to the cards. */
+.rail-label {
+  position: absolute; left: calc(100% + var(--sp-2)); top: 50%; translate: 0 -50%;
+  white-space: nowrap; padding: var(--sp-1) var(--sp-2); border-radius: 6px;
+  background: var(--ink); color: var(--surface);
+  font-size: var(--fs-micro); font-weight: 650; line-height: 1.4;
+  box-shadow: var(--shadow); z-index: 30;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .12s ease;
+}
+.rail-btn:hover .rail-label,
+.rail-btn:focus-visible .rail-label { opacity: 1; visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .rail-label { transition: none; } }
 .rail-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }
 /* No room for a 44px gutter in one column — .mjump below carries the same jumps
    and the same counts, as a scrolling row instead of a column. */
@@ -303,9 +368,9 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   cursor: pointer;
 }
 .mtab:first-child { border-left: 0; }
-.mtab:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
+.mtab:focus-visible { --focus-offset: -3px; }
 /* Selected: fill + weight + aria-selected. Never the fill alone. */
-.mtab.is-active { background: var(--brand); color: #fff; }
+.mtab.is-active { background: var(--brand); color: var(--fill-ink); }
 /* The mobile equivalent of the rail badges — what is still outstanding, on the
    tab you would leave to go and do it. */
 .mtab-badge {
@@ -315,7 +380,7 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   font-size: var(--fs-micro); font-weight: 800; font-variant-numeric: tabular-nums;
 }
 .mtab-badge[hidden] { display: none; }
-.mtab.is-active .mtab-badge { background: #fff; color: var(--brand); }
+.mtab.is-active .mtab-badge { background: var(--fill-ink); color: var(--brand); }
 
 /* Site identity — visible on both tabs, so neither pane is ever anonymous. The
    report's own document header states it too, but only the Report tab can see
@@ -343,7 +408,7 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   background: var(--surface); color: var(--ink-soft);
   font: inherit; font-size: var(--fs-meta); font-weight: 600; white-space: nowrap; cursor: pointer;
 }
-.mjump-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.mjump-btn:focus-visible { --focus-offset: 1px; }
 /* "You are here" — the left edge marker the rail uses, turned into a filled dot
    so it survives being a pill rather than a square. */
 .mjump-btn.is-active { background: var(--surface-2); border-color: var(--cat, var(--brand)); color: var(--ink);
@@ -352,7 +417,7 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .mjump-count {
   min-width: 17px; height: 17px; padding: 0 var(--sp-0); border-radius: 9px;
   display: inline-grid; place-items: center;
-  background: var(--found-edge); color: var(--cat-ink, #fff);
+  background: var(--found-edge); color: var(--fill-ink);
   font-size: var(--fs-micro); font-weight: 800; font-variant-numeric: tabular-nums;
 }
 .mjump-count[hidden] { display: none; }
@@ -374,7 +439,7 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .card.compact { padding: var(--sp-2) var(--sp-4); }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); flex-wrap: wrap; }
 .card-head h2 { font-size: var(--fs-display); display: flex; align-items: center; gap: var(--sp-2); }
-.step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: #fff; font-size: var(--fs-body); font-weight: 700; }
+.step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: var(--fill-ink); font-size: var(--fs-body); font-weight: 700; }
 .head-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 
 /* The report's document header. On the two-column desktop layout the right column
@@ -413,7 +478,8 @@ input[type=text], input[type=number], input[type=date], select, textarea {
   width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--ink); font: inherit;
 }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); outline-offset: -1px; border-color: var(--brand); }
+input:focus, select:focus, textarea:focus { border-color: var(--brand); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { --focus-offset: -1px; }
 textarea { resize: vertical; min-height: 62px; }
 .hint { font-size: var(--fs-meta); color: var(--ink-soft); margin: var(--sp-2) 0 0; }
 .coord-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-3); }
@@ -455,7 +521,7 @@ textarea { resize: vertical; min-height: 62px; }
    shared with the status dots and the carets. */
 .btn { font: inherit; font-weight: 600; border-radius: 8px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .btn:hover { border-color: var(--brand); }
-.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--fill-ink); }
 .btn.primary:hover { filter: brightness(1.08); }
 /* Named for the markup's benefit — identical to the bare .btn, but saying
    "secondary" out loud is how a demoted action stays demoted through an edit. */
@@ -471,13 +537,13 @@ a.btn { display: inline-block; text-decoration: none; }
 
 /* Click feedback: a quick flash used to confirm "copied to clipboard" */
 @keyframes btn-flash {
-  0%   { background: var(--accent); border-color: var(--accent); color: #fff; transform: scale(1.05); }
-  55%  { background: var(--accent); border-color: var(--accent); color: #fff; transform: scale(1); }
+  0%   { background: var(--accent); border-color: var(--accent); color: var(--fill-ink); transform: scale(1.05); }
+  55%  { background: var(--accent); border-color: var(--accent); color: var(--fill-ink); transform: scale(1); }
   100% { background: transparent; border-color: var(--line); color: var(--ink); transform: scale(1); }
 }
 .btn.flash { animation: btn-flash .6s ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  @keyframes btn-flash { 0% { background: var(--accent); color: #fff; } 100% { background: transparent; color: var(--ink); } }
+  @keyframes btn-flash { 0% { background: var(--accent); color: var(--fill-ink); } 100% { background: transparent; color: var(--ink); } }
   .btn.flash { animation-duration: .3s; }
 }
 
@@ -498,7 +564,10 @@ a.btn { display: inline-block; text-decoration: none; }
   padding: var(--sp-2); border: 0; border-radius: 7px;
   background: transparent; color: var(--ink); cursor: pointer;
 }
-.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); }
+/* Inset: a menu item is flush to the menu's edge, so an outset ring would be
+   clipped by the rounded border. */
+.menu-item:focus-visible { --focus-offset: -2px; }
 a.menu-item { display: block; text-decoration: none; }
 /* Destructive items read as destructive at rest, not only under the pointer —
    "Clear my note" wipes text with no undo, and it used to be styled exactly like
@@ -855,7 +924,7 @@ body.qm-open { overflow: hidden; }
 .cs-seg b { font-variant-numeric: tabular-nums; }
 /* The selected segment. Weight + fill + aria-pressed, so the filtered list is
    never a mystery — colour is not doing this on its own. */
-.cs-seg.on { background: var(--brand); border-left-color: var(--brand); color: #fff; }
+.cs-seg.on { background: var(--brand); border-left-color: var(--brand); color: var(--fill-ink); }
 .cs-seg.on + .cs-seg { border-left-color: var(--brand); }
 .cs-seg[data-seg=attention].on { background: var(--manual); border-left-color: var(--manual); color: var(--cat-ink); }
 .cs-seg[data-seg=attention].on + .cs-seg { border-left-color: var(--manual); }
@@ -899,7 +968,7 @@ body.qm-open { overflow: hidden; }
 .cs-starved-sec { font: inherit; font-size: var(--fs-micro); font-weight: 600; color: var(--brand);
   background: transparent; border: 0; border-radius: 5px; padding: 0 var(--sp-0); cursor: pointer; text-align: left; }
 .cs-starved-sec:hover { text-decoration: underline; }
-.cs-starved-sec:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.cs-starved-sec:focus-visible { --focus-offset: 1px; }
 .cs-starved-rest { font-style: italic; }
 
 /* ---------- step 3 — run the checks ---------- */
@@ -975,7 +1044,7 @@ body.qm-open { overflow: hidden; }
   border-radius: var(--radius); display: flex; align-items: baseline; gap: var(--sp-1) var(--sp-3); flex-wrap: wrap; }
 .adv > .adv-summary::-webkit-details-marker { display: none; }
 .adv > .adv-summary:hover .adv-title { color: var(--brand); }
-.adv > .adv-summary:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.adv > .adv-summary:focus-visible { --focus-offset: -2px; }
 .adv-title { font-weight: 650; font-size: var(--fs-title); }
 /* The disclosure triangle, drawn here so it sits tight against the title. */
 .adv-title::before { content: "▸"; display: inline-block; width: 14px; color: var(--ink-soft); }
@@ -1091,12 +1160,17 @@ body.qm-open { overflow: hidden; }
 /* "Found" is the loudest marking — a cherry left edge, so a found matter (which
    may need caution on site) is impossible to miss. It used to be joined by a ring,
    a chip and a lit segmented button all saying the same word; the edge and the
-   single result marker in the disposition zone now carry it between them. */
+   single result marker in the disposition zone now carry it between them.
+
+   The left edge also carries a border STYLE per status, so the four are told
+   apart by their pattern in greyscale and not only by hue: solid-and-thick for
+   found, plain solid for a clean nothing-found, dashed for a check that broke,
+   dotted for one nobody has run yet. */
 .src.status-found { border-left: 5px solid var(--found-edge); border-color: var(--found-edge); }
 .src.status-none { border-left: 4px solid var(--none); }
-.src.status-failed { border-left: 4px solid var(--failed); }
-.src.status-manual { border-left: 4px solid var(--manual); }
-.src.status-unset { border-left: 4px solid var(--line); }
+.src.status-failed { border-left: 4px dashed var(--failed); }
+.src.status-manual { border-left: 4px dotted var(--manual); }
+.src.status-unset { border-left: 4px dotted var(--line); }
 /* Reviewed tints the whole card so progress is visible at a glance; the
    border-left above still tracks the Found/None/Failed/Manual category. */
 .src.is-reviewed { background: var(--reviewed-bg); }
@@ -1181,7 +1255,7 @@ body.qm-open { overflow: hidden; }
   display: inline-grid; place-items: center;
   font-size: var(--fs-micro); font-weight: 800; letter-spacing: -.02em;
   font-family: ui-sans-serif, system-ui, sans-serif;
-  color: var(--cat-ink, #fff); background: var(--ink-soft);
+  color: var(--fill-ink); background: var(--ink-soft);
 }
 .src-icon.jur-national { background: var(--cat-national, var(--brand)); }
 .src-icon.jur-state    { background: var(--cat, var(--ink-soft)); }
@@ -1259,6 +1333,59 @@ body.qm-open { overflow: hidden; }
 .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- status glyphs ----------
+   Colour is never the only carrier. The four results differ by fill and text
+   colour, which is no difference at all in greyscale or to the ~8% of male users
+   with red-green CVD: --found's orange and --none's ochre sit within a few
+   percent of the same lightness, so a "found" chip and a "nothing found" chip
+   were near-identical without the words.
+
+   The settled one-line cards already carried a shape per result (.s-dot). This
+   promotes that vocabulary to every surface that wears a status colour — chips,
+   the finding panel's label, the pressed radio in the result picker — rather than
+   starting a second, contradictory one:
+
+     ●  found    ○  none    ▲  failed    ◆  manual    ◌  not checked
+
+   The glyphs are declared HERE and nowhere else: statusDot() in app.js renders an
+   empty span and lets .s-dot::before fill it, so the vocabulary cannot drift
+   between the stylesheet and the script. Geometric characters rather than emoji,
+   because emoji presentation varies enough between platforms to change the shape.
+
+   The `/ ""` is the alt-text form of `content`: it draws the glyph but contributes
+   nothing to the accessible name, so a screen reader still hears "Nothing found"
+   rather than "○ Nothing found". (.s-dot is already aria-hidden, and carries it
+   anyway so the two rules stay copy-paste identical.)
+
+   The card and report-evidence left edges take a border STYLE per status for the
+   same reason — see .src.status-* and .r-inc-item.status-* below. */
+:root {
+  --glyph-found:  "\25CF";
+  --glyph-none:   "\25CB";
+  --glyph-failed: "\25B2";
+  --glyph-manual: "\25C6";
+  --glyph-unset:  "\25CC";
+}
+.chip.found::before, .chip.none::before, .chip.failed::before, .chip.manual::before,
+.src-result-label::before, .status-select button.on::before {
+  margin-right: var(--sp-1); font-weight: 700; font-style: normal;
+}
+.s-dot.found::before,   .chip.found::before,
+.src-result.status-found .src-result-label::before,
+.status-select button.on[data-s=found]::before   { content: var(--glyph-found) / ""; }
+.s-dot.none::before,    .chip.none::before,
+.src-result.status-none .src-result-label::before,
+.status-select button.on[data-s=none]::before    { content: var(--glyph-none) / ""; }
+.s-dot.failed::before,  .chip.failed::before,
+.src-result.status-failed .src-result-label::before,
+.status-select button.on[data-s=failed]::before  { content: var(--glyph-failed) / ""; }
+.s-dot.manual::before,  .chip.manual::before,
+.src-result.status-manual .src-result-label::before,
+.status-select button.on[data-s=manual]::before  { content: var(--glyph-manual) / ""; }
+.s-dot.unset::before { content: var(--glyph-unset) / ""; }
+/* The dot IS the glyph, so it carries no spacing of its own. */
+.s-dot::before { margin: 0; }
+
 .chip { font-size: var(--fs-micro); font-weight: 700; padding: var(--sp-0) var(--sp-2); border-radius: 999px; }
 .chip.found { background: var(--found-bg); color: var(--found); border: 1.5px solid var(--found-edge); }
 .chip.none { background: var(--none-bg); color: var(--none); }
@@ -1331,7 +1458,8 @@ body.qm-open { overflow: hidden; }
 .photo-section { margin-top: var(--sp-4); }
 .dropzone { border: 1.5px dashed var(--line); border-radius: 10px; padding: var(--sp-3) var(--sp-4); text-align: center;
   font-size: var(--fs-body); color: var(--ink-soft); cursor: pointer; transition: border-color .15s, background .15s; }
-.dropzone:hover, .dropzone:focus { border-color: var(--brand); outline: none; background: var(--surface-2); }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--brand); background: var(--surface-2); }
+.dropzone:focus-visible { --focus-offset: -4px; }
 .dropzone.drag { border-color: var(--accent); background: var(--reviewed-bg); color: var(--reviewed); }
 .dropzone.small { padding: var(--sp-2); font-size: var(--fs-meta); }
 .dropzone .pick-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; font-weight: 600;
@@ -1341,13 +1469,17 @@ body.qm-open { overflow: hidden; }
 .photo-grid.small { gap: var(--sp-2); margin-top: var(--sp-2); }
 .photo-thumb { position: relative; width: 120px; margin: 0; background: var(--surface-2); border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
 .photo-grid.small .photo-thumb { width: 84px; }
-.photo-thumb img { display: block; width: 100%; height: 90px; object-fit: cover; cursor: zoom-in; }
+/* The opener is a real button now (see photoOpener) — stripped back to the frame
+   the bare <img> used to be, so nothing about the thumbnail moved. */
+.photo-open { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.photo-open:focus-visible { --focus-offset: -2px; }
+.photo-thumb img { display: block; width: 100%; height: 90px; object-fit: cover; }
 .photo-grid.small .photo-thumb img { height: 64px; }
 .photo-thumb .photo-remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; line-height: 18px;
   padding: 0; border-radius: 50%; border: none; background: rgba(17,24,29,.65); color: #fff; font-size: var(--fs-title); cursor: pointer; }
 .photo-thumb .photo-cap { width: 100%; border: none; border-top: 1px solid var(--line); border-radius: 0; padding: var(--sp-1); font-size: var(--fs-micro); background: transparent; }
 .photo-thumb.view { cursor: default; }
-.photo-thumb.view img { cursor: zoom-in; }
+.photo-thumb.view .photo-open { cursor: zoom-in; }
 .photo-thumb.view figcaption { font-size: var(--fs-micro); color: var(--ink-soft); padding: var(--sp-1); }
 /* Evidence photos on a card. At rest this is one compact button — the always-on
    dashed dropzone cost ~44 px of empty invitation on every biosecurity card, and
@@ -1384,7 +1516,7 @@ a.photo-credit:hover { text-decoration: underline; }
    last control on the card, in DOM order and on screen, which is what the
    instructions have always said ("sign off last"). */
 .include-row .inc-btn { white-space: nowrap; }
-.include-row .inc-btn.on { background: var(--reviewed); border-color: var(--reviewed); color: #fff; }
+.include-row .inc-btn.on { background: var(--reviewed); border-color: var(--reviewed); color: var(--fill-ink); }
 .include-row .signoff { margin-left: auto; }
 /* The destination reads as text — a 200px <select> on all 23 cards was heavy
    machinery for a choice the default gets right nearly every time. The full
@@ -1407,7 +1539,7 @@ a.photo-credit:hover { text-decoration: underline; }
   background: transparent; border: 0; border-radius: 5px; padding: 0; cursor: pointer;
   text-align: left; text-decoration: underline; }
 .inc-dest-link:hover { text-decoration: none; }
-.inc-dest-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.inc-dest-link:focus-visible { --focus-offset: 2px; }
 
 /* ---------- site map ---------- */
 /* Two locator maps stacked in the (narrow) collection column; they render side by
@@ -1419,7 +1551,7 @@ a.photo-credit:hover { text-decoration: underline; }
 .map-controls { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .map-presets { display: inline-flex; gap: var(--sp-1); flex-wrap: wrap; }
 .map-preset { padding: var(--sp-1) var(--sp-2); }
-.map-preset.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.map-preset.on { background: var(--brand); border-color: var(--brand); color: var(--fill-ink); }
 .map-km-field { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-meta); font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
 .map-km-field input { width: 74px; padding: var(--sp-1) var(--sp-2); }
 .map-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-meta); font-weight: 600; color: var(--ink-soft); white-space: nowrap; cursor: pointer; }
@@ -1578,8 +1710,13 @@ a.photo-credit:hover { text-decoration: underline; }
 .r-included { display: flex; flex-direction: column; gap: var(--sp-2); }
 .r-inc-item { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 8px; padding: var(--sp-2); background: var(--surface-2); }
 /* Found evidence blocks in the report get the same loud cherry edge as the
-   collection cards, so a found matter stands out in the report column too. */
+   collection cards, so a found matter stands out in the report column too — and
+   the same per-status border styles, so the report column reads in greyscale too.
+   Each block also carries its status chip, which brings the glyph with it. */
 .r-inc-item.status-found { border-left-color: var(--found-edge); border-left-width: 4px; }
+.r-inc-item.status-failed { border-left-style: dashed; border-left-color: var(--failed); }
+.r-inc-item.status-manual { border-left-style: dotted; border-left-color: var(--manual); }
+.r-inc-item.status-none { border-left-color: var(--none); }
 .r-inc-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 /* The source name IS the way back to its card — it replaced a standing "⇠ Show"
    button on every entry, whose visible label never said where it went. Styled as
@@ -1588,7 +1725,7 @@ a.photo-credit:hover { text-decoration: underline; }
 .r-inc-name { font: inherit; font-weight: 650; font-size: var(--fs-meta); color: var(--ink);
   background: transparent; border: 0; border-radius: 5px; padding: 0; cursor: pointer; text-align: left; }
 .r-inc-name:hover { color: var(--brand); text-decoration: underline; }
-.r-inc-name:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.r-inc-name:focus-visible { --focus-offset: 2px; }
 .r-inc-head .chip { font-size: var(--fs-micro); }
 /* "Show" + "Remove" sit together at the right of an included-source block. Show
    jumps the collection (left column) to the originating source card. */
@@ -1616,7 +1753,7 @@ a.photo-credit:hover { text-decoration: underline; }
    thumbnails, showing the whole frame rather than a cover-cropped square). */
 .photo-grid.report-large { gap: var(--sp-3); }
 .photo-grid.report-large .photo-thumb { width: 300px; max-width: 100%; background: var(--surface-2); }
-.photo-grid.report-large .photo-thumb img { height: auto; max-height: 340px; object-fit: contain; cursor: zoom-in; }
+.photo-grid.report-large .photo-thumb img { height: auto; max-height: 340px; object-fit: contain; }
 
 /* ---------- lightbox / map modal (pan + zoom) ---------- */
 .lb-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(8,14,18,.86);
@@ -1695,7 +1832,7 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
     padding: var(--sp-2) var(--sp-3); font-size: var(--fs-body); font-weight: 600;
   }
   .topbar-meta .ghost-link:hover { background: var(--surface-2); }
-  .topbar-meta .ghost-link:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+  .topbar-meta .ghost-link:focus-visible { --focus: var(--brand); --focus-offset: -2px; }
   /* Destructive, and irreversible — ruled off from the two preferences above it,
      the same way .menu-item.danger is on the card menus. */
   #btn-cache-blaster { color: var(--failed); }

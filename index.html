@@ -88,12 +88,18 @@
       <div class="card-head">
         <h2><span class="step">1</span> Choose a site</h2>
       </div>
-      <div class="tabs" role="tablist">
-        <button class="tab is-active" data-tab="by-name" role="tab">By station name</button>
-        <button class="tab" data-tab="by-coords" role="tab">By coordinates</button>
+      <!-- A real tablist: aria-selected, aria-controls and a roving tabindex, all
+           kept in sync by wireTabs() so the markup here and the state after a
+           click can't disagree. -->
+      <div class="tabs" role="tablist" aria-label="How to find the site">
+        <button class="tab is-active" data-tab="by-name" role="tab" id="tab-by-name"
+                aria-selected="true" aria-controls="panel-by-name">By station name</button>
+        <button class="tab" data-tab="by-coords" role="tab" id="tab-by-coords"
+                aria-selected="false" aria-controls="panel-by-coords" tabindex="-1">By coordinates</button>
       </div>
 
-      <div class="tab-panel is-active" data-panel="by-name">
+      <div class="tab-panel is-active" data-panel="by-name" role="tabpanel"
+           id="panel-by-name" aria-labelledby="tab-by-name">
         <label for="station-search" class="field-label">Start typing a station name or number</label>
         <div class="autocomplete">
           <input id="station-search" type="text" autocomplete="off" spellcheck="false"
@@ -103,7 +109,8 @@
         <p class="hint" id="station-count-hint"></p>
       </div>
 
-      <div class="tab-panel" data-panel="by-coords">
+      <div class="tab-panel" data-panel="by-coords" role="tabpanel"
+           id="panel-by-coords" aria-labelledby="tab-by-coords">
         <div class="coord-grid">
           <div>
             <label class="field-label" for="in-lat">Latitude</label>
