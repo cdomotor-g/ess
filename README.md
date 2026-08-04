@@ -199,6 +199,15 @@ click the highlighted handle to bring the pane back. The choice is remembered.
 The narrow **jump rail** on the far left carries the four steps plus one button
 per source category, badged with how many sources in it still need a human.
 
+**On a phone or a narrow window** the two panes become **tabs** rather than a
+stack, so the report is one tap away instead of thousands of pixels below the
+collection list. Each tab keeps its own scroll position, the **Collect** tab
+carries the same outstanding count the rail badges do, and the site name and
+number stay on screen on both tabs. The jump rail becomes a scrolling row of
+category chips under the tabs, with the same per-category counts. Theme, **Clear
+cache** and **Docs** move into the **⋯** menu in the header so the header stays
+one row. Everything is the same work, and nothing has to be done differently.
+
 **The two halves show you they belong together.** Hover (or tab to) a source card
 and the report section it feeds lights up; hover a report section and every card
 feeding it lights up — no scrolling, nothing moves. In the report, a source's
