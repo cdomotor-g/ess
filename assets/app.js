@@ -313,8 +313,58 @@
     return state.filter !== "all";
   }
 
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  // ------------------------------------------------------------------- ui mode
+  // Two presentations of ONE state (see the Focus mode section further down, and
+  // docs/ARCHITECTURE.md):
+  //
+  //   focus      (default) one column, one step per screen, the tool proposing
+  //                        what comes next
+  //   workbench            today's split view — both panes, the operator choosing
+  //
+  // A preference about how a person works rather than a property of a station, so
+  // it lives in the browser and not in the per-site payload — same pattern as
+  // LS_ADVANCED / LS_CARD_SORT above.
+  const LS_MODE = LS_PREFIX + "mode";
+  let uiMode = "focus";
+  const focusLive = () => uiMode === "focus";
+  const workbenchLive = () => uiMode === "workbench";
+
+  // While Focus is live the workbench's two columns are EMPTIED, not hidden: their
+  // children move into these detached holders, and the two purely-derived regions
+  // (the dashboard and the report sections) are dropped entirely and rebuilt from
+  // state on the way back. Event listeners ride on the nodes themselves, so nothing
+  // needs re-wiring in either direction.
+  const WB_COLS = ["col-left", "col-right"];
+  let wbStash = null; // { "col-left": <div>, "col-right": <div> } | null
+
+  // …with one wrinkle. Plenty of code READS a control rather than rendering into
+  // one — sourcesForSite() reads #toggle-manual-internal on every single recompute,
+  // including the ones Focus mode does — and those lookups have to keep resolving
+  // while the workbench is stashed. So a document-rooted query that misses falls
+  // through to the holders. A query with an explicit root never does: that caller
+  // has already said which subtree it means.
+  const $ = (sel, root = document) => {
+    const hit = root.querySelector(sel);
+    return hit || (root === document ? stashQuery(sel) : null);
+  };
+  const $$ = (sel, root = document) => {
+    const hits = Array.from(root.querySelectorAll(sel));
+    return (hits.length || root !== document) ? hits : stashQueryAll(sel);
+  };
+  function stashQuery(sel) {
+    if (!wbStash) return null;
+    for (const id of WB_COLS) {
+      const hit = wbStash[id] && wbStash[id].querySelector(sel);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  function stashQueryAll(sel) {
+    if (!wbStash) return [];
+    const out = [];
+    for (const id of WB_COLS) if (wbStash[id]) out.push(...wbStash[id].querySelectorAll(sel));
+    return out;
+  }
   const el = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -1085,6 +1135,7 @@
     state.filter = "all";  // restore() brings back this site's own filter choice
     state.groupOpen = {};  // …and its own collapse choices
     state.flow = freshFlow(); // …and how far it got through step 3
+    resetFocusCursor();    // …and where Focus mode had got to (restore() brings this site's back)
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
   }
@@ -1135,6 +1186,17 @@
     renderReport();
     $("#fld-date").value = state.date;
     $("#fld-maintenance").value = state.maintenance;
+    // Focus mode renders the same state as one step instead of two panes, and owns
+    // its own "where should the operator be looking" — so it returns here rather
+    // than falling through to the workbench's jump.
+    if (focusLive()) {
+      // A site that has just been chosen makes the picking step done; don't leave
+      // the operator sitting on it.
+      if (state.site && focusCursor === "site:pick") focusCursor = null;
+      renderCollectionStatus(); // renderDashboard() skipped it, and the step list counts it
+      renderFocus({ focus: !opts || opts.focus !== false });
+      return;
+    }
     // Choosing a site is a jump like any other, so focus follows it to the site
     // header — otherwise the operator picks a station and their next Tab restarts
     // from the top bar. The exception is the boot-time batch restore, which passes
@@ -1203,6 +1265,10 @@
     // already open confirms the round trip the operator just made, while a file
     // for a different site starts that sequence again.
     state.flow = sameSite ? normalizeFlow(prevFlow) : freshFlow();
+    // …and so does Focus mode's place in the flow: a reply for the site already open
+    // leaves the operator where they were (their step list simply gains a lot of
+    // answered steps); a file for a different site starts that walk again.
+    if (!sameSite) resetFocusCursor();
     state.report = {};
     (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
     // Seed jurisdiction-specific section defaults (e.g. the QLD GBO text) where the
@@ -2090,6 +2156,12 @@
 
   // ---------------------------------------------------------------- dashboard
   function renderDashboard() {
+    // The single biggest DOM build in the app — twenty-three cards and several
+    // hundred controls. Focus mode doesn't have a dashboard to build it into, and
+    // building it into a detached holder would be the "display:none is not the same
+    // as not there" mistake in a different costume. Everything it renders is
+    // derived, so it is rebuilt from state the moment the workbench comes back.
+    if (!workbenchLive()) return;
     const wrap = $("#dashboard-groups");
     wrap.innerHTML = "";
     // A full dashboard render is the "next render" that ends every transient card
@@ -2304,8 +2376,10 @@
     if (!rail) return;
     if (railObserver) { railObserver.disconnect(); railObserver = null; }
     rail.innerHTML = "";
-    // Matches #workspace — there's nothing to jump to until a site is loaded.
-    const live = !!state.site && !$("#workspace").hidden;
+    // Matches #workspace — there's nothing to jump to until a site is loaded, and
+    // nothing to navigate at all while Focus mode has the screen (its own step list
+    // is what does this job there).
+    const live = workbenchLive() && !!state.site && !$("#workspace").hidden;
     rail.hidden = !live;
     if (!live) return;
 
@@ -3656,6 +3730,10 @@
     refreshMobileNav();  // …on the Collect tab and its chips, below 981px
     refreshGroupHeads(); // …and per category on each group's roll-up
     renderStarvedSections(); // …and which report sections are still empty, from over here
+    // …and Focus mode's step list, which counts the same things. Every path that
+    // changes a result already comes through here, so this is the one hook the
+    // derived step graph needs to stay live.
+    if (focusLive()) renderFocus({ focus: false });
     // The sentence just changed width/wrap, and this card is what the sticky group
     // headers pin under (covers browsers without ResizeObserver too).
     measureStatusBar();
@@ -4288,7 +4366,23 @@
     return w;
   }
 
+  // Rendering the report has always been where a section's state is first created
+  // and its dropdown auto-suggested. Focus mode doesn't build the report pane, so
+  // that seeding is split out and run from both — otherwise an export taken from
+  // Focus would be missing every auto-suggested choice, and the two modes would
+  // disagree about the same site.
+  function ensureReportChoices() {
+    if (!state.site) return;
+    REPORT_SECTIONS.forEach((section) => {
+      const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
+      if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
+    });
+  }
+
   function renderReport() {
+    ensureReportChoices();
+    // …but the pane itself is the workbench's. See renderDashboard() above.
+    if (!workbenchLive()) return;
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
     // Clamped finding notes, collected as they're built and measured once the
@@ -4320,8 +4414,7 @@
       wrap.append(box);
     }
     REPORT_SECTIONS.forEach((section) => {
-      const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
-      if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
+      const rstate = state.report[section.id]; // seeded by ensureReportChoices() above
 
       // data-section is the join to the collection pane — see linkPartners() and
       // the scroll sync. Every card feeding this section carries the same value.
@@ -4840,6 +4933,546 @@
       if (span) span.textContent = rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed";
     }
     renderReportHeader(); // the "n of 11 reviewed" roll-up moves with every tick
+    if (focusLive()) renderFocus({ focus: false }); // a section step's "done" just moved
+  }
+
+  /* ============================================================== FOCUS MODE ===
+     The split view above is a cockpit: everything reachable, nothing hidden, the
+     operator in charge of what to look at next. That suits some people exactly.
+     For others it is still overwhelming — not because of how much is on screen,
+     but because they have to decide what to do next on every single screen.
+
+     Focus mode is the second way to fly the same aircraft. One column, one step
+     per screen, and the tool proposing the order. Two rules keep it from becoming
+     a second application:
+
+       ONE STATE, TWO PRESENTATIONS.  Every step reads and writes state.findings /
+       state.report — the same objects, the same localStorage schema, the same
+       ess-findings/1 export. Switching mode mid-assessment is a re-render and
+       nothing else, and it is lossless in both directions (see setUiMode, which
+       flushes any debounced keystroke before the DOM it was typed into goes away).
+
+       NOTHING IS TRAPPED.  Focus PROPOSES an order; it never enforces one. Every
+       step is reachable from the step list at any time, "Skip for now" is always
+       available, and no step is a dead end.
+
+     This section owns the shell and the step graph. The step BODIES are still
+     being built out; until then each one states what it is for and hands off to
+     the workbench with a labelled button (focusHandoffTo). ============================ */
+
+  // ------------------------------------------------------------- the step graph
+  // A pure function of state, computed on every render and NEVER stored. That is
+  // what lets the flow reshape itself correctly the instant a card is re-routed to
+  // a different section, an import answers fifteen sources at once, or the internal
+  // -sources toggle changes which sources apply at all.
+  //
+  //   id     stable across recomputation ("src:qld-globe", "sec:invasive_plants").
+  //          The cursor stores this, never an index — the list re-orders as work
+  //          lands, and an index would silently point at a different step.
+  //   phase  site · checks · sources · report · finish, for the chrome.
+  //   kind   input (the operator supplies something) or output (the operator
+  //          reviews something the tool assembled).
+  //   ref    the source id or report-section id this step is about.
+  //   state  done · needs-you · skipped · blocked · not-reached.
+  const FOCUS_PHASE = { site: "Site", checks: "Checks", sources: "Sources", report: "Report", finish: "Finish" };
+
+  // Has this source been answered AT ALL? This is the gate on a report section, and
+  // deliberately not isOutstanding(): `manual` and `failed` are legitimate final
+  // answers from the operator's point of view — a portal that must be visited in
+  // person IS answered — and holding a report section hostage to a sign-off would
+  // strand the flow on exactly the sources that can never be closed from a desk.
+  //
+  // "Still needs you" keeps its one definition (isOutstanding, above) and is what a
+  // step's own state reports. The two saying different things about the same manual
+  // source is the point, not a bug: the section is ready to write, and the source is
+  // still on somebody's list.
+  const hasAnswer = (f) => statusOf(f) !== STATUS.UNSET;
+
+  // Steps waved past with "Skip for now". Session-only and per site: a skip is
+  // "not now", not a decision about the assessment, and the cursor is the only
+  // thing this mode persists.
+  let focusSkipped = new Set();
+  let focusCursor = null;   // the current step's stable id (persisted per site)
+  let focusStepIds = [];    // ids of the last computed list — see resolveFocusCursor
+  // A different site is a different step list. Called wherever state.site is
+  // reassigned, so one site's place can never be read as another's.
+  function resetFocusCursor() { focusCursor = null; focusSkipped = new Set(); focusStepIds = []; }
+
+  function focusSteps() {
+    const site = state.site;
+    const steps = [];
+    // `state` is settled in one pass at the end: a step's own facts decide
+    // done/blocked/skipped, and only "have I got here yet" needs the cursor.
+    const add = (id, phase, kind, title, extra) => steps.push(Object.assign(
+      { id, phase, kind, title, ref: null, done: false, touched: false, state: "not-reached" }, extra || {}));
+
+    add("site:pick", "site", "input", site ? "Change the site" : "Choose the site",
+      { done: !!site, touched: !!site });
+    // Nothing downstream is knowable without a site — which sources apply, and
+    // therefore every other step, follows from where the site is.
+    if (!site) { steps[0].state = "needs-you"; return steps; }
+
+    // ackOnly: a step with no record of its own. The cursor is the only evidence
+    // that the operator has been past it, so that is what marks it done. Walking
+    // Back un-marks it, which is honest — there is nothing else to go on.
+    add("site:details", "site", "input", "Check the site's details", { ackOnly: true });
+    add("out:identity", "site", "output", "Review the report's front page", {
+      // What this step reviews IS the identity block and the two locator maps, so
+      // it is finished when they are actually there.
+      done: MAP_SLOTS.every((slot) => { const ms = state.maps[slot.key]; return !!(ms && ms.image); }),
+    });
+    add("checks:auto", "checks", "input", "Run the checks this tool can run itself",
+      { done: !!state.flow.auto, touched: !!state.flow.auto });
+    add("checks:prompt", "checks", "input", "Copy the prompt into an AI assistant",
+      { done: !!state.flow.prompt, touched: !!state.flow.prompt });
+    add("checks:paste", "checks", "input", "Paste the assistant's reply back",
+      { done: !!state.flow.applied, touched: !!state.flow.applied });
+
+    // ---- the interleave. Every card resolves to exactly ONE report section via
+    // targetSectionOf(), so the order is a straightforward grouping: for each
+    // report section, in proforma order, its sources and then the section itself.
+    // The operator reviews each output while the evidence is still in their head,
+    // and reaches the end with a finished report rather than a finished checklist.
+    const bySection = new Map(REPORT_SECTIONS.map((sec) => [sec.id, []]));
+    const orphans = [];
+    sourcesForSite().forEach((src) => {
+      const bucket = bySection.get(targetSectionOf(src));
+      (bucket || orphans).push(src);
+    });
+
+    const addSourceStep = (src) => {
+      const f = state.findings[src.id] || {};
+      add(`src:${src.id}`, "sources", "input", src.name, {
+        ref: src.id,
+        done: !isOutstanding(f),
+        // Anything recorded here — a status, a note, a photo — means somebody (or
+        // an import) has already been at this source, wherever the cursor sits.
+        touched: hasAnswer(f) || !!(f.note && f.note.trim()) || !!(f.images && f.images.length),
+      });
+    };
+
+    REPORT_SECTIONS.forEach((sec) => {
+      // Within a section, the existing dashboard ordering: what still needs a human
+      // first, settled work last. sortCards sorts in place, so it gets a copy.
+      const inSec = sortCards((bySection.get(sec.id) || []).slice());
+      inSec.forEach(addSourceStep);
+      const rstate = state.report[sec.id] || {};
+      add(`sec:${sec.id}`, "report", "output", sec.title, {
+        ref: sec.id,
+        sources: inSec.length,
+        // A section with NO sources routed to it still gets a step, marked as such,
+        // so the operator is told it was considered rather than finding it silently
+        // absent. Its gate is vacuously open, so it never blocks progress.
+        noSources: !inSec.length,
+        gate: inSec.every((src) => hasAnswer(state.findings[src.id] || {})),
+        done: !!rstate.reviewed,
+      });
+    });
+    // A source whose category maps to no report section at all still has to be
+    // worked — it just has no output to interleave with. Kept at the end of the
+    // source work rather than dropped on the floor.
+    orphans.forEach(addSourceStep);
+
+    const counts = statusCounts();
+    add("finish:export", "finish", "output", "Check what's left, and export", {
+      gate: true,
+      done: !counts.outstanding && REPORT_SECTIONS.every((sec) => (state.report[sec.id] || {}).reviewed),
+    });
+
+    // ---- settle the states.
+    const at = steps.findIndex((s) => s.id === focusCursor);
+    steps.forEach((s, i) => {
+      if (focusSkipped.has(s.id) && !s.done) { s.state = "skipped"; return; }
+      if (s.done) { s.state = "done"; return; }
+      // An output is ready when its inputs are in, full stop — the gate opening is
+      // the signal, and it does not wait for the cursor to arrive.
+      if (s.kind === "output") { s.state = s.gate === false ? "blocked" : "needs-you"; return; }
+      if (s.ackOnly) { s.state = i < at ? "done" : (i === at ? "needs-you" : "not-reached"); return; }
+      // …and an input is "not reached" only while nothing has happened at it AND
+      // the operator has not got there yet.
+      s.state = (s.touched || at < 0 || i <= at) ? "needs-you" : "not-reached";
+    });
+    return steps;
+  }
+
+  // The cursor resolves by ID. When the step it names has gone — a card re-routed
+  // to another section, internal sources hidden — land on the nearest EARLIER
+  // survivor rather than throwing the operator back to the start, which is what the
+  // previous list of ids is kept for. Not part of focusSteps(): that stays pure.
+  function resolveFocusCursor(steps) {
+    if (!steps.length) { focusStepIds = []; return -1; }
+    let i = steps.findIndex((s) => s.id === focusCursor);
+    if (i < 0) {
+      for (let k = focusStepIds.indexOf(focusCursor) - 1; k >= 0 && i < 0; k--)
+        i = steps.findIndex((s) => s.id === focusStepIds[k]);
+      if (i < 0) i = 0;
+      focusCursor = steps[i].id;
+    }
+    focusStepIds = steps.map((s) => s.id);
+    return i;
+  }
+
+  // ------------------------------------------------------------ mode switching
+  function readUiMode() {
+    try { return localStorage.getItem(LS_MODE) === "workbench" ? "workbench" : "focus"; } catch (_) { return "focus"; }
+  }
+
+  // The label names where the button GOES, never where you are, so it always reads
+  // as a way out. Making Focus the default only works if that is true on first sight.
+  function syncModeButton() {
+    const btn = $("#btn-mode");
+    if (!btn) return;
+    const out = focusLive();
+    btn.textContent = out ? "Workbench ▸" : "Focus ▸";
+    const label = out
+      ? "Switch to the workbench — both panes, everything reachable at once"
+      : "Switch to Focus mode — one step at a time, with the report interleaved";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
+
+  function detachWorkbench() {
+    if (wbStash) return;
+    wbStash = {};
+    for (const id of WB_COLS) {
+      const col = document.getElementById(id);
+      if (!col) continue;
+      const holder = document.createElement("div");
+      holder.append(...Array.from(col.childNodes));
+      wbStash[id] = holder;
+    }
+    // The two purely-derived regions are dropped rather than carried: a stashed
+    // dashboard is still several hundred controls held in memory, and both are
+    // rebuilt from state the moment the workbench comes back.
+    ["#dashboard-groups", "#report-sections"].forEach((sel) => {
+      const node = stashQuery(sel);
+      if (node) node.replaceChildren();
+    });
+  }
+
+  function attachWorkbench() {
+    if (!wbStash) return;
+    releaseAdoptedNodes();
+    for (const id of WB_COLS) {
+      const col = document.getElementById(id), holder = wbStash[id];
+      if (col && holder) col.append(...Array.from(holder.childNodes));
+    }
+    wbStash = null;
+  }
+
+  // Workbench nodes borrowed INTO a Focus step body. The site picker is one: it is
+  // already exactly the control that step needs, and re-parenting it keeps every
+  // listener, so there is no second copy to keep in sync. Where each node came from
+  // is recorded so the workbench is rebuilt intact.
+  const adoptedNodes = [];
+  function adoptNode(node, into) {
+    if (!node || !into) return null;
+    adoptedNodes.push({ node, parent: node.parentNode, next: node.nextSibling, hidden: node.hidden });
+    node.hidden = false;
+    into.append(node);
+    return node;
+  }
+  function releaseAdoptedNodes() {
+    while (adoptedNodes.length) {
+      const a = adoptedNodes.pop();
+      a.node.hidden = a.hidden;
+      if (!a.parent) { a.node.remove(); continue; }
+      if (a.next && a.next.parentNode === a.parent) a.parent.insertBefore(a.node, a.next);
+      else a.parent.append(a.node);
+    }
+  }
+
+  function setUiMode(mode, opts) {
+    mode = mode === "workbench" ? "workbench" : "focus";
+    const o = opts || {};
+    // An in-flight debounced keystroke belongs to the state BOTH modes render, so
+    // it is written before the DOM it was typed into goes away. This is the whole
+    // of "switching loses nothing": there is no per-mode data to migrate.
+    if (mode !== uiMode) flushSave();
+    uiMode = mode;
+    if (o.persist !== false) { try { localStorage.setItem(LS_MODE, uiMode); } catch (_) {} }
+    syncModeButton();
+    if (o.render === false) return;
+    applyUiMode(o);
+  }
+
+  function applyUiMode(opts) {
+    const split = $(".split"), region = $("#focus");
+    if (focusLive()) {
+      detachWorkbench();
+      if (split) split.hidden = true;
+      const shell = $("#mshell"); if (shell) shell.hidden = true;
+      if (region) region.hidden = false;
+      renderFocus(opts);
+      // The pinned-box offsets the stylesheet reads belong to boxes that are no
+      // longer on screen; re-measure so a stale --status-h / --mshell-h can't
+      // offset a scroll in here.
+      measureTopbar(); measureStatusBar(); measureReportHeader(); measureMobileShell();
+      return;
+    }
+    releaseAdoptedNodes();
+    if (region) { region.replaceChildren(); region.hidden = true; }
+    attachWorkbench();
+    if (split) split.hidden = false;
+    if (state.site) renderWorkspace({ focus: false });
+    else { renderRailNav(); renderMobileNav(); }
+    measureTopbar(); measureStatusBar(); measureReportHeader(); measureMobileShell();
+  }
+
+  // ------------------------------------------------------------------ the shell
+  // Identical on every step: where you are, the step's own one-line heading, the
+  // body (which the step owns), and one primary action forward.
+  let focusListOpen = false;
+
+  function renderFocus(opts) {
+    const root = $("#focus");
+    if (!root || !focusLive()) return;
+    const o = opts || {};
+    const active = document.activeElement;
+    const inStep = !!active && root.contains(active);
+    // A BACKGROUND re-render — a result landing, an agent writing a note — must not
+    // yank the caret out of a control the operator is typing in. (The site picker's
+    // search box is borrowed into a step, so this is reachable.) The next
+    // navigation renders it fresh anyway.
+    if (o.focus === false && inStep && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return;
+    // Ids are stable across renders, so a control that had keyboard focus can be
+    // handed it back rather than dropping it to <body>.
+    const refocusId = (o.focus === false && inStep && active.id) ? active.id : "";
+    releaseAdoptedNodes(); // whatever the last render borrowed goes home first
+    const steps = focusSteps();
+    const at = resolveFocusCursor(steps);
+    const step = steps[at];
+    root.replaceChildren();
+    if (!step) return;
+
+    const done = steps.filter((s) => s.state === "done").length;
+    const heading = el("h2", { class: "fx-title", id: "fx-title", tabindex: "-1" }, step.title);
+
+    root.append(
+      el("div", { class: "fx-shell" },
+        renderFocusIntro(),
+        renderFocusChrome(step, steps, at, done),
+        renderFocusList(steps, at),
+        el("div", { class: "fx-step", "data-kind": step.kind, "data-state": step.state },
+          el("p", { class: "fx-kicker" },
+            el("span", { class: "fx-kind" }, step.kind === "output" ? "Review" : "Do"),
+            el("span", { class: "fx-step-state", "data-state": step.state }, FOCUS_STATE_LABEL[step.state] || "")),
+          heading,
+          el("div", { class: "fx-body" }, focusStepBody(step))),
+        renderFocusNav(step, steps, at)));
+
+    // Moving to a step is a jump, and the heading is what it lands on — otherwise
+    // the operator advances and their next Tab restarts from the top bar. `focus:
+    // false` is for the renders that are a side effect of something else (a result
+    // landing, a batch restoring on page load), which nobody asked to be moved by.
+    if (o.focus !== false) { heading.focus({ preventScroll: true }); return; }
+    if (!refocusId) return;
+    const back = root.querySelector(`#${window.CSS && CSS.escape ? CSS.escape(refocusId) : refocusId}`);
+    if (back) back.focus({ preventScroll: true });
+  }
+
+  const FOCUS_STATE_LABEL = {
+    done: "Done", "needs-you": "Needs you", skipped: "Skipped",
+    blocked: "Waiting on its sources", "not-reached": "Not started",
+  };
+
+  function renderFocusChrome(step, steps, at, done) {
+    const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
+    return el("div", { class: "fx-chrome" },
+      el("p", { class: "fx-where" },
+        el("span", { class: "fx-phase", "data-phase": step.phase }, FOCUS_PHASE[step.phase] || ""),
+        el("span", { class: "fx-of", role: "status" }, `Step ${at + 1} of ${steps.length}`)),
+      el("span", { class: "cs-track fx-track", "aria-hidden": "true" },
+        el("span", { class: "cs-fill", style: `width:${pct}%` })),
+      el("button", {
+        type: "button", class: "btn tertiary fx-list-btn", id: "fx-list-btn",
+        "aria-expanded": focusListOpen ? "true" : "false", "aria-controls": "fx-list",
+        title: "Every step, in order, with what each one still needs — and a jump to any of them",
+        onclick: () => { focusListOpen = !focusListOpen; renderFocus({ focus: false }); },
+      }, `All steps ${focusListOpen ? "▴" : "▾"}`));
+  }
+
+  // Focus mode's answer to the nav rail, and what keeps "the tool proposes an
+  // order, it does not impose one" true: every step, its state, and a jump.
+  function renderFocusList(steps, at) {
+    const list = el("div", { class: "fx-list", id: "fx-list" });
+    list.hidden = !focusListOpen;
+    if (!focusListOpen) return list;
+    let phase = null;
+    steps.forEach((s, i) => {
+      if (s.phase !== phase) {
+        phase = s.phase;
+        list.append(el("p", { class: "fx-list-phase" }, FOCUS_PHASE[phase] || phase));
+      }
+      const here = i === at;
+      list.append(el("button", {
+        type: "button", class: "fx-list-item" + (here ? " is-here" : ""),
+        "data-state": s.state, "aria-current": here ? "step" : null,
+        onclick: () => focusGoTo(s.id),
+      },
+        el("span", { class: "fx-list-mark", "aria-hidden": "true" }, FOCUS_STATE_MARK[s.state] || "·"),
+        el("span", { class: "fx-list-name" }, s.title),
+        el("span", { class: "fx-list-state" }, FOCUS_STATE_LABEL[s.state] || "")));
+    });
+    return list;
+  }
+
+  // Status is never carried by colour alone — see the same rule on the source
+  // cards' status glyphs.
+  const FOCUS_STATE_MARK = {
+    done: "✓", "needs-you": "●", skipped: "↷", blocked: "⋯", "not-reached": "○",
+  };
+
+  function renderFocusNav(step, steps, at) {
+    // Before a site is picked there is exactly one step, and Back / Skip / Continue
+    // would each be a lie about somewhere to go. The step's own control is the way
+    // forward, and it is the only primary action on the surface.
+    if (steps.length < 2) return null;
+    const last = at >= steps.length - 1;
+    return el("div", { class: "fx-nav" },
+      el("button", {
+        type: "button", class: "btn tertiary", id: "fx-back", disabled: at <= 0 ? "disabled" : null,
+        onclick: () => focusMove(-1),
+      }, "◂ Back"),
+      el("span", { class: "fx-nav-gap" }),
+      // "Skip" means "leave this one, show me the next"; on the last step there is
+      // no next for it to mean.
+      last ? null : el("button", {
+        type: "button", class: "btn tertiary", id: "fx-skip",
+        title: "Leave this one for later — it stays on the step list and nothing is lost",
+        onclick: () => { focusSkipped.add(step.id); focusMove(1); },
+      }, "Skip for now"),
+      el("button", {
+        type: "button", class: "btn primary", id: "fx-next",
+        onclick: () => (last ? focusGoTo(steps[0].id) : focusMove(1)),
+      }, last ? "Back to the start" : "Continue ▸"));
+  }
+
+  // Making Focus the default changes the tool for people who were happy with it, so
+  // the first Focus session says once — and only once — that the old view is one
+  // click away. A browser flag, like the collection guide's: this is onboarding,
+  // not chrome, and nobody should meet it twice.
+  const LS_FOCUS_SEEN = LS_PREFIX + "focus-seen";
+  function focusIntroSeen() { try { return localStorage.getItem(LS_FOCUS_SEEN) === "1"; } catch (_) { return true; } }
+  function renderFocusIntro() {
+    if (focusIntroSeen()) return null;
+    return el("p", { class: "fx-intro", role: "status" },
+      el("span", {},
+        "This is ", el("b", {}, "Focus"), " — one step at a time, with the report built into the flow. ",
+        "The full workbench is one click away, top right, whenever you want it."),
+      el("button", {
+        type: "button", class: "btn tertiary tiny",
+        onclick: () => {
+          try { localStorage.setItem(LS_FOCUS_SEEN, "1"); } catch (_) {}
+          renderFocus({ focus: false });
+        },
+      }, "Got it"));
+  }
+
+  function focusGoTo(id) {
+    focusCursor = id;
+    // A discrete choice, and often the last thing done before a reload — persist it
+    // now rather than 400 ms later.
+    save(); flushSave();
+    renderFocus();
+  }
+  function focusMove(delta) {
+    const steps = focusSteps();
+    const at = resolveFocusCursor(steps);
+    const next = Math.max(0, Math.min(steps.length - 1, at + delta));
+    focusGoTo(steps[next].id);
+  }
+
+  // ------------------------------------------------------------- the step bodies
+  // Being built out step by step. Until a step has its own body it states what it
+  // is for and hands off to the workbench, which is a labelled route to the same
+  // controls rather than a dead end — no capability exists in only one mode.
+  const FOCUS_LEDE = {
+    "site:details": "Check the station record, the assessment date and the two locator maps that go on the front of the report.",
+    "out:identity": "The front page of the deliverable: which site this is, and the hyper-local and greater-region maps.",
+    "checks:auto": "Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.",
+    "checks:prompt": "One self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research the rest.",
+    "checks:paste": "The assistant answers with one JSON object. Anything it leaves blank keeps the result you already have.",
+    "finish:export": "What is still outstanding, and every way this report leaves the app.",
+  };
+
+  function focusStepBody(step) {
+    if (step.id === "site:pick") {
+      // The picker IS this step. Borrowed rather than rebuilt, so the autocomplete,
+      // the coordinate tab and every listener on them are the same ones.
+      const box = el("div", { class: "fx-adopt" });
+      adoptNode($("#site-picker"), box);
+      return box;
+    }
+    const body = el("div", {});
+    if (step.id.startsWith("src:")) return focusSourceBody(step, body);
+    if (step.id.startsWith("sec:")) return focusSectionBody(step, body);
+    const lede = FOCUS_LEDE[step.id];
+    if (lede) body.append(el("p", { class: "fx-lede" }, lede));
+    body.append(focusHandoffBtn(step, "Open this in the workbench"));
+    return body;
+  }
+
+  function focusSourceBody(step, body) {
+    const src = DATA.sources.find((s) => s.id === step.ref);
+    const f = state.findings[step.ref] || {};
+    if (!src) { body.append(el("p", { class: "fx-lede" }, "This source is no longer in the registry.")); return body; }
+    if (src.what_to_find) body.append(el("p", { class: "fx-lede" }, src.what_to_find));
+    body.append(el("p", { class: "fx-facts" },
+      el("span", { class: `chip ${statusOf(f)}` }, STATUS_LABEL[statusOf(f)]),
+      el("span", { class: "fx-fact" }, src.jurisdiction || ""),
+      f.note && f.note.trim() ? el("span", { class: "fx-fact" }, "has a note") : null));
+    const url = buildUrl(src);
+    body.append(el("div", { class: "fx-actions" },
+      url ? el("a", { class: "btn secondary", href: url, target: "_blank", rel: "noopener" }, "Open the source ↗") : null,
+      focusHandoffBtn(step, "Answer this in the workbench")));
+    return body;
+  }
+
+  function focusSectionBody(step, body) {
+    const rstate = state.report[step.ref] || {};
+    if (step.noSources) {
+      body.append(el("p", { class: "fx-lede" },
+        "No source that applies to this site feeds this section. It was considered — nothing is needed from you here."));
+    } else if (step.state === "blocked") {
+      // Name what is holding it, in the same terms the gate is written in.
+      const waiting = sourcesForSite().filter((s) =>
+        targetSectionOf(s) === step.ref && !hasAnswer(state.findings[s.id] || {}));
+      body.append(el("p", { class: "fx-lede" },
+        `Waiting on ${waiting.length} of this section's ${step.sources} sources — it is presented for review once every one of them has an answer.`));
+      body.append(el("div", { class: "fx-waiting" }, waiting.slice(0, 6).map((s) =>
+        el("button", { type: "button", class: "fx-waiting-src",
+          onclick: () => focusGoTo(`src:${s.id}`) }, s.name))));
+    } else {
+      body.append(el("p", { class: "fx-lede" },
+        `Every one of this section's ${step.sources} source${step.sources === 1 ? "" : "s"} has an answer. Read what it says, then sign it off.`));
+    }
+    if (rstate.choice) body.append(el("p", { class: "fx-facts" }, el("span", { class: "fx-fact" }, rstate.choice)));
+    body.append(focusHandoffBtn(step, "Review this section in the workbench"));
+    return body;
+  }
+
+  function focusHandoffBtn(step, label) {
+    return el("div", { class: "fx-actions" },
+      el("button", { type: "button", class: "btn secondary", onclick: () => focusHandoffTo(step) }, label + " ▸"));
+  }
+
+  // Switch modes and land on the thing the step was about. Ordering matters: the
+  // workbench DOM does not exist until setUiMode has rebuilt it.
+  function focusHandoffTo(step) {
+    setUiMode("workbench");
+    if (step.id.startsWith("src:")) { showSourceCard(step.ref); return; }
+    if (step.id.startsWith("sec:")) { showReportSection(step.ref); return; }
+    if (step.id.startsWith("checks:")) {
+      revealLeftPane();
+      openFlowStep(step.id.slice("checks:".length));
+      jumpTo($("#run-checks"));
+      return;
+    }
+    if (step.id === "site:details") { revealLeftPane(); setSiteDetailsOpen(true); jumpTo($("#site-summary")); return; }
+    if (step.id === "out:identity") { revealRightPane(); jumpTo($("#report")); return; }
+    if (step.id === "finish:export") { revealRightPane(); jumpTo($("#report-complete") || $("#report")); return; }
+    jumpTo($("#workspace") || $("#site-picker"));
   }
 
   // ---------------------------------------------------------------- persistence
@@ -4899,7 +5532,11 @@
       // Presentation state that belongs to this site rather than the browser: which
       // categories the operator has explicitly folded away or kept open, and which
       // slice of the list they were working — so reopening a site keeps their place.
-      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow },
+      // …and Focus mode's cursor: the step's stable ID, never its index, because the
+      // step list is derived and re-orders as work lands (an index would silently
+      // point at a different step after any change). Nothing else about Focus mode
+      // is stored — the steps themselves are recomputed from this payload.
+      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow, focus: { step: focusCursor } },
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -4999,6 +5636,10 @@
       state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
       state.filter = (d.ui && FILTERS[d.ui.filter]) ? d.ui.filter : "all";
       state.flow = normalizeFlow(d.ui && d.ui.flow);
+      // Close the tab on step 19 and come back tomorrow to step 19. resolveFocusCursor
+      // handles an id that no longer exists (a re-routed card, hidden internal sources).
+      const fx = d.ui && d.ui.focus;
+      focusCursor = (fx && typeof fx.step === "string") ? fx.step : null;
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
       // (v1) for sites saved before the split, then mark dirty so the next save
       // migrates them out of the text key.
@@ -6340,7 +6981,8 @@
   function renderMobileNav() {
     const shell = $("#mshell");
     if (!shell) return;
-    const live = !!state.site && !$("#workspace").hidden;
+    // The tabs exist to switch between the two panes; Focus mode has neither.
+    const live = workbenchLive() && !!state.site && !$("#workspace").hidden;
     shell.hidden = !live;
     if (!live) {
       // No site: no tabs, and the two panes go back to stacking (picker above,
@@ -6769,6 +7411,16 @@
     const agentBtn = $("#btn-agent-settings");
     if (agentBtn) agentBtn.addEventListener("click", revealLeftPane);
 
+    // The Focus ⇄ Workbench switch. Read the stored preference now so the button
+    // is labelled correctly from the first paint, but leave applying it to init():
+    // Focus mode's step list needs the source registry, and if the data load fails
+    // the workbench is the right thing to be looking at (it is where the error
+    // banner lives).
+    uiMode = readUiMode();
+    syncModeButton();
+    const modeBtn = $("#btn-mode");
+    if (modeBtn) modeBtn.addEventListener("click", () => setUiMode(focusLive() ? "workbench" : "focus"));
+
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");
     if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
@@ -6826,11 +7478,17 @@
         (local
           ? `You've opened this file directly. Browsers block <code>fetch()</code> from <code>file://</code>. Serve the folder instead:<br><code>cd ess &amp;&amp; python3 -m http.server 8000</code> then open <code>http://localhost:8000/</code> — or publish via GitHub Pages.`
           : `Check that <code>data/stations.json</code>, <code>sources.json</code>, <code>dropdowns.json</code> and <code>meta.json</code> are present.`));
+      // The banner lives in the left column, and there is no step list to build
+      // without the source registry — so a failed load stays in the workbench.
+      setUiMode("workbench", { persist: false });
       return;
     }
     $("#station-count-hint").textContent =
       `${DATA.stations.length.toLocaleString()} Bureau sites · ${DATA.sources.length} sources · data ${DATA.meta.generated_utc ? DATA.meta.generated_utc.slice(0, 10) : ""}`;
     $("#foot-meta").textContent = `${DATA.stations.length.toLocaleString()} sites · ${DATA.sources.length} sources.`;
+    // Put the chosen view on screen BEFORE any site is restored, so a resumed
+    // assessment renders once, into the mode it is going to be worked in.
+    applyUiMode({ focus: false });
     restoreBatch(); // if a batch was loaded in a previous visit, show the tray + resume the active site
     $("#station-search").focus();
     document.dispatchEvent(new CustomEvent("ess:ready")); // signals the optional agent module
@@ -6874,6 +7532,10 @@
       const src = DATA.sources.find((x) => x.api && x.api.kind === "wildnet");
       return wildnetQuery(state.site.lat, state.site.lon, radius || (src && src.api && src.api.radius_km) || 10, src && src.api);
     },
+    // Focus mode's derived step list, read-only. Exposed because it is a pure
+    // function of state and the cheapest way to check the interleave is to log it
+    // for a real site — re-route a card, re-log, and watch the step move.
+    focusSteps: () => focusSteps().map((s) => ({ ...s })),
     beginRun: () => { renderCollectionStatus(); },
     // An agent run fills the list itself and leaves the rest to a human, so when it
     // finishes the collection bar lands on that subset — see focusOnOutstanding.

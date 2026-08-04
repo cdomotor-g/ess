@@ -26,17 +26,24 @@
           <p class="tagline">Environmental Site Summary — desktop assessment assistant</p>
         </div>
       </div>
-      <!-- Maintenance and preferences — never the work. On the wide layout they sit
-           inline; below 981px the same three controls become a ⋯ popover, so the
-           header is one row and "Clear cache" (destructive, no undo) is not one
-           mis-tap away from a half-finished assessment. The same nodes move rather
-           than being duplicated, so there is still only one theme button to keep
-           in sync. -->
+      <!-- Maintenance and preferences — never the work, with ONE deliberate
+           exception: the mode switch. Focus mode is the default view, and a
+           default only works if the way out of it is visible on first sight
+           rather than filed under a preference, so it rides here as real chrome.
+
+           On the wide layout these sit inline; below 981px the same controls
+           become a ⋯ popover, so the header is one row and "Clear cache"
+           (destructive, no undo) is not one mis-tap away from a half-finished
+           assessment. The same nodes move rather than being duplicated, so there
+           is still only one theme button — and one mode button — to keep in sync. -->
       <div class="topbar-meta-wrap">
         <button class="ghost-link topbar-more" id="btn-topbar-more" type="button"
                 aria-expanded="false" aria-controls="topbar-meta"
-                aria-label="Theme, cache and documentation" title="Theme, cache and documentation">⋯</button>
+                aria-label="View, theme, cache and documentation" title="View, theme, cache and documentation">⋯</button>
         <div class="topbar-meta" id="topbar-meta">
+          <!-- The label names the DESTINATION, never the current view, so it always
+               reads as a way out. Filled by syncModeButton() in assets/app.js. -->
+          <button class="ghost-link topbar-mode" id="btn-mode" type="button">Workbench ▸</button>
           <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">Dark</button>
           <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">Clear cache</button>
           <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
@@ -67,6 +74,20 @@
      <p class="msite" id="msite"><b class="msite-name" id="msite-name"></b><span class="msite-ids" id="msite-ids"></span></p>
      <div class="mjump" id="mjump" role="group" aria-label="Jump to a category" hidden><!-- filled by JS: renderMobileNav() --></div>
    </div>
+
+   <!-- FOCUS MODE — the other way through the same tool, and the default view.
+        One column, one step per screen, and the tool proposing what comes next
+        instead of the operator choosing on every screen. It REPLACES .split
+        rather than covering it: while this region is live the two columns below
+        are emptied (their children move into detached holders in app.js), because
+        hiding a 400-control DOM behind display:none is not the same as not
+        building it, and the point of this mode is that the rest is not there.
+
+        Everything inside is built by renderFocus(); the region carries only the
+        landmark. There is no second data model behind it — each step reads and
+        writes the same state.findings / state.report the workbench does, so
+        switching mode mid-assessment is a re-render and nothing else. -->
+   <section class="focus" id="focus" aria-label="Guided assessment" hidden><!-- filled by JS: renderFocus() --></section>
 
    <div class="split">
     <!-- Narrow jump rail — the four numbered steps, then one button per visible

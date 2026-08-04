@@ -304,9 +304,74 @@ Vanilla JS, no dependencies, no build. It:
   small **text** key (findings text, report, prefs — rewritten on every keystroke)
   and a larger `…:img` key holding the photos + satellite map data URLs (rewritten
   only when images change). This keeps note editing fast on image-heavy sites;
-  legacy single-key saves are migrated to the split layout on first edit;
+  legacy single-key saves are migrated to the split layout on first edit. The
+  text key's `ui` block carries the per-site presentation state: `ui.groups`
+  (category collapses), `ui.filter`, `ui.flow` (how far step 3 got) and
+  `ui.focus.step` (Focus mode's cursor — see below);
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three.
+
+### Focus mode — the second presentation (`#focus`, `assets/app.js`)
+The split view described above is a **cockpit**: everything reachable, nothing
+hidden, the operator choosing what to look at next. That suits some people
+exactly; for others the problem is not how much is on screen but that they have
+to decide what to do next on every screen. **Focus mode** is a second route
+through the same tool — one column, one step per screen, and the tool proposing
+the order. It is the **default view**; the workbench is one labelled click away
+in the top bar (`#btn-mode`, label always names the destination), and the choice
+is remembered per browser in `ess-workbench:v1:mode`.
+
+It is a presentation, not a second application:
+
+- **One state, two presentations.** Every step reads and writes the same
+  `state.findings` / `state.report`, the same `localStorage` schema and the same
+  `ess-findings/1` export. There is no per-mode data and nothing to migrate.
+  `setUiMode` calls `flushSave()` before either switch, so an in-flight debounced
+  keystroke is written before the DOM it was typed into goes away — switching
+  mid-edit is lossless in both directions.
+- **The other mode is not merely hidden.** While Focus is live the two columns
+  are *emptied*: their children move into detached holders (`detachWorkbench`),
+  and the dashboard and report-section regions — the purely derived ones — are
+  dropped entirely and rebuilt from state on the way back. `display:none` still
+  builds and keeps ~400 controls, which is the cost this mode exists to avoid.
+  Code that *reads* a stashed control rather than rendering into one (chiefly
+  `sourcesForSite()` reading `#toggle-manual-internal`) keeps working because a
+  document-rooted `$`/`$$` lookup that misses falls through to the holders.
+  A step whose body is already exactly a workbench control **borrows the node**
+  (`adoptNode`) rather than growing a second copy — the site picker is the first.
+- **The step graph is derived, never stored** (`focusSteps()`, pure). Each step
+  is `{ id, phase, kind, ref, state }` — `id` stable across recomputation
+  (`src:qld-globe`, `sec:invasive_plants`), `phase` one of *site · checks ·
+  sources · report · finish*, `kind` `input` or `output`, `state` one of *done ·
+  needs-you · skipped · blocked · not-reached*. Because it is recomputed on every
+  render, re-routing a card, importing a batch or applying an agent reply
+  reshapes the flow immediately and correctly.
+- **The interleave** is what makes this more than a wizard. Every card resolves
+  to exactly one report section via `targetSectionOf()`, so the order is a
+  grouping: *for each report section, in proforma order, its sources and then the
+  section itself*. Within a section the source steps use the dashboard's own
+  `sortCards()` ordering. The operator reviews each output while the evidence is
+  still in their head and reaches the end with a finished report rather than a
+  finished checklist.
+- **The gate.** A section step unlocks (`blocked` → `needs-you`) when every
+  source routed to it has a *recorded status*, not a sign-off: `manual` and
+  `failed` are final answers from the operator's point of view, and gating on
+  sign-off would strand the flow on exactly the sources that can never be closed
+  from a desk. "Still needs you" keeps its one definition (`isOutstanding`) and
+  is what a step's own state reports — so a manual source is simultaneously *an
+  answer the section can be written from* and *still on somebody's list*, which
+  is the truth. A section with no sources routed to it still gets a step, marked,
+  and never blocks progress.
+- **Only the cursor persists**, per site, as the step's **id** in `ui.focus.step`
+  — never an index, because the list re-orders as work lands. When the step it
+  names disappears, `resolveFocusCursor` lands on the nearest *earlier* survivor
+  rather than throwing the operator back to the start. Skips are session-only:
+  "skip" is *not now*, not a decision about the assessment.
+- **Nothing is trapped.** The step list (`All steps ▾`) shows every step with its
+  state and jumps to any of them, `Skip for now` is always available, and no step
+  is a dead end. Steps whose bodies are still being built out state what they are
+  for and hand off to the workbench with a labelled button, so no capability
+  exists in only one mode.
 
 ### Queensland Globe site map (`assets/qldmap.js`)
 A separate, lazily-initialised module behind `window.ESSQldMap`. It draws a
