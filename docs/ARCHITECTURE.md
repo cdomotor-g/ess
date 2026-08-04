@@ -372,6 +372,45 @@ It is a presentation, not a second application:
   is a dead end. Steps whose bodies are still being built out state what they are
   for and hand off to the workbench with a labelled button, so no capability
   exists in only one mode.
+- **One primary action per step.** Continue is it on most steps — but when the
+  step's *body* carries a visible filled button (the pass this step is, the
+  picker's own action), Continue steps back to `secondary`. The borrowed node's
+  own classes are never touched; `syncFlowSteps` owns those and the workbench
+  wants them back exactly as they were.
+
+#### The step bodies (`FOCUS_BODY`, `focusStepBody`)
+A body is written once and used by both modes wherever that is possible at all,
+which in practice means one of three shapes:
+
+1. **Borrow the workbench's own node** (`adoptNode`), for a control that already
+   does exactly the step's job — the site picker, the correction disclosure
+   (`#sd-correct`), the date/maintenance fields, the two map sections
+   (`#site-maps`), the photo dropzone (`.photo-section`), and each step-3 pass's
+   `.flow-do`. Every listener, every piece of state-syncing and every receipt
+   comes with it, so a run in Focus *is* a run in the workbench; there is no
+   synchronisation routine because there is nothing to synchronise. What is
+   borrowed goes home on the next render or mode switch (`releaseAdoptedNodes`).
+   A borrowed node can be re-styled for the step it is standing in — the map
+   sections come square and side by side, and their tuning controls fold away
+   behind one button, because at rest that step asks *one* question.
+2. **Share the renderer**, where the report pane and a step must show the same
+   thing but cannot share a node (the pane isn't built while Focus is live):
+   `reportIdentityText()`, `reportMapsBlock()`, `reportPhotosBlock()` and
+   `identityReviewToggle()` are called by `renderReport()`/`renderReportHeader()`
+   and by the `out:identity` step alike.
+3. **Read state directly**, for text — `stationRecordRows()` is the station
+   record for the metadata grid and for the step's read-back both.
+
+Two consequences worth stating. The report's **front page** (`#rsec-identity`,
+`state.report.identity`) became a real report section with its own Reviewed tick,
+because a Focus step needed one and a control that exists in only one mode is not
+allowed; the locator maps and the station photographs were two headed blocks
+before and are its two halves now. And the **station record is correctable** —
+name, WMO, delivery group, facility and state — from a disclosure that both modes
+show, because the step reads the record back as a confirmation and a confirmation
+you cannot act on is a dead end. Station number and coordinates are deliberately
+*not* editable there: `siteKey()` is built from them, so changing one is a
+different site rather than a typo, and *Change site* is the route to that.
 
 ### Queensland Globe site map (`assets/qldmap.js`)
 A separate, lazily-initialised module behind `window.ESSQldMap`. It draws a

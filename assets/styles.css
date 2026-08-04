@@ -330,6 +330,74 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-adopt > .card { border: 0; box-shadow: none; padding: 0; margin: 0; background: transparent; }
 .fx-adopt > .card > .card-head { display: none; }
 
+/* ---- said once, on arrival: what the thing pressed on the LAST step did. Same
+   shape as the intro banner, in the "something happened" tint. */
+.fx-flash { margin: 0; font-size: var(--fs-meta); font-weight: 600; line-height: 1.5;
+  color: var(--reviewed); background: var(--reviewed-bg);
+  border: 1px solid var(--reviewed); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3); }
+
+/* ---- the station record, read back rather than typed. A confirmation is a list
+   of facts, so it is set as one — the correction disclosure underneath is the
+   only control the step carries at rest. */
+.fx-record { margin: 0; background: var(--surface-2); border-radius: 10px; padding: var(--sp-2) var(--sp-3); }
+.fx-record-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3);
+  padding: var(--sp-1) 0; border-bottom: 1px dashed var(--line); }
+.fx-record-row:last-child { border-bottom: none; }
+.fx-record-row dt { color: var(--ink-soft); font-size: var(--fs-meta); }
+.fx-record-row dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+
+/* ---- the locator maps. At rest the step is two pictures and one question; the
+   ten preset buttons, the two size fields and the two label toggles that tune
+   them are real controls, borrowed whole from the workbench, but they are one
+   click away — on screen they would be the step asking eleven things instead
+   of one. */
+.fx-maps .map-controls { display: none; }
+.fx-maps.is-tuning .map-controls { display: flex; }
+.fx-maps .map-head { margin-bottom: var(--sp-1); }
+/* Side by side, and square — the pane crops them to a 3:1 strip because they sit
+   in a column beside everything else, but this step exists to LOOK at them, and
+   this is the shape the report's front page shows them in anyway. Two of them
+   stacked at full width is the one step in this phase that needed a scrollbar. */
+.fx-maps .site-maps { margin-top: 0; display: grid; grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3); align-items: start; }
+/* Loading, failed and ready are all the same box, so the step doesn't jump under
+   the operator as each map lands. */
+.fx-maps .map-frame, .fx-maps .map-frame.is-loading, .fx-maps .map-frame.is-error { aspect-ratio: 1 / 1; }
+
+/* ---- the report's front page, shown as the report says it. */
+.fx-rdoc { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: var(--radius);
+  padding: var(--sp-3); background: var(--surface-2); }
+.fx-rdoc-kicker { margin: 0; font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--brand); }
+.fx-rdoc-name { margin: var(--sp-hair) 0 0; font-size: var(--fs-title); line-height: 1.25; }
+.fx-rdoc-ids { margin: var(--sp-hair) 0 0; font-size: var(--fs-meta); color: var(--ink-soft); }
+.fx-rdoc-more > summary { font-size: var(--fs-meta); color: var(--ink-soft); cursor: pointer;
+  margin-top: var(--sp-2); list-style-position: inside; }
+.fx-rdoc-more > summary:hover { color: var(--brand); }
+.fx-rdoc-detail { margin-top: var(--sp-1); background: transparent; padding: 0; }
+.fx-review { align-items: center; }
+/* This step REVIEWS the front page; it does not tune it. The pictures are the
+   report's own, at a size that lets the whole page be taken in at once — a click
+   opens any of them full screen, which is where a doubt about a map gets settled.
+   Shown at report width they are a scrollbar, and a step that has to be scrolled
+   to answer its own question is the wrong step. */
+.fx-body .report-maps { max-width: 380px; }
+/* Two lines: which map it is and how far across. The tile attribution that
+   follows has to be in the DELIVERABLE, not in the glance that confirms the
+   picture — it is in full in the report pane and in every export. */
+.fx-body .report-maps figcaption { display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.fx-body .photo-grid.report-large .photo-thumb { width: 150px; }
+.fx-body .photo-grid.report-large .photo-thumb img { max-height: 110px; }
+
+/* ---- a step-3 pass, borrowed. Its padding belongs to the row it normally sits
+   in beside the description; here the step's heading and lede have already said
+   what it is, so the action stands on its own. */
+.fx-flow-do .flow-do { padding-top: 0; }
+.fx-flow-do .flow-do-block { padding-top: 0; }
+.fx-receipt { margin: 0; font-size: var(--fs-meta); color: var(--reviewed); font-weight: 600; }
+
 /* ---- one way forward. Back and Skip are demoted; Continue is the only primary
    action on the surface. */
 .fx-nav { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
@@ -340,6 +408,10 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   .fx-step { padding: var(--sp-4) var(--sp-3); }
   /* Continue keeps the end of the row; Back and Skip share the start of it. */
   .fx-nav #fx-next { flex: 1 1 100%; order: -1; }
+  /* Two squares side by side stop being maps at this width. */
+  .fx-maps .site-maps { grid-template-columns: 1fr; }
+  .fx-record-row { flex-direction: column; gap: 0; }
+  .fx-record-row dd { text-align: left; }
 }
 
 /* The mode switch is navigation, not a preference, so it is the one control in the
@@ -970,6 +1042,21 @@ body.qm-open { overflow: hidden; }
 .summary-item .k { color: var(--ink-soft); font-size: var(--fs-body); }
 .summary-item .v { font-weight: 600; text-align: right; }
 .summary-item .v.copyable { cursor: pointer; border-bottom: 1px dotted var(--ink-soft); }
+
+/* ---------- correcting the station record ----------
+   The record above is auto-filled and right nearly every time, so this is a
+   disclosure and not a form: shut, it is one quiet line under the grid. Focus
+   mode's site-details step borrows this exact block, which is why the styling
+   hangs off .sd-correct rather than off the panel it normally sits in. */
+.sd-correct { margin-top: var(--sp-2); }
+.sd-correct > summary { font-size: var(--fs-meta); color: var(--ink-soft); cursor: pointer;
+  padding: var(--sp-1) 0; list-style-position: inside; }
+.sd-correct > summary:hover { color: var(--brand); }
+.sd-correct[open] > summary { color: var(--ink); font-weight: 600; }
+.sd-correct .dash-note { margin: var(--sp-1) 0 var(--sp-2); }
+.sd-correct-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.sd-correct-grid > div { min-width: 140px; }
+.sd-correct-grid > .grow { flex: 1 1 220px; }
 
 /* ---------- collection status ---------- */
 /* ONE control answering "what still needs me" — it replaced a six-pill progress
@@ -1763,6 +1850,13 @@ a.photo-credit:hover { text-decoration: underline; }
 .report-map figcaption { font-size: var(--fs-micro); color: var(--ink-soft); margin-top: var(--sp-1); }
 /* The two locator maps in the report: side by side, square, equally sized, each
    filling its half of the available width. */
+/* The report's front page. The locator maps and the station photographs used to
+   be two headed sections; they are one now, because the operator confirms "this
+   is the right place" once rather than once per picture grid — and because that
+   single section is what Focus mode presents as its first output. */
+.r-identity-block + .r-identity-block { margin-top: var(--sp-3); }
+.r-identity-block > h4 { font-size: var(--fs-meta); font-weight: 650; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: .05em; margin: 0 0 var(--sp-1); }
 .report-maps { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
 .report-maps .report-map { margin: 0; min-width: 0; }
 .report-maps .report-map img { width: 100%; max-width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }

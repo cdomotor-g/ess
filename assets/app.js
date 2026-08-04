@@ -519,11 +519,18 @@
     const site = state.site;
     await addImagesTo(state.siteImages, files);
     if (state.site !== site) { toast("Site changed before the photo finished processing — discarded"); return; }
-    saveImages(); renderSiteImages(); renderReport();
+    saveImages(); renderSiteImages(); renderReport(); refreshFocusForPhotos();
   }
   function removeSiteImage(id) {
     state.siteImages = state.siteImages.filter((im) => im.id !== id);
-    saveImages(); renderSiteImages(); renderReport();
+    saveImages(); renderSiteImages(); renderReport(); refreshFocusForPhotos();
+  }
+  // The photos step's own state (and the report front page it feeds) both move
+  // when a picture is added or dropped, and neither renderSiteImages nor
+  // renderReport reaches Focus mode. Declared, not arrow, so it is hoisted above
+  // the image helpers that call it.
+  function refreshFocusForPhotos() {
+    if (focusLive()) renderFocus({ focus: false });
   }
 
   async function addFindingImages(sourceId, files) {
@@ -1271,6 +1278,8 @@
     if (!sameSite) resetFocusCursor();
     state.report = {};
     (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
+    // …and the front page's own tick, which rides in the site block (see reportObject).
+    state.report[IDENTITY_SECTION] = { choice: null, note: "", reviewed: !!si.front_page_reviewed };
     // Seed jurisdiction-specific section defaults (e.g. the QLD GBO text) where the
     // imported file left the section blank, so they still appear in the report.
     REPORT_SECTIONS.forEach((sec) => {
@@ -1440,9 +1449,12 @@
   }
 
   // ---------------------------------------------------------------- summary
-  function renderSummary() {
-    const s = state.site;
-    const rows = [
+  // The station record as the operator reads it back — one list, one order, used by
+  // the workbench's metadata grid AND by Focus mode's site-details step, so the two
+  // can never describe the same station differently.
+  function stationRecordRows() {
+    const s = state.site || {};
+    return [
       ["Station Name", s.name],
       ["Station Number", s.station_num || "—"],
       ["WMO Number", s.wmo || "—"],
@@ -1452,6 +1464,11 @@
       ["Latitude", s.lat],
       ["Longitude", s.lon],
     ];
+  }
+
+  function renderSummary() {
+    const s = state.site;
+    const rows = stationRecordRows();
     const grid = $("#summary-grid");
     grid.innerHTML = "";
     rows.forEach(([k, v]) => {
@@ -1465,7 +1482,63 @@
     });
     if (s.manual) grid.append(el("div", { class: "summary-item", style: "grid-column:1/-1" },
       el("span", { class: "k" }, "Source"), el("span", { class: "v" }, "Manual coordinate entry")));
+    syncSiteCorrectFields();
     renderSiteHeader();
+  }
+
+  // ------------------------------------------------- correcting the station record
+  // Which #sd-correct field writes which property. Deliberately none of the three
+  // that identify the site: station_num keys its saved work (siteKey), and lat/lon
+  // are what every deep link, map and API query is built from — a wrong one of
+  // those is a different site, not a typo, and Change site is the route to it.
+  const SITE_CORRECT_FIELDS = [
+    { sel: "#fld-site-name", get: (s) => s.name || "", set: (s, v) => { s.name = v.trim() || s.name; } },
+    { sel: "#fld-site-wmo", get: (s) => s.wmo || "", set: (s, v) => { s.wmo = v.trim(); } },
+    { sel: "#fld-site-group", get: (s) => s.delivery_group || "", set: (s, v) => { s.delivery_group = v.trim(); } },
+    { sel: "#fld-site-facility",
+      get: (s) => (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "",
+      set: (s, v) => {
+        const list = v.split(";").map((x) => x.trim()).filter(Boolean);
+        s.facility_types = list;
+        s.primary_facility = list[0] || "";
+      } },
+  ];
+
+  // Push `state.site` into the correction inputs — on load, and after anything else
+  // changes the record — so an open disclosure never shows a stale value.
+  function syncSiteCorrectFields() {
+    const s = state.site;
+    if (!s) return;
+    SITE_CORRECT_FIELDS.forEach(({ sel, get }) => {
+      const inp = $(sel);
+      if (inp && document.activeElement !== inp) inp.value = get(s);
+    });
+    const st = $("#fld-site-state");
+    if (st && document.activeElement !== st) st.value = s.state || "";
+  }
+
+  // A corrected descriptive field is a re-render of everything that quotes it (the
+  // header, the summary, the report's front page) and nothing more.
+  function correctSiteField(field, value) {
+    if (!state.site) return;
+    field.set(state.site, value);
+    save();
+    renderSummary(); renderSiteHeader(); renderReportHeader(); renderReport();
+    if (focusLive()) renderFocus({ focus: false });
+  }
+
+  // …with one exception. The state decides which sources apply at all, so changing
+  // it is a different assessment list — a full workspace render, which in Focus mode
+  // recomputes the step graph off the new list.
+  function correctSiteState(code) {
+    const s = state.site;
+    if (!s || code === s.state) return;
+    s.state = code || stateFromCoords(s.lat, s.lon);
+    s.region = s.state;
+    s.refs = refsForState(s.state);
+    save();
+    renderWorkspace({ focus: false });
+    toast(s.state ? `Sources now shown for ${s.state}` : "State cleared");
   }
 
   // The resting state of step 2 — who the site is, where it is, what the locator
@@ -1715,12 +1788,21 @@
       const map = await buildMapDataUrl(s.lat, s.lon, km, labels);
       if (token !== mapGenTokens[slot] || state.site !== site) return; // superseded (site/size changed)
       ms.image = map; ms.status = "ready"; ms.error = "";
-      saveImages(); renderSiteMap(slot); renderReport();
+      saveImages(); renderSiteMap(slot); renderReport(); refreshFocusForMaps();
     } catch (err) {
       if (token !== mapGenTokens[slot] || state.site !== site) return;
       ms.status = "error"; ms.error = err.message || "could not load the map";
-      renderSiteMap(slot);
+      renderSiteMap(slot); refreshFocusForMaps();
     }
+  }
+
+  // A map ARRIVING (or failing) moves the maps step's own state and puts a picture
+  // on the report's front page, so Focus mode's chrome is refreshed when the
+  // stitching settles — not while it is in flight, which would only redraw a
+  // spinner. renderSiteMap has already painted the figure itself by this point;
+  // this is the step list and the "done" tick catching up with it.
+  function refreshFocusForMaps() {
+    if (focusLive()) renderFocus({ focus: false });
   }
 
   function setMapKm(slot, km) {
@@ -3644,9 +3726,15 @@
         ? "✓ Batch loaded — pick a site from the tray above."
         : `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}. Anything left over is in step 4 below.`, "ok");
       markFlowDone("applied", answered ? `${answered} source${answered > 1 ? "s" : ""} answered` : "Response applied");
-      // renderWorkspace() parks at the top of the workspace; the operator's next
-      // move is the list of what's left, so land them there instead.
-      if (kind === "site") requestAnimationFrame(() => jumpTo($("#dashboard")));
+      if (kind !== "site") return;
+      // Applying a reply answers a large part of the list in one action and
+      // reshapes everything downstream of it. Both modes therefore land on what is
+      // LEFT rather than on the top of the thing that just changed — the workbench
+      // on its dashboard, Focus on the first source step that still needs a human
+      // (not the first source step in the list, which the reply has usually already
+      // answered), carrying one sentence saying what the round trip did.
+      if (focusLive()) focusAfterApply(answered);
+      else requestAnimationFrame(() => jumpTo($("#dashboard")));
     } catch (err) {
       setFlowStatus("#paste-status", "Couldn't apply that: " + err.message, "err");
     }
@@ -4379,6 +4467,78 @@
     });
   }
 
+  /* ------------------------------------------- the report's front page (identity)
+     Which site this is, and the pictures that establish it: the two locator maps
+     and the station photographs. ONE section rather than the two headed blocks it
+     used to be, because it carries one review tick — the operator confirms "this is
+     the right place" once, not once per picture grid — and because that is exactly
+     what Focus mode presents the moment the site work is done (the out:identity
+     step). Both modes build it from these three functions, so the front page a
+     Focus user signs off is the front page the report shows. */
+  const IDENTITY_SECTION = "identity";
+
+  // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
+  function reportMapsBlock() {
+    const s = state.site;
+    const ready = s ? MAP_SLOTS.filter((slot) => { const ms = state.maps[slot.key]; return ms && ms.image && ms.image.dataUrl; }) : [];
+    if (!ready.length) return null;
+    // Grid columns follow the number of ready maps, so a single (still-loading or
+    // failed) slot fills the width instead of leaving an empty half.
+    const row = el("div", { class: "report-maps", style: `grid-template-columns:repeat(${ready.length},1fr)` });
+    ready.forEach((slot) => {
+      const m = state.maps[slot.key].image;
+      row.append(el("figure", { class: "report-map" },
+        el("img", { src: m.dataUrl, alt: `${slot.title} — satellite locator`, loading: "lazy", decoding: "async",
+          title: "Open the full-screen map — scroll to zoom, drag to pan",
+          onclick: () => openLightbox(m.dataUrl, `${slot.title} — ${(+m.km).toLocaleString()} km across · ${s.name}`) }),
+        el("figcaption", {}, `${slot.title} — ${(+m.km).toLocaleString()} km across · centred on ${s.lat}, ${s.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
+    });
+    return el("div", { class: "r-identity-block" },
+      el("h4", {}, ready.length > 1 ? "Location maps" : "Location map"), row);
+  }
+
+  function reportPhotosBlock() {
+    if (!(state.siteImages || []).length) return null;
+    const grid = el("div", { class: "photo-grid report-large" });
+    state.siteImages.forEach((im) => grid.append(photoFigure(im, "", () => removeSiteImage(im.id))));
+    return el("div", { class: "r-identity-block" }, el("h4", {}, "Site photographs"), grid);
+  }
+
+  function reportIdentitySection() {
+    const rstate = state.report[IDENTITY_SECTION] || (state.report[IDENTITY_SECTION] = newReportState(IDENTITY_SECTION));
+    const box = el("div", { class: "rsection rsec-identity" + (rstate.reviewed ? " is-reviewed" : ""),
+      id: `rsec-${IDENTITY_SECTION}` });
+    box.append(el("div", { class: "rsec-head" }, el("h3", {}, "Site and location"),
+      identityReviewToggle(box)));
+    const maps = reportMapsBlock(), photos = reportPhotosBlock();
+    if (maps) box.append(maps);
+    if (photos) box.append(photos);
+    // Said rather than left blank: an empty front page is either a map still being
+    // stitched or one that failed, and both are worth naming where the reader is.
+    if (!maps) box.append(el("p", { class: "r-sub" },
+      MAP_SLOTS.some((slot) => (state.maps[slot.key] || {}).status === "loading")
+        ? "The locator maps are still being generated."
+        : "No locator map has been generated for this site yet — the site details step can retry it."));
+    return box;
+  }
+
+  // The same control the report sections carry, writing the same state through the
+  // same setter — so a tick in Focus and a tick in the workbench are one tick.
+  // `inputId` is passed by the Focus step: ticking it re-renders the step (its own
+  // "done" just moved), and a stable id is how renderFocus hands the box back the
+  // keyboard focus it was holding. The two are never in the document at once — the
+  // mode that isn't live has no report pane and no step body.
+  function identityReviewToggle(box, inputId) {
+    const rstate = state.report[IDENTITY_SECTION] || (state.report[IDENTITY_SECTION] = newReportState(IDENTITY_SECTION));
+    const input = el("input", { type: "checkbox", id: inputId || null });
+    input.checked = !!rstate.reviewed;
+    const toggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""),
+      title: "The report's own tally — tick once you've checked the site, the maps and the photos are the right ones" },
+      input, el("span", {}, rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed"));
+    input.addEventListener("change", (e) => setSectionReviewed(IDENTITY_SECTION, e.target.checked, box, toggle));
+    return toggle;
+  }
+
   function renderReport() {
     ensureReportChoices();
     // …but the pane itself is the workbench's. See renderDashboard() above.
@@ -4388,31 +4548,7 @@
     // Clamped finding notes, collected as they're built and measured once the
     // whole pane is in the document — see measureClamps().
     const clamps = [];
-    // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
-    const readyMaps = state.site ? MAP_SLOTS.filter((slot) => { const ms = state.maps[slot.key]; return ms && ms.image && ms.image.dataUrl; }) : [];
-    if (readyMaps.length) {
-      const box = el("div", { class: "rsection" }, el("h3", {}, readyMaps.length > 1 ? "Location maps" : "Location map"));
-      // Grid columns follow the number of ready maps, so a single (still-loading or
-      // failed) slot fills the width instead of leaving an empty half.
-      const row = el("div", { class: "report-maps", style: `grid-template-columns:repeat(${readyMaps.length},1fr)` });
-      readyMaps.forEach((slot) => {
-        const m = state.maps[slot.key].image;
-        row.append(el("figure", { class: "report-map" },
-          el("img", { src: m.dataUrl, alt: `${slot.title} — satellite locator`, loading: "lazy", decoding: "async",
-            title: "Open the full-screen map — scroll to zoom, drag to pan",
-            onclick: () => openLightbox(m.dataUrl, `${slot.title} — ${(+m.km).toLocaleString()} km across · ${state.site.name}`) }),
-          el("figcaption", {}, `${slot.title} — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
-      });
-      box.append(row);
-      wrap.append(box);
-    }
-    if ((state.siteImages || []).length) {
-      const box = el("div", { class: "rsection" }, el("h3", {}, "Site photographs"));
-      const grid = el("div", { class: "photo-grid report-large" });
-      state.siteImages.forEach((im) => grid.append(photoFigure(im, "", () => removeSiteImage(im.id))));
-      box.append(grid);
-      wrap.append(box);
-    }
+    if (state.site) wrap.append(reportIdentitySection());
     REPORT_SECTIONS.forEach((section) => {
       const rstate = state.report[section.id]; // seeded by ensureReportChoices() above
 
@@ -4724,28 +4860,43 @@
   // the consistency checker has to say. Text-only updates against markup that is
   // already in the page, so every path that changes a section can call it without
   // re-rendering the report itself.
+  // What the document header SAYS, apart from where it is drawn. Focus mode shows
+  // the report's real front page on its out:identity step rather than a paraphrase
+  // of it, and this is what keeps the two from drifting into different wordings of
+  // the same station.
+  function reportIdentityText() {
+    const s = state.site || {};
+    return {
+      name: s.name || "ESS report",
+      // The same identifiers the exported report's front table carries, in the
+      // order an operator reads them out: who, where, when.
+      ids: [
+        s.station_num && `#${s.station_num}`,
+        s.state, s.delivery_group,
+        `${s.lat}, ${s.lon}`,
+        state.date ? `assessed ${formatDate(state.date)}` : null,
+      ].filter(Boolean).join(" · "),
+      // The rest of the station record, one disclosure away — it belongs to the
+      // document, but it isn't what tells two open sites apart.
+      detail: [
+        ["WMO number", s.wmo || "—"],
+        ["Facility", (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "—"],
+        ["Site maintenance", (state.maintenance || "").trim() || "—"],
+      ],
+    };
+  }
+
   function renderReportHeader() {
     const s = state.site;
     if (!s || !$("#rdoc-name")) return;
-    $("#rdoc-name").textContent = s.name;
-    // The same identifiers the exported report's front table carries, in the
-    // order an operator reads them out: who, where, when.
-    $("#rdoc-ids").textContent = [
-      s.station_num && `#${s.station_num}`,
-      s.state, s.delivery_group,
-      `${s.lat}, ${s.lon}`,
-      state.date ? `assessed ${formatDate(state.date)}` : null,
-    ].filter(Boolean).join(" · ");
+    const idt = reportIdentityText();
+    $("#rdoc-name").textContent = idt.name;
+    $("#rdoc-ids").textContent = idt.ids;
 
-    // The rest of the station record, one disclosure away — it belongs to the
-    // document, but it isn't what tells two open sites apart.
     const detail = $("#rdoc-detail");
     if (detail) {
       detail.innerHTML = "";
-      [["WMO number", s.wmo || "—"],
-        ["Facility", (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "—"],
-        ["Site maintenance", (state.maintenance || "").trim() || "—"],
-      ].forEach(([k, v]) => detail.append(
+      idt.detail.forEach(([k, v]) => detail.append(
         el("div", { class: "rdoc-detail-row" }, el("dt", {}, k), el("dd", {}, v))));
     }
 
@@ -5015,11 +5166,27 @@
     // ackOnly: a step with no record of its own. The cursor is the only evidence
     // that the operator has been past it, so that is what marks it done. Walking
     // Back un-marks it, which is honest — there is nothing else to go on.
-    add("site:details", "site", "input", "Check the site's details", { ackOnly: true });
-    add("out:identity", "site", "output", "Review the report's front page", {
-      // What this step reviews IS the identity block and the two locator maps, so
-      // it is finished when they are actually there.
+    add("site:details", "site", "input", "Check the station record and the date", { ackOnly: true });
+    add("site:maps", "site", "input", "Check the locator maps", {
+      // What this step is FOR is two maps of the right place, so it is finished when
+      // both of them are actually there. A slot that failed stays "needs you", which
+      // is honest, and blocks nothing: Continue never waits on the network.
       done: MAP_SLOTS.every((slot) => { const ms = state.maps[slot.key]; return !!(ms && ms.image); }),
+    });
+    add("site:photos", "site", "input", "Add any site photos", {
+      // Photos are optional, so walking past this step is a legitimate answer to it
+      // — but a site that already has some doesn't need walking past again.
+      ackOnly: true,
+      done: !!(state.siteImages || []).length,
+      touched: !!(state.siteImages || []).length,
+    });
+    // The first proof the interleave works: the site has just been entered, checked
+    // and photographed, and what the report now SAYS about it is shown immediately,
+    // while it is still fresh — rather than three thousand pixels down another pane
+    // an hour later.
+    add("out:identity", "site", "output", "Review the report's front page", {
+      ref: IDENTITY_SECTION,
+      done: !!(state.report[IDENTITY_SECTION] || {}).reviewed,
     });
     add("checks:auto", "checks", "input", "Run the checks this tool can run itself",
       { done: !!state.flow.auto, touched: !!state.flow.auto });
@@ -5231,10 +5398,15 @@
     const active = document.activeElement;
     const inStep = !!active && root.contains(active);
     // A BACKGROUND re-render — a result landing, an agent writing a note — must not
-    // yank the caret out of a control the operator is typing in. (The site picker's
-    // search box is borrowed into a step, so this is reachable.) The next
-    // navigation renders it fresh anyway.
-    if (o.focus === false && inStep && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return;
+    // yank the caret out of a control the operator is TYPING in. (The site picker's
+    // search box, the paste box and the correction fields are all borrowed into
+    // steps, so this is reachable.) The next navigation renders it fresh anyway.
+    //
+    // A tick or a radio is not typing, and skipping the render for one is how a
+    // step whose own state just moved ends up still saying "Needs you" underneath
+    // a box the operator has just ticked. Those re-render, and the refocusId path
+    // below hands the control its focus straight back.
+    if (o.focus === false && inStep && isTypingControl(active)) return;
     // Ids are stable across renders, so a control that had keyboard focus can be
     // handed it back rather than dropping it to <body>.
     const refocusId = (o.focus === false && inStep && active.id) ? active.id : "";
@@ -5251,6 +5423,7 @@
     root.append(
       el("div", { class: "fx-shell" },
         renderFocusIntro(),
+        renderFocusFlash(),
         renderFocusChrome(step, steps, at, done),
         renderFocusList(steps, at),
         el("div", { class: "fx-step", "data-kind": step.kind, "data-state": step.state },
@@ -5261,6 +5434,27 @@
           el("div", { class: "fx-body" }, focusStepBody(step))),
         renderFocusNav(step, steps, at)));
 
+    // ONE primary action per step. Continue is it on most of them — but a step
+    // whose body carries its own filled button (the picker's Load site, the step-3
+    // pass this step IS) has already got one, and two filled buttons side by side
+    // is the action-hierarchy problem the panes were fixed for. The step's own
+    // action wins; Continue steps back to "or move on". The borrowed button's own
+    // classes are never touched — syncFlowSteps owns those, and the workbench wants
+    // them back exactly as they were.
+    // Only a primary the operator can actually SEE counts: the site picker carries
+    // one on its coordinates tab, which is folded away while the name tab is open,
+    // and demoting Continue for a button nobody can reach would leave the step with
+    // no filled action at all.
+    const next = root.querySelector("#fx-next");
+    const ownPrimary = Array.from(root.querySelectorAll(".fx-body .btn.primary"))
+      .some((n) => n.getClientRects().length);
+    if (next && ownPrimary) {
+      next.classList.remove("primary");
+      next.classList.add("secondary");
+    }
+
+    afterFocusStep(step);
+
     // Moving to a step is a jump, and the heading is what it lands on — otherwise
     // the operator advances and their next Tab restarts from the top bar. `focus:
     // false` is for the renders that are a side effect of something else (a result
@@ -5269,6 +5463,40 @@
     if (!refocusId) return;
     const back = root.querySelector(`#${window.CSS && CSS.escape ? CSS.escape(refocusId) : refocusId}`);
     if (back) back.focus({ preventScroll: true });
+  }
+
+  // Is this control one a person can be mid-keystroke in? Text inputs, textareas
+  // and open selects are; buttons, ticks and radios are not.
+  const NON_TYPING_INPUT = /^(checkbox|radio|button|submit|reset|file|image|range|color)$/i;
+  function isTypingControl(n) {
+    if (!n) return false;
+    if (n.tagName === "TEXTAREA" || n.tagName === "SELECT") return true;
+    return n.tagName === "INPUT" && !NON_TYPING_INPUT.test(n.type || "text");
+  }
+
+  // Work a step can only do once its body is actually IN the document. The map
+  // sections are the case that needs it: renderSiteMap()/renderMapPresets() find
+  // their figure with a document-rooted query, so they can only paint after the
+  // borrowed #site-maps has been appended to the live tree.
+  function afterFocusStep(step) {
+    if (step.id !== "site:maps" || !state.site) return;
+    renderMapsSections(); // rebuilds both sections, then paints each slot's current state
+    // …and starts the ones that have never been tried. Deliberately not
+    // ensureAllMaps(): a slot that FAILED must not be retried by the render that
+    // the failure itself triggered, or the step would sit in a retry loop with a
+    // spinner. A failed slot renders its own Retry button.
+    MAP_SLOTS.forEach((slot) => { if (mapState(slot.key).status === "idle") ensureSiteMap(slot.key); });
+  }
+
+  // One sentence, shown once, at the top of the step the operator was just moved
+  // to: what the thing they pressed on the LAST step actually did. Applying an
+  // assistant's reply is the case it exists for — it answers a large part of the
+  // list in one action, and landing silently on some unrelated step three phases
+  // later would leave that unsaid.
+  let focusFlash = null;
+  function renderFocusFlash() {
+    if (!focusFlash) return null;
+    return el("p", { class: "fx-flash", role: "status" }, focusFlash);
   }
 
   const FOCUS_STATE_LABEL = {
@@ -5369,8 +5597,12 @@
       }, "Got it"));
   }
 
-  function focusGoTo(id) {
+  // `flash` is the one-sentence receipt to carry ONTO the step being moved to.
+  // Every ordinary navigation passes nothing, which is what clears a stale one:
+  // the message belongs to the move that produced it and to no other.
+  function focusGoTo(id, flash) {
     focusCursor = id;
+    focusFlash = flash || null;
     // A discrete choice, and often the last thing done before a reload — persist it
     // now rather than 400 ms later.
     save(); flushSave();
@@ -5388,8 +5620,10 @@
   // is for and hands off to the workbench, which is a labelled route to the same
   // controls rather than a dead end — no capability exists in only one mode.
   const FOCUS_LEDE = {
-    "site:details": "Check the station record, the assessment date and the two locator maps that go on the front of the report.",
-    "out:identity": "The front page of the deliverable: which site this is, and the hyper-local and greater-region maps.",
+    "site:details": "Filled in from the Bureau station list. Read it back — it is usually right — then set the date this assessment was made.",
+    "site:maps": "Two satellite locators are stitched for every site: the close surrounds, and the region around them. Check they show the place you mean.",
+    "site:photos": "Optional. Paste a screenshot with Ctrl+V, drag an image in, or choose a file — they carry through to the report. Continue past this if you have none.",
+    "out:identity": "The front page of the deliverable, as it now reads. Nothing further is asked of you here — check it says the right site, and tick it off.",
     "checks:auto": "Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.",
     "checks:prompt": "One self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research the rest.",
     "checks:paste": "The assistant answers with one JSON object. Anything it leaves blank keeps the result you already have.",
@@ -5407,11 +5641,183 @@
     const body = el("div", {});
     if (step.id.startsWith("src:")) return focusSourceBody(step, body);
     if (step.id.startsWith("sec:")) return focusSectionBody(step, body);
+    const own = FOCUS_BODY[step.id];
+    if (own) return own(step, body);
     const lede = FOCUS_LEDE[step.id];
     if (lede) body.append(el("p", { class: "fx-lede" }, lede));
     body.append(focusHandoffBtn(step, "Open this in the workbench"));
     return body;
   }
+
+  /* --------------------------------------------------- site · details · identity
+     The opening run of steps, and the first interleaved output. Every one of them
+     borrows the workbench control that already does the job rather than growing a
+     second copy of it: the correction disclosure, the two map sections, the photo
+     dropzone and the three step-3 actions are all the SAME nodes, re-parented for
+     as long as the step is on screen and put back by releaseAdoptedNodes(). That
+     is what makes "a run in Focus shows as done in the workbench" true by
+     construction rather than by a synchronisation routine. */
+
+  // The station record, read back rather than typed. Auto-filled from the Bureau
+  // station list and right nearly every time, so this is a confirmation with one
+  // correction affordance behind it — not six input boxes asking to be re-entered.
+  function focusDetailsBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["site:details"]));
+    const dl = el("dl", { class: "fx-record" });
+    stationRecordRows().forEach(([k, v]) => dl.append(
+      el("div", { class: "fx-record-row" }, el("dt", {}, k), el("dd", {}, String(v == null ? "—" : v)))));
+    if (state.site && state.site.manual)
+      dl.append(el("div", { class: "fx-record-row" }, el("dt", {}, "Source"), el("dd", {}, "Manual coordinate entry")));
+    body.append(dl);
+    // One affordance, shut by default — the whole point of the read-back above is
+    // that correcting it is the exception.
+    const correct = el("div", { class: "fx-adopt" });
+    adoptNode($("#sd-correct"), correct);
+    body.append(correct);
+    // …and the two fields that ARE routinely typed here.
+    const fields = el("div", { class: "fx-adopt" });
+    adoptNode($(".summary-editable"), fields);
+    body.append(fields);
+    return body;
+  }
+
+  // Both locator maps, arriving. The map sections are borrowed whole, so the size
+  // presets, the roads/labels toggle and Refresh are the controls the workbench
+  // has — but they start folded away: at rest this step asks one question ("is
+  // this the right place?") and two pictures answer it. Ten preset buttons on
+  // screen to ask that would be the wrong step.
+  function focusMapsBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["site:maps"]));
+    const maps = el("div", { class: "fx-adopt fx-maps" });
+    adoptNode($("#site-maps"), maps);
+    const tune = el("button", {
+      type: "button", class: "btn tertiary", "aria-expanded": "false", "aria-controls": "site-maps",
+      title: "Change how far across each map is, and whether roads and place names are drawn on it",
+      onclick: (e) => {
+        const on = maps.classList.toggle("is-tuning");
+        e.currentTarget.setAttribute("aria-expanded", on ? "true" : "false");
+        e.currentTarget.textContent = on ? "Hide the map controls ▴" : "Size, labels and refresh ▾";
+      },
+    }, "Size, labels and refresh ▾");
+    body.append(maps, el("div", { class: "fx-actions" }, tune));
+    return body;
+  }
+
+  // Paste, drag, or choose a file — the same zone the workbench uses, so a
+  // Ctrl+V anywhere on this step lands here exactly as it does over there (the
+  // document-level listener in wireSiteDetails is what catches the ones the zone
+  // itself doesn't).
+  function focusPhotosBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["site:photos"]));
+    const zone = el("div", { class: "fx-adopt" });
+    adoptNode($(".photo-section"), zone);
+    body.append(zone);
+    return body;
+  }
+
+  // The first output. Not a summary of the front page — the front page: the
+  // document header's own words, the real locator maps, the real photographs, and
+  // the same Reviewed tick the report pane carries, writing the same state.
+  function focusIdentityBody(step, body) {
+    const idt = reportIdentityText();
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["out:identity"]));
+    const head = el("div", { class: "fx-rdoc" },
+      el("p", { class: "fx-rdoc-kicker" }, "Environmental Site Summary"),
+      el("h3", { class: "fx-rdoc-name" }, idt.name),
+      el("p", { class: "fx-rdoc-ids" }, idt.ids));
+    // Folded, because the document header folds it: what tells two open sites
+    // apart is the line above, and the rest of the record is a disclosure over
+    // there too (#rdoc-detail is `hidden` until Details ▾ is pressed).
+    const dl = el("dl", { class: "fx-record fx-rdoc-detail" });
+    idt.detail.forEach(([k, v]) => dl.append(
+      el("div", { class: "fx-record-row" }, el("dt", {}, k), el("dd", {}, v))));
+    head.append(el("details", { class: "fx-rdoc-more" },
+      el("summary", {}, "The rest of the record"), dl));
+    body.append(head);
+
+    const maps = reportMapsBlock(), photos = reportPhotosBlock();
+    if (maps) body.append(maps);
+    if (photos) body.append(photos);
+    if (!maps) body.append(el("p", { class: "fx-lede" },
+      MAP_SLOTS.some((slot) => (state.maps[slot.key] || {}).status === "loading")
+        ? "The locator maps are still being stitched — they will appear here as they arrive."
+        : "No locator map has been generated yet. Go back a step to retry it."));
+
+    // The tick and the way in to change any of it, on one row — they are the two
+    // answers to the same question ("does this front page read right?"), and a
+    // second row for the second answer is a row this step cannot spare.
+    body.append(el("div", { class: "fx-actions fx-review" },
+      identityReviewToggle(null, "fx-identity-reviewed"),
+      el("button", { type: "button", class: "btn secondary", onclick: () => focusHandoffTo(step) },
+        "Open this in the report pane ▸")));
+    return body;
+  }
+
+  /* ---------------------------------------------------- the automated round trip
+     Three steps, one sequence — and it already knows it is one. state.flow /
+     syncFlowSteps / markFlowDone record each pass and its one-line receipt, per
+     site, which is exactly what a Focus step needs, so nothing here invents a
+     second done-tracker: the workbench's receipts ARE these steps' done summaries,
+     and a run in either mode shows as run in the other. */
+  const FLOW_OF_STEP = { "checks:auto": "auto", "checks:prompt": "prompt", "checks:paste": "applied" };
+  const CHECKS_STEPS = Object.keys(FLOW_OF_STEP);
+
+  function focusChecksBody(step, body) {
+    const key = FLOW_OF_STEP[step.id];
+    const flow = state.flow || (state.flow = freshFlow());
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE[step.id]));
+    // What this pass did, last time it ran — the workbench's receipt, verbatim.
+    if (flow[key]) body.append(el("p", { class: "fx-receipt" },
+      el("b", {}, "✓ "), flow.notes[key] || FLOW_STEPS.find((f) => f.key === key).done));
+    // The action itself, borrowed: the button, its status line and (on the paste
+    // step) the textarea are the workbench's own, wiring included.
+    const doBox = el("div", { class: "fx-adopt fx-flow-do" });
+    adoptNode($(`.flow-step[data-flow="${key}"] .flow-do`), doBox);
+    body.append(doBox);
+    // A user working entirely by hand should be able to pass the whole assistant
+    // round trip in one action rather than three.
+    body.append(el("div", { class: "fx-actions" },
+      el("button", {
+        type: "button", class: "btn tertiary",
+        title: "Leave all three of the automated passes — you can come back to any of them from the step list",
+        onclick: () => {
+          CHECKS_STEPS.forEach((id) => focusSkipped.add(id));
+          const steps = focusSteps();
+          const after = steps.findIndex((s) => s.id === "checks:paste");
+          focusGoTo((steps[after + 1] || steps[steps.length - 1]).id);
+        },
+      }, "Skip all three ▸")));
+    return body;
+  }
+
+  // Where an applied reply leaves the operator, and what it tells them on arrival.
+  // The count comes from the same statusCounts() the collection bar reads, so the
+  // sentence here and the number over there can never disagree.
+  function focusAfterApply(answered) {
+    const left = statusCounts().outstanding;
+    const said = [
+      answered ? `${answered} source${answered === 1 ? "" : "s"} answered` : "Reply applied",
+      left ? `${left} still need${left === 1 ? "s" : ""} you` : "nothing left outstanding",
+    ].join(" · ");
+    const steps = focusSteps();
+    // The first source step that still needs a human. Falling back to the step
+    // after the paste step keeps this from ever being a dead end on a site the
+    // reply answered outright.
+    const target = steps.find((s) => s.id.startsWith("src:") && s.state === "needs-you")
+      || steps[steps.findIndex((s) => s.id === "checks:paste") + 1]
+      || steps[steps.length - 1];
+    focusGoTo(target.id, `✓ ${said}.`);
+  }
+
+  const FOCUS_BODY = {
+    "site:details": focusDetailsBody,
+    "site:maps": focusMapsBody,
+    "site:photos": focusPhotosBody,
+    "out:identity": focusIdentityBody,
+    "checks:auto": focusChecksBody,
+    "checks:prompt": focusChecksBody,
+    "checks:paste": focusChecksBody,
+  };
 
   function focusSourceBody(step, body) {
     const src = DATA.sources.find((s) => s.id === step.ref);
@@ -5465,12 +5871,18 @@
     if (step.id.startsWith("sec:")) { showReportSection(step.ref); return; }
     if (step.id.startsWith("checks:")) {
       revealLeftPane();
-      openFlowStep(step.id.slice("checks:".length));
+      // The step ids and the flow keys are not the same words ("checks:paste" is
+      // the "applied" pass), so the mapping is the one FLOW_OF_STEP already owns.
+      openFlowStep(FLOW_OF_STEP[step.id]);
       jumpTo($("#run-checks"));
       return;
     }
     if (step.id === "site:details") { revealLeftPane(); setSiteDetailsOpen(true); jumpTo($("#site-summary")); return; }
-    if (step.id === "out:identity") { revealRightPane(); jumpTo($("#report")); return; }
+    // Both of these live inside step 2's panel, so the panel has to be open before
+    // the jump — landing on a shut disclosure is landing nowhere.
+    if (step.id === "site:maps") { revealLeftPane(); setSiteDetailsOpen(true); jumpTo($("#site-maps") || $("#site-summary")); return; }
+    if (step.id === "site:photos") { revealLeftPane(); setSiteDetailsOpen(true, "#site-dropzone"); return; }
+    if (step.id === "out:identity") { revealRightPane(); showReportSection(IDENTITY_SECTION); return; }
     if (step.id === "finish:export") { revealRightPane(); jumpTo($("#report-complete") || $("#report")); return; }
     jumpTo($("#workspace") || $("#site-picker"));
   }
@@ -5729,6 +6141,11 @@
         name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
         delivery_group: s.delivery_group, facility_types: s.facility_types,
         lat: s.lat, lon: s.lon, assessment_date: state.date, site_maintenance: state.maintenance,
+        // The report's front page carries its own review tick, like every section
+        // below it. It travels in the site block rather than in `sections`, because
+        // that array is the eleven proforma sections and a consumer counting them
+        // should keep counting eleven.
+        front_page_reviewed: !!(state.report[IDENTITY_SECTION] || {}).reviewed,
         images: (state.siteImages || []).map(exportImage),
         // Both locator maps, keyed by slot, so a re-import restores them. `map`
         // stays populated (local slot) for backward-compatible consumers.
@@ -6706,6 +7123,18 @@
     });
     const photos = $("#sd-photo-count");
     if (photos) photos.addEventListener("click", () => setSiteDetailsOpen(true, "#site-dropzone"));
+
+    // The station-record correction. Wired here, on the nodes themselves, so Focus
+    // mode's site-details step gets the same behaviour by borrowing the block —
+    // there is no second copy of these fields to keep in step.
+    SITE_CORRECT_FIELDS.forEach((field) => {
+      const inp = $(field.sel);
+      // change (not input): a half-typed station name should not repaint the header
+      // and the report's front page on every keystroke.
+      if (inp) inp.addEventListener("change", (e) => correctSiteField(field, e.target.value));
+    });
+    const stateSel = $("#fld-site-state");
+    if (stateSel) stateSel.addEventListener("change", (e) => correctSiteState(e.target.value));
 
     // A screenshot pasted anywhere on the page — with the details panel shut, or
     // with nothing focused at all — is a station photo. The zone-level listeners

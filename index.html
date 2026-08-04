@@ -210,6 +210,49 @@
           <p class="dash-note">Filled in from the Bureau station record and two auto-generated locator maps. Add the site photos here — they carry through to the report.</p>
           <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
+          <!-- The station record comes from the Bureau's station list and is right
+               the overwhelming majority of the time, so it reads as a confirmation
+               rather than as six input boxes. The rare correction lives behind one
+               disclosure — and only for the DESCRIPTIVE fields: the station number
+               and the coordinates are what identify the site (they key its saved
+               work), so getting one of those wrong is a different site rather than
+               a typo, and Change site is the way out of it.
+               Focus mode borrows this whole block for its site-details step, so
+               there is one implementation of the correction and not two. -->
+          <details class="sd-correct" id="sd-correct">
+            <summary>Correct these details</summary>
+            <p class="dash-note">Overrides the station record for this assessment only — nothing is written back to the station list. The station number and coordinates identify the site; if one of those is wrong, use <b>Change site</b> instead.</p>
+            <div class="sd-correct-grid">
+              <div class="grow">
+                <label class="field-label" for="fld-site-name">Station name</label>
+                <input id="fld-site-name" type="text" autocomplete="off" />
+              </div>
+              <div>
+                <label class="field-label" for="fld-site-wmo">WMO number</label>
+                <input id="fld-site-wmo" type="text" autocomplete="off" />
+              </div>
+              <div>
+                <!-- The one correction with consequences: the state decides which
+                     sources apply at all, so changing it rebuilds the collection
+                     list (and, in Focus, the whole step graph). -->
+                <label class="field-label" for="fld-site-state">State / territory</label>
+                <select id="fld-site-state">
+                  <option value="">—</option>
+                  <option>QLD</option><option>NSW</option><option>VIC</option><option>TAS</option>
+                  <option>ACT</option><option>WA</option><option>NT</option><option>SA</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label" for="fld-site-group">Delivery group</label>
+                <input id="fld-site-group" type="text" autocomplete="off" />
+              </div>
+              <div class="grow">
+                <label class="field-label" for="fld-site-facility">Facility</label>
+                <input id="fld-site-facility" type="text" autocomplete="off" placeholder="e.g. AWS; rain gauge" />
+              </div>
+            </div>
+          </details>
+
           <!-- Two locator maps (hyper-local + greater-region), each with its own
                controls + figure, built dynamically by assets/app.js. Both are
                auto-populated and carried through to the report &amp; export. -->

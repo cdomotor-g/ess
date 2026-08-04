@@ -86,12 +86,15 @@ slice. Each backlog item names the files to touch and how to verify.
   source feeding it has been answered. Focus is the default view; the workbench is
   one labelled click away in the top bar. **Landed so far:** the mode shell (#69)
   and the derived step graph (#70) — the switch, the step chrome, the per-site
-  cursor, the step list, and `focusSteps()`. **Still to land:** the step bodies for
-  the site/checks steps (#71), one source per step (#72), report-section review
-  (#73), the finish step and the specialist escape hatches (#74), and the
-  accessibility / keyboard / narrow-screen pass (#75). Until a step has its own
-  body it states what it is for and hands off to the workbench, so nothing is
-  reachable in only one mode. See `docs/ARCHITECTURE.md` → *Focus mode*.
+  cursor, the step list, and `focusSteps()`; and the site, front-page and
+  automated-round-trip steps (#71) — the station record read back with one
+  correction affordance, the two locator maps, the photo dropzone, the report's
+  real front page with its own review tick, and the three step-3 passes one per
+  step. **Still to land:** one source per step (#72), report-section review (#73),
+  the finish step and the specialist escape hatches (#74), and the accessibility /
+  keyboard / narrow-screen pass (#75). Until a step has its own body it states what
+  it is for and hands off to the workbench, so nothing is reachable in only one
+  mode. See `docs/ARCHITECTURE.md` → *Focus mode*.
 
 ## Deliberately manual (by nature, not backlog)
 
