@@ -90,11 +90,16 @@ slice. Each backlog item names the files to touch and how to verify.
   automated-round-trip steps (#71) — the station record read back with one
   correction affordance, the two locator maps, the photo dropzone, the report's
   real front page with its own review tick, and the three step-3 passes one per
-  step. **Still to land:** one source per step (#72), report-section review (#73),
-  the finish step and the specialist escape hatches (#74), and the accessibility /
-  keyboard / narrow-screen pass (#75). Until a step has its own body it states what
-  it is for and hands off to the workbench, so nothing is reachable in only one
-  mode. See `docs/ARCHITECTURE.md` → *Focus mode*.
+  step; and **one source per step** (#72) — the headline step, where most of an
+  assessment is spent: the source's instruction and the whole of its finding open
+  rather than folded, the four-way result picker, the note, the evidence zone once
+  the result is Found, the report routing, and a Continue that records the
+  sign-off. Settled sources are stepped over rather than presented. **Still to
+  land:** report-section review (#73), the finish step and the specialist escape
+  hatches (#74), and the accessibility / keyboard / narrow-screen pass (#75).
+  Until a step has its own body it states what it is for and hands off to the
+  workbench, so nothing is reachable in only one mode.
+  See `docs/ARCHITECTURE.md` → *Focus mode*.
 
 ## Deliberately manual (by nature, not backlog)
 

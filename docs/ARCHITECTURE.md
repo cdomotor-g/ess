@@ -367,11 +367,20 @@ It is a presentation, not a second application:
   names disappears, `resolveFocusCursor` lands on the nearest *earlier* survivor
   rather than throwing the operator back to the start. Skips are session-only:
   "skip" is *not now*, not a decision about the assessment.
+- **Settled work is not presented.** A source step is `done` once it is signed off
+  *or* answered and not outstanding, and forward movement (`Continue`, `Skip for
+  now`) steps over those rather than showing a screen that asks nothing — twelve
+  of a typical site's sources come back settled from the automated round trip, and
+  re-walking them is the volume this mode exists to answer. `Back` deliberately
+  does **not** skip: it is the retracing motion, and by the time it is pressed
+  Continue has usually just settled the very source it would be retracing to.
 - **Nothing is trapped.** The step list (`All steps ▾`) shows every step with its
   state and jumps to any of them, `Skip for now` is always available, and no step
   is a dead end. Steps whose bodies are still being built out state what they are
   for and hand off to the workbench with a labelled button, so no capability
-  exists in only one mode.
+  exists in only one mode. The cross-pane jumps (`showSourceCard`,
+  `showReportSection`) resolve to the corresponding *step* while Focus is live,
+  rather than silently doing nothing against a pane that isn't built.
 - **One primary action per step.** Continue is it on most steps — but when the
   step's *body* carries a visible filled button (the pass this step is, the
   picker's own action), Continue steps back to `secondary`. The borrowed node's
@@ -400,6 +409,37 @@ which in practice means one of three shapes:
    and by the `out:identity` step alike.
 3. **Read state directly**, for text — `stationRecordRows()` is the station
    record for the metadata grid and for the step's read-back both.
+
+##### The source step (`focusSourceBody`)
+The headline step, and where most of an assessment is spent. It is shape 2 taken
+as far as it goes: `renderStatusControl`, `renderPhotoBlock`, `renderWikiImageRow`,
+`renderIncludeRow`/`renderIncludeTarget`, `renderCardMenu` and `paintResult` are
+the card's own renderers, so a source answered in Focus *is* answered in the
+workbench and the other way round — there is nothing to synchronise. Two of them
+take one option for this caller: `renderStatusControl(…, { open: true })` holds
+the four-way picker open at every status (on a screen of its own the answer is the
+whole question, and a Manual source collapsing to a chip would ask for a click
+before it could be changed), and `renderIncludeRow(…, { signoff: false })` drops
+the sign-off pill, because here the step's **Continue** records it.
+
+The card's sequence — *identity → what came back → your answer → evidence → into
+the report → done* — is kept exactly. What changes is that the card **is** the
+screen, so the compaction a column of 23 forces comes off: the `ⓘ` disclosure's
+"what to look for" is open prose, the finding is shown in full rather than clamped
+to four lines, and the evidence zone opens when the result is `Found` (via the
+same `CARD_OPEN.photos` set the card uses, so a zone opened in either mode is open
+in both). The `⋯` stays a `⋯` — those really are occasional — and it carries
+Focus's escape hatch to the full card. Specialist tools (Queensland Globe's site
+map, the PMST Excel import, the live API checks) are invoked from the step itself;
+the runners paint into `#run-…`/`#res-…` by document lookup, and only one mode's
+copy of those ids is ever in the document.
+
+Two mechanisms make this work from the app's existing call sites. `refreshCard(id)`
+re-renders the current **step** when Focus is live — every mutation in the app
+already calls through it, so both modes repaint from the same places. And a
+background re-render now *carries the caret across* (`readCaret`/`writeCaret`)
+instead of skipping itself to defend it: a screenshot pasted while the note has
+focus has to appear, or the paste reads as having done nothing.
 
 Two consequences worth stating. The report's **front page** (`#rsec-identity`,
 `state.report.identity`) became a real report section with its own Reviewed tick,
