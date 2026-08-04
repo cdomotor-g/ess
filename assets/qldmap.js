@@ -311,6 +311,7 @@
     hooks: {},                 // { onChange, onAdd }
     diag: null,
     open: false,
+    release: null,             // trapFocus() teardown while the modal is open
     building: false,
   };
 
@@ -1847,6 +1848,13 @@
     renderPanel();
     renderCaptureCard();
     renderDiagnostics();
+    // Modal in name (role="dialog" aria-modal="true") but not in behaviour: Tab
+    // used to walk out of the dialog and into the collection pane behind the
+    // scrim, where focus was invisible and the operator had no way back. The trap
+    // is app.js's — this module is only ever opened from there, so it has run.
+    // Escape stays with onKey below, which closes the layer probe before the
+    // modal; a second Escape handler in the trap would take both at once.
+    M.release = window.ESSFocusTrap ? window.ESSFocusTrap(M.overlay.querySelector(".qm-dialog")) : null;
     M.overlay.querySelector(".qm-close").focus();
     showStatus('<div class="qm-loading"><span class="qm-spin" aria-hidden="true"></span>Loading map…</div>');
     setProgress(0.08, "Loading map library…");
@@ -1891,6 +1899,8 @@
     M.open = false;
     M.overlay.hidden = true;
     document.body.classList.remove("qm-open");
+    // Releases the Tab trap and returns focus to the card button that opened it.
+    if (M.release) { M.release(); M.release = null; }
   }
 
   // -------------------------------------------------------- public interface
