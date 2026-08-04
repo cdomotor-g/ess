@@ -431,6 +431,57 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
    mistake in it is obvious and correctable. */
 .fx-source .include-row { padding-top: var(--sp-2); border-top: 1px dashed var(--line); }
 
+/* ---- a report section step. The report pane's own controls, unstacked: the
+   statement, the warnings, the note and the evidence split, in the order a person
+   answers them. Nearly all of it is the report's existing CSS (.r-warns, .r-warn,
+   .r-evidence, .r-ev-caveat…) reaching in unchanged — a section reviewed here has
+   to LOOK like the section it is, or the two modes teach two different documents.
+   What is added is the labelling and the room a screen of its own can afford. */
+.fx-zone { display: flex; flex-direction: column; gap: var(--sp-1); }
+/* The conclusion, at reading size. On the report pane this is one field among
+   eleven; here it is the sentence the section exists to state, and the operator is
+   being asked to agree with it. */
+.fx-sec-choice { font-size: var(--fs-body); padding: var(--sp-2) var(--sp-3); line-height: 1.45; }
+/* Biosecurity's derived declaration — consequence of the statement above, so it is
+   set as a footnote to it rather than as a second field. */
+.fx-sec-detail { margin: var(--sp-hair) 0 0; font-size: var(--fs-meta); color: var(--ink-soft); line-height: 1.5; }
+.fx-sec-detail:empty { display: none; }
+/* THE step's reason for existing: in the workbench these sit in the right pane,
+   where an operator concentrating on collection may never look. Here they are on
+   the screen at the moment the decision is being made, so they carry the weight of
+   an alert rather than a footnote — and they are still screen-only, never exported. */
+.fx-warns { display: flex; flex-direction: column; gap: var(--sp-1); }
+.fx-warns:empty { display: none; }
+.fx-warns .r-warn { margin: 0; font-size: var(--fs-body); line-height: 1.5;
+  border-left: 4px solid var(--failed); padding: var(--sp-2) var(--sp-3); border-radius: 8px; }
+/* A note the section's whole detail goes into starts at a size that invites a
+   paragraph, and still grows to whatever is typed (autoGrow / syncCardMetrics). */
+.fx-sec-note { min-height: 96px; font-size: var(--fs-body); line-height: 1.55; }
+.fx-sec-ref { margin: 0; font-size: var(--fs-meta); color: var(--ink-soft); overflow-wrap: anywhere; }
+/* The evidence, at the width of the step rather than of a column shared with the
+   collection pane — the findings are what the statement above rests on. */
+.fx-rests .r-evidence { margin-top: 0; }
+.fx-rests .r-inc-note { font-size: var(--fs-meta); line-height: 1.55; }
+/* The gate, when it is not shut behind us: either sources still unanswered, or a
+   section already reviewed whose gate has re-opened. Amber, and it keeps its
+   words — nothing recorded below it is hidden or reset. */
+.fx-reopen { border: 1px solid var(--caution); border-left: 4px solid var(--caution);
+  border-radius: var(--radius); background: var(--caution-bg); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2); }
+.fx-reopen-lead { margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--caution); line-height: 1.5; }
+.fx-reopen .fx-waiting-src { border-color: var(--caution); color: var(--caution); background: var(--surface); }
+.fx-reopen .fx-waiting-src:hover { border-color: var(--brand); color: var(--brand); background: var(--link-bg); }
+
+/* ---- an errand, and the way back from it. A jump out of a section step to fix
+   one of its sources is a round trip, not a change of place, so the step it lands
+   on says where it came from and Continue there is labelled with the way home. */
+.fx-return { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2);
+  margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
+.fx-return-lead { color: var(--ink-soft); }
+.fx-return-btn { font: inherit; font-weight: 650; color: var(--brand); background: var(--link-bg);
+  border: 1px solid var(--line); border-radius: 999px; padding: var(--sp-0) var(--sp-2); cursor: pointer; }
+.fx-return-btn:hover { border-color: var(--brand); }
+
 /* ---- a step-3 pass, borrowed. Its padding belongs to the row it normally sits
    in beside the description; here the step's heading and lede have already said
    what it is, so the action stands on its own. */

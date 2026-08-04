@@ -4134,7 +4134,17 @@
     // …and the same the other way: the source's own step is where it is shown.
     // (focusHandoffTo switches modes BEFORE calling this, so the handoff still
     // lands on the real card.)
-    if (focusLive()) { focusGoTo(`src:${sourceId}`); return; }
+    //
+    // A jump made FROM a section step is an errand — the caveat strip saying three
+    // of this section's sources were never checked is a prompt to go and check one
+    // — so it arms the way back. Every route into a source from a section (an
+    // evidence name, the caveat strip, the waiting list) runs through here, which
+    // is why the arming lives here rather than at each of them.
+    if (focusLive()) {
+      focusGoTo(`src:${sourceId}`, null,
+        { returnTo: focusCursor && focusCursor.startsWith("sec:") ? focusCursor : null });
+      return;
+    }
     revealLeftPane();
     let node = document.getElementById(`src-${sourceId}`);
     if (!node) {
@@ -4569,21 +4579,34 @@
     return box;
   }
 
-  // The same control the report sections carry, writing the same state through the
-  // same setter — so a tick in Focus and a tick in the workbench are one tick.
-  // `inputId` is passed by the Focus step: ticking it re-renders the step (its own
-  // "done" just moved), and a stable id is how renderFocus hands the box back the
-  // keyboard focus it was holding. The two are never in the document at once — the
+  // The report's per-section review tick, wherever it is drawn: the report pane's
+  // section head, the front page, and a Focus section step all build it here and
+  // write the same flag through the same setter — so a tick in Focus and a tick in
+  // the workbench are one tick, and the three can never drift apart in wording.
+  //
+  // Deliberately NOT the collection card's "Sign off": different word, different
+  // control (a checkbox, not a pressed pill) and a different accent, because the
+  // two used to be pixel-identical and mean different things.
+  //
+  // `opts.box` is the container to carry the is-reviewed class; `opts.inputId` is
+  // passed by the Focus steps, whose re-render needs a stable id to hand the
+  // keyboard focus back to. Two copies are never in the document at once — the
   // mode that isn't live has no report pane and no step body.
-  function identityReviewToggle(box, inputId) {
-    const rstate = state.report[IDENTITY_SECTION] || (state.report[IDENTITY_SECTION] = newReportState(IDENTITY_SECTION));
-    const input = el("input", { type: "checkbox", id: inputId || null });
+  const REVIEW_TITLE = "The report's own tally — tick once you've reviewed this section (separate from signing off the source cards)";
+  function sectionReviewToggle(sectionId, opts) {
+    const o = opts || {};
+    const rstate = state.report[sectionId] || (state.report[sectionId] = newReportState(sectionId));
+    const input = el("input", { type: "checkbox", id: o.inputId || null });
     input.checked = !!rstate.reviewed;
-    const toggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""),
-      title: "The report's own tally — tick once you've checked the site, the maps and the photos are the right ones" },
+    const toggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""), title: o.title || REVIEW_TITLE },
       input, el("span", {}, rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed"));
-    input.addEventListener("change", (e) => setSectionReviewed(IDENTITY_SECTION, e.target.checked, box, toggle));
+    input.addEventListener("change", (e) => setSectionReviewed(sectionId, e.target.checked, o.box, toggle));
     return toggle;
+  }
+
+  function identityReviewToggle(box, inputId) {
+    return sectionReviewToggle(IDENTITY_SECTION, { box, inputId,
+      title: "The report's own tally — tick once you've checked the site, the maps and the photos are the right ones" });
   }
 
   function renderReport() {
@@ -4603,18 +4626,10 @@
       // the scroll sync. Every card feeding this section carries the same value.
       const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""),
         id: `rsec-${section.id}`, "data-section": section.id });
-      // Per-section "Reviewed" tickbox — the REPORT's own tally, deliberately not the
-      // collection card's "Sign off": different word, different control (a checkbox,
-      // not a pressed pill) and a different accent, because the two used to be
-      // pixel-identical and mean different things. Updated in place (no full report
-      // re-render) so ticking stays cheap on image-heavy sites.
-      const revInput = el("input", { type: "checkbox" });
-      revInput.checked = !!rstate.reviewed;
-      const revToggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""),
-        title: "The report's own tally — tick once you've reviewed this section (separate from signing off the source cards)" },
-        revInput, el("span", {}, rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed"));
-      revInput.addEventListener("change", (e) => setSectionReviewed(section.id, e.target.checked, box, revToggle));
-      box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title), revToggle));
+      // Per-section "Reviewed" tickbox — the REPORT's own tally. Updated in place
+      // (no full report re-render) so ticking stays cheap on image-heavy sites.
+      box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title),
+        sectionReviewToggle(section.id, { box })));
 
       if (section.dropdown) {
         const opts = DATA.dropdowns[section.dropdown] || [];
@@ -4703,6 +4718,14 @@
 
      Returns null when the section has nothing included. */
   const EV_FINDINGS_SHOWN = 3; // findings expanded before "+ n more"
+
+  // Where a source name in the evidence GOES, said in the words of the mode the
+  // operator is standing in. The workbench scrolls the collection pane onto its
+  // card; Focus makes that source's step the screen and — because the jump started
+  // on a section step — arms the way straight back (see showSourceCard).
+  const evGoTitle = (name) => focusLive()
+    ? `Go to ${name} — Continue there brings you straight back to this section`
+    : `Go to ${name} on the collection list`;
   function evidenceSplit(inc) {
     const out = { found: [], none: [], open: [] };
     inc.forEach((x) => {
@@ -4763,8 +4786,9 @@
           el("span", { class: "r-ev-label" }, `⚠ Not yet checked (${open.length})`),
           evSourceList(open, (f) => f.status === STATUS.FAILED ? " (search failed)" : ""),
           el("button", { type: "button", class: "r-ev-goto",
-            title: `These sources still owe this section an answer — go to ${open[0].src.name} on the collection list`,
-            onclick: () => showSourceCard(open[0].src.id) }, "go to these in collection →"))));
+            title: `These sources still owe this section an answer — ${evGoTitle(open[0].src.name)}`,
+            onclick: () => showSourceCard(open[0].src.id) },
+            focusLive() ? "go and check these →" : "go to these in collection →"))));
 
     // A collapsed entry's PICTURES are not collapsed with it. The Queensland Globe
     // capture rides on a source that is almost always still "manual", and it is the
@@ -4798,7 +4822,7 @@
       num ? el("span", { class: "src-num", title: "Collection card number (left pane)" }, `${num}`) : null,
       el("span", { class: "chip " + (st === STATUS.UNSET ? "manual" : st), style: st === STATUS.UNSET ? "opacity:.5" : "" }, STATUS_LABEL[st]),
       el("button", { type: "button", class: "r-inc-name",
-        "aria-label": `${src.name} — go to its card on the collection list`,
+        "aria-label": evGoTitle(src.name), title: evGoTitle(src.name),
         onclick: () => showSourceCard(src.id) }, src.name),
       el("div", { class: "r-inc-actions" },
         el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
@@ -4849,7 +4873,7 @@
       if (i) out.push(el("span", { class: "r-ev-sep", "aria-hidden": "true" }, "·"));
       const num = cardNumbers[src.id];
       out.push(el("button", { type: "button", class: "r-ev-src", "data-ev-src": src.id,
-        title: `Go to ${src.name} on the collection list`, onclick: () => showSourceCard(src.id) },
+        title: evGoTitle(src.name), onclick: () => showSourceCard(src.id) },
         num ? el("span", { class: "src-num" }, `${num}`) : null,
         src.name + (suffixOf ? suffixOf(f) : "")));
     });
@@ -5192,9 +5216,13 @@
   let focusSkipped = new Set();
   let focusCursor = null;   // the current step's stable id (persisted per site)
   let focusStepIds = [];    // ids of the last computed list — see resolveFocusCursor
+  // The step to offer a way back to — see renderFocusReturn. An errand, not a
+  // history: one slot, armed by a jump that starts on a section step and cleared
+  // by the next navigation of any other kind.
+  let focusReturn = null;
   // A different site is a different step list. Called wherever state.site is
   // reassigned, so one site's place can never be read as another's.
-  function resetFocusCursor() { focusCursor = null; focusSkipped = new Set(); focusStepIds = []; }
+  function resetFocusCursor() { focusCursor = null; focusSkipped = new Set(); focusStepIds = []; focusReturn = null; }
 
   function focusSteps() {
     const site = state.site;
@@ -5275,6 +5303,7 @@
       const inSec = sortCards((bySection.get(sec.id) || []).slice());
       inSec.forEach(addSourceStep);
       const rstate = state.report[sec.id] || {};
+      const gate = inSec.every((src) => hasAnswer(state.findings[src.id] || {}));
       add(`sec:${sec.id}`, "report", "output", sec.title, {
         ref: sec.id,
         sources: inSec.length,
@@ -5282,8 +5311,14 @@
         // so the operator is told it was considered rather than finding it silently
         // absent. Its gate is vacuously open, so it never blocks progress.
         noSources: !inSec.length,
-        gate: inSec.every((src) => hasAnswer(state.findings[src.id] || {})),
-        done: !!rstate.reviewed,
+        gate,
+        // The tick is recorded state and the graph never takes it back — but a
+        // section whose gate has RE-OPENED (a source reset to Not checked after the
+        // section was signed off) is not finished any more, so it stops counting as
+        // done and says it needs another look. Nothing it holds is lost: statement,
+        // note and tick are all still on the step when the operator returns to it.
+        reviewed: !!rstate.reviewed,
+        done: !!rstate.reviewed && gate,
       });
     });
     // A source whose category maps to no report section at all still has to be
@@ -5485,6 +5520,7 @@
         renderFocusChrome(step, steps, at, done),
         renderFocusList(steps, at),
         el("div", { class: "fx-step", "data-kind": step.kind, "data-state": step.state },
+          renderFocusReturn(step),
           el("p", { class: "fx-kicker" },
             el("span", { class: "fx-kind" }, step.kind === "output" ? "Review" : "Do"),
             el("span", { class: "fx-step-state", "data-state": step.state }, FOCUS_STATE_LABEL[step.state] || "")),
@@ -5628,21 +5664,69 @@
     done: "✓", "needs-you": "●", skipped: "↷", blocked: "⋯", "not-reached": "○",
   };
 
-  // What Continue MEANS on this step, when it means more than "next". On a source
-  // it is the sign-off as well: the workbench's pill is one control among twelve,
-  // and here the step's conclusion IS the judgement, so the label says so —
-  // and says so only when there is an answer to sign off on. Continue is never
-  // blocked: leaving a source unanswered and coming back to it is legitimate, the
-  // step keeps saying it needs you, and Skip for now is the way past on purpose.
+  // What Continue MEANS on this step, when it means more than "next".
+  //
+  // On a SOURCE it is the sign-off as well: the workbench's pill is one control
+  // among twelve, and here the step's conclusion IS the judgement, so the label
+  // says so — and says so only when there is an answer to sign off on.
+  //
+  // On a SECTION it is the review tick: same flag, same setter, same tally as the
+  // workbench's checkbox. That is what makes the empty-section step honest — one
+  // Continue, no controls to answer, and the section still ends up reviewed.
+  //
+  // `go` overrides where Continue lands, and only the return errand sets it.
+  // Continue is never blocked: leaving a source unanswered and coming back to it is
+  // legitimate, the step keeps saying it needs you, and Skip for now is the way
+  // past on purpose.
   function focusContinue(step) {
+    if (step.id.startsWith("sec:")) {
+      if ((state.report[step.ref] || {}).reviewed) return null;
+      return {
+        label: "Mark reviewed and continue ▸",
+        hint: "Records this section as reviewed in the report's own tally, then moves on",
+        run: () => setSectionReviewed(step.ref, true),
+      };
+    }
     if (!step.id.startsWith("src:")) return null;
     const f = state.findings[step.ref] || {};
-    if (!hasAnswer(f) || isSignedOff(f)) return null;
+    const back = focusReturnSection();
+    const sign = hasAnswer(f) && !isSignedOff(f);
+    if (!sign && !back) return null;
+    // On an errand, Continue is the way home — that is the whole of "go and check
+    // one, then come back": one button, and it says where it goes.
+    if (back) return {
+      label: sign ? `Sign off and back to ${back.title} ▸` : `Back to ${back.title} ▸`,
+      hint: sign
+        ? `Records your sign-off on this source, then returns to the ${back.title} section`
+        : `Returns to the ${back.title} section, where you came from`,
+      run: () => { if (sign) setReviewed(step.ref, true); },
+      go: () => focusGoTo(`sec:${back.id}`),
+    };
     return {
       label: "Sign off and continue ▸",
       hint: "Records your sign-off on this source, then moves to the next step",
       run: () => setReviewed(step.ref, true),
     };
+  }
+
+  // The section a return errand leads back to, or null when none is armed.
+  function focusReturnSection() {
+    if (!focusReturn || !focusReturn.startsWith("sec:")) return null;
+    return REPORT_SECTIONS.find((s) => s.id === focusReturn.slice(4)) || null;
+  }
+
+  // Offered at the head of the step an errand landed on. The caveat strip on a
+  // section — "three of these sources were never checked" — is a prompt to go and
+  // check one, and the whole value of that prompt is that coming back is one click
+  // and lands where it left, with the section's state intact.
+  function renderFocusReturn(step) {
+    const back = focusReturnSection();
+    if (!back || `sec:${back.id}` === step.id) return null;
+    return el("p", { class: "fx-return" },
+      el("span", { class: "fx-return-lead" }, "On an errand from"),
+      el("button", { type: "button", class: "fx-return-btn",
+        title: `Back to the ${back.title} section, exactly where you left it`,
+        onclick: () => focusGoTo(`sec:${back.id}`) }, `◂ ${back.title}`));
   }
 
   function renderFocusNav(step, steps, at) {
@@ -5669,8 +5753,11 @@
         type: "button", class: "btn primary", id: "fx-next",
         title: cont && !last ? cont.hint : null,
         onclick: () => {
-          if (cont && !last) cont.run();
-          return last ? focusGoTo(steps[0].id) : focusMove(1);
+          if (last) return focusGoTo(steps[0].id);
+          cont && cont.run();
+          // …and only then the movement, so the step's own record is written
+          // before the list it is about to be recomputed from.
+          return cont && cont.go ? cont.go() : focusMove(1);
         },
       }, last ? "Back to the start" : (cont ? cont.label : "Continue ▸")));
   }
@@ -5699,9 +5786,14 @@
   // `flash` is the one-sentence receipt to carry ONTO the step being moved to.
   // Every ordinary navigation passes nothing, which is what clears a stale one:
   // the message belongs to the move that produced it and to no other.
-  function focusGoTo(id, flash) {
+  //
+  // `opts.returnTo` is the same idea for the way BACK: an errand out of a section
+  // step arms it, every other navigation clears it, so the offer to return can
+  // never outlive the errand that made it.
+  function focusGoTo(id, flash, opts) {
     focusCursor = id;
     focusFlash = flash || null;
+    focusReturn = (opts && opts.returnTo) || null;
     // A discrete choice, and often the last thing done before a reload — persist it
     // now rather than 400 ms later.
     save(); flushSave();
@@ -6094,26 +6186,157 @@
     return src && PHOTO_CATEGORIES.has(src.category) ? id : null;
   }
 
+  /* ------------------------------------------------------- a report section step
+     The half of this mode that makes it more than a wizard. The operator has just
+     worked through every source routed to this section; the evidence is still in
+     their head. This step asks the one question that is worth asking at exactly
+     that moment: HERE IS WHAT THE REPORT NOW SAYS ABOUT INVASIVE PLANTS — IS THAT
+     RIGHT?
+
+     Five things, in the order a person answers them:
+
+       1  what this section concludes   the standardized statement
+       2  ⚠ anything inconsistent       sectionWarnings, at the moment it can be acted on
+       3  the detail                    the free-text note, with a draft on offer
+       4  what it rests on              the evidence, split three ways (#49)
+       5  reviewed ✓                    the section's own tick, which is Continue
+
+     Item 2 is why the step exists. In the workbench those warnings sit in the
+     right pane, where an operator concentrating on collection may never look; here
+     they are on the screen at the moment the operator is deciding, which is the
+     only moment they can act on. (They still never reach the exported artefact.)
+
+     Every control is the report pane's own renderer writing the same state through
+     the same helpers — suggestChoice, sectionNarrative, sectionWarnings,
+     syncBioDetail, renderSectionEvidence, setSectionReviewed — so a section written
+     in Focus IS the section the report shows, by construction. `body` doubles as
+     the `box` those helpers take: it holds this section's .r-warns and #bio-detail,
+     and only one mode's copy of either is ever in the document. */
   function focusSectionBody(step, body) {
-    const rstate = state.report[step.ref] || {};
+    const section = REPORT_SECTIONS.find((s) => s.id === step.ref);
+    if (!section) {
+      body.append(el("p", { class: "fx-lede" },
+        "This section is no longer in the proforma — nothing is asked of you here."));
+      return body;
+    }
+    ensureReportChoices(); // the auto-suggested statement, on the mode that has no report pane
+    const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
+    body.classList.add("fx-section");
+
+    // A section nothing feeds: one screen, one sentence, and Continue records the
+    // review. Being told a section was considered and found irrelevant is worth a
+    // screen; a blank form asking nothing is not.
     if (step.noSources) {
       body.append(el("p", { class: "fx-lede" },
-        "No source that applies to this site feeds this section. It was considered — nothing is needed from you here."));
-    } else if (step.state === "blocked") {
-      // Name what is holding it, in the same terms the gate is written in.
+        `No source that applies to this site feeds ${section.title}. It was considered — nothing is needed from you here, and Continue marks it reviewed.`));
+      body.append(el("div", { class: "fx-actions fx-review" },
+        sectionReviewToggle(section.id, { box: body, inputId: `fx-sec-rev-${section.id}` })));
+      return body;
+    }
+
+    // ---- 0. the gate, when it is not shut behind us -------------------------
+    // Reachable early (the step list never traps anything) and reachable AGAIN
+    // after a source is reset to Not checked. Both cases say what is outstanding
+    // and offer the errand; neither hides the work already recorded below.
+    if (!step.gate) {
       const waiting = sourcesForSite().filter((s) =>
         targetSectionOf(s) === step.ref && !hasAnswer(state.findings[s.id] || {}));
-      body.append(el("p", { class: "fx-lede" },
-        `Waiting on ${waiting.length} of this section's ${step.sources} sources — it is presented for review once every one of them has an answer.`));
-      body.append(el("div", { class: "fx-waiting" }, waiting.slice(0, 6).map((s) =>
-        el("button", { type: "button", class: "fx-waiting-src",
-          onclick: () => focusGoTo(`src:${s.id}`) }, s.name))));
+      const n = waiting.length;
+      body.append(el("div", { class: "fx-reopen" },
+        el("p", { class: "fx-reopen-lead" }, step.reviewed
+          ? `You reviewed this section, and ${n} of its sources ${n === 1 ? "has" : "have"} gone back to Not checked since. Your statement, note and tick are all still here — it needs another look, not re-writing.`
+          : `${n} of this section's ${step.sources} sources ${n === 1 ? "is" : "are"} still unanswered. You can write the section now, but check what it rests on first.`),
+        el("div", { class: "fx-waiting" }, waiting.slice(0, 8).map((s) =>
+          el("button", { type: "button", class: "fx-waiting-src",
+            title: `Go to ${s.name}, then come straight back here`,
+            onclick: () => showSourceCard(s.id) }, s.name)))));
     } else {
       body.append(el("p", { class: "fx-lede" },
-        `Every one of this section's ${step.sources} source${step.sources === 1 ? "" : "s"} has an answer. Read what it says, then sign it off.`));
+        `Every one of this section's ${step.sources} source${step.sources === 1 ? "" : "s"} has an answer. `
+        + "Here is what the report now says — read it back, then sign it off."));
     }
-    if (rstate.choice) body.append(el("p", { class: "fx-facts" }, el("span", { class: "fx-fact" }, rstate.choice)));
-    body.append(focusHandoffBtn(step, "Review this section in the workbench"));
+
+    // ---- 1. what this section concludes -------------------------------------
+    // The standardized statement, pre-suggested from the evidence. Set at reading
+    // size and given a label: on the card-lined report pane it is one field among
+    // eleven, and here it is the section's conclusion.
+    if (section.dropdown) {
+      const opts = DATA.dropdowns[section.dropdown] || [];
+      const sel = el("select", { class: "fx-sec-choice", id: `fx-sec-choice-${section.id}`,
+        "aria-label": `The standardized statement for ${section.title}`,
+        onchange: (e) => {
+          rstate.choice = e.target.value;
+          save();
+          refreshSection(section, body, rstate);
+          if (section.bioDetail) syncBioDetail(section, body);
+        } });
+      opts.forEach((o) => sel.append(el("option", { value: o, selected: rstate.choice === o ? "selected" : null }, o)));
+      const zone = el("div", { class: "fx-zone" },
+        el("span", { class: "zone-label" }, "What this section concludes"), sel);
+      // Biosecurity's declaration text is derived FROM the statement, so it is
+      // painted by the same helper the report pane uses, into the same id — only
+      // one mode's copy is ever in the document.
+      if (section.bioDetail) zone.append(el("p", { class: "fx-sec-detail", id: "bio-detail" }));
+      body.append(zone);
+      if (section.bioDetail) syncBioDetail(section, body);
+    }
+
+    // ---- 2. anything inconsistent -------------------------------------------
+    // Filled by refreshSection at the foot of this function, and re-filled live on
+    // every keystroke in the note and every change of the statement above.
+    body.append(el("div", { class: "r-warns fx-warns" }));
+
+    // ---- 3. the detail -------------------------------------------------------
+    const ta = el("textarea", { class: "note-field fx-sec-note", id: `fx-sec-note-${section.id}`, rows: "1",
+      "aria-label": `The detail recorded under ${section.title}`,
+      placeholder: "Free-text comments for this section…",
+      oninput: (e) => { rstate.note = e.target.value; refreshSection(section, body, rstate); save(); autoGrow(e.target); } });
+    ta.value = rstate.note || "";
+    const detail = el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "The detail"), ta);
+    // Drafts from THIS section's evidence plus the standard wording. Appends below
+    // whatever is already written; it has never overwritten and must not start.
+    const suggestion = sectionNarrative(section);
+    if (suggestion) detail.append(el("div", { class: "fx-actions" },
+      el("button", { type: "button", class: "btn-mini",
+        title: "Draft this section from the collected evidence and standard wording (appends; never overwrites)",
+        onclick: () => {
+          const cur = (ta.value || "").trim();
+          ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
+          rstate.note = ta.value;
+          refreshSection(section, body, rstate); save(); autoGrow(ta);
+        } }, "Insert suggested detail")));
+    // The proforma's own hyperlink for the invasive / disease sections.
+    const ref = section.ref && state.site && state.site.refs && state.site.refs[section.ref];
+    if (ref) detail.append(el("p", { class: "fx-sec-ref" }, "Reference: ",
+      el("a", { href: ref, target: "_blank", rel: "noopener" }, ref)));
+    body.append(detail);
+
+    // ---- 4. what it rests on -------------------------------------------------
+    // The three-way split, unchanged: Findings at full weight, "Checked, nothing
+    // found" on one line, "⚠ Not yet checked" as a caveat strip. Every source name
+    // in it is a button to that source's step — and, because the jump starts here,
+    // one that arms the way back (showSourceCard).
+    const clamps = [];
+    const evidence = renderSectionEvidence(includedCardsForSection(section.id), clamps);
+    const rests = el("div", { class: "fx-zone fx-rests" },
+      el("span", { class: "zone-label" }, "What it rests on"));
+    rests.append(evidence || el("p", { class: "fx-lede" },
+      "No source has been included into this section yet. A source is included as soon as it carries a note or a photo, "
+      + "and its own step can point it here."));
+    body.append(rests);
+    measureClamps(clamps); // measured on the next frame, by which time this is in the document
+
+    // ---- 5. reviewed ---------------------------------------------------------
+    // The section's own tick — the same flag, setter and tally as the workbench's
+    // checkbox, and the same thing this step's Continue records.
+    body.append(el("div", { class: "fx-actions fx-review" },
+      sectionReviewToggle(section.id, { box: body, inputId: `fx-sec-rev-${section.id}` }),
+      el("button", { type: "button", class: "btn secondary", onclick: () => focusHandoffTo(step) },
+        "Open this in the report pane ▸")));
+
+    refreshSection(section, body, rstate); // the warnings, for the state as it stands
+    queueCardMetrics();                    // …and the note's height, once it is laid out
     return body;
   }
 

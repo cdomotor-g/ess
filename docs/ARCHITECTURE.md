@@ -405,8 +405,11 @@ which in practice means one of three shapes:
 2. **Share the renderer**, where the report pane and a step must show the same
    thing but cannot share a node (the pane isn't built while Focus is live):
    `reportIdentityText()`, `reportMapsBlock()`, `reportPhotosBlock()` and
-   `identityReviewToggle()` are called by `renderReport()`/`renderReportHeader()`
-   and by the `out:identity` step alike.
+   `sectionReviewToggle()` are called by `renderReport()`/`renderReportHeader()`
+   and by the `out:identity` and `sec:…` steps alike. A shared renderer may need
+   the *container* as well — `refreshSection`, `renderReportWarnings` and
+   `syncBioDetail` all take a `box` to find `.r-warns` / `#bio-detail` in — so a
+   step body passes itself, and only one mode's copy of either is ever live.
 3. **Read state directly**, for text — `stationRecordRows()` is the station
    record for the metadata grid and for the step's read-back both.
 
@@ -440,6 +443,56 @@ already calls through it, so both modes repaint from the same places. And a
 background re-render now *carries the caret across* (`readCaret`/`writeCaret`)
 instead of skipping itself to defend it: a screenshot pasted while the note has
 focus has to appear, or the paste reads as having done nothing.
+
+##### The report section step (`focusSectionBody`)
+The other half of the interleave, and the half that makes this more than a wizard.
+The operator has just worked through every source routed to this section; the
+evidence is still in their head. The step asks the one question worth asking at
+that moment — *here is what the report now says about Invasive Plants, is that
+right?* — in five parts, in the order a person answers them:
+
+1. **What this section concludes** — the standardized statement (`suggestChoice`
+   pre-suggests it from the evidence), and for Biosecurity the derived declaration
+   text (`syncBioDetail`, painted into the same `#bio-detail` id the report pane
+   uses; only one mode's copy is ever in the document).
+2. **⚠ Anything inconsistent** — `sectionWarnings`, inline, live on every keystroke
+   and every change of the statement (`refreshSection`). **This is the step those
+   warnings were written for.** In the workbench they sit in the right pane, where
+   an operator concentrating on collection may never look; here they are on screen
+   at the moment the operator is deciding, which is the only moment they can act on
+   them. They remain screen-only and never reach the exported artefact.
+3. **The detail** — the free-text note, with **Insert suggested detail**
+   (`sectionNarrative`) drafting from this section's evidence plus
+   `statements.json`. It appends below whatever is written; it has never
+   overwritten and must not start.
+4. **What it rests on** — `renderSectionEvidence`, unchanged: *Findings* at full
+   weight, *Checked, nothing found* on one line, *⚠ Not yet checked* as a caveat
+   strip. A collapsed entry's photographs are not collapsed with it.
+5. **Reviewed ✓** — `sectionReviewToggle`, the section's own tick. The same flag,
+   the same setter and the same `reportRollup()` tally as the report pane's
+   checkbox, and deliberately *not* the card-level sign-off.
+
+Four rules the shape follows from:
+
+- **The errand.** The caveat strip — *three of these sources were never checked* —
+  is a prompt to go and check one, and it is only worth putting on the step if
+  coming back is free. A jump that starts on a section step arms `focusReturn`
+  (in `showSourceCard`, so every route in — an evidence name, the caveat strip's
+  button, the waiting list — gets it for nothing). The step it lands on says where
+  it came from and its **Continue** is labelled with the way home; every other
+  navigation clears it, so the offer can never outlive the errand.
+- **A re-opened gate loses nothing.** A section step's `done` is `reviewed && gate`,
+  so a source reset to *Not checked* after sign-off re-locks the step — but the
+  statement, the note and the tick are recorded state and the graph never takes
+  them back. The step says it needs another look, in amber, above work that is all
+  still there.
+- **Nothing is trapped**, here too: a section reached before its gate opens is not
+  a form the operator is locked out of. The gate is about *ordering*, so an open
+  gate says what is outstanding and offers the errand, and the controls stay
+  usable below it.
+- **An empty section is one screen, not a blank form.** A section no source on this
+  site feeds says exactly that, and its **Continue** records the review — which is
+  what keeps `finish:export` reachable without a form that asks nothing.
 
 Two consequences worth stating. The report's **front page** (`#rsec-identity`,
 `state.report.identity`) became a real report section with its own Reviewed tick,

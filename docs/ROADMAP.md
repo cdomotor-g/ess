@@ -94,9 +94,15 @@ slice. Each backlog item names the files to touch and how to verify.
   assessment is spent: the source's instruction and the whole of its finding open
   rather than folded, the four-way result picker, the note, the evidence zone once
   the result is Found, the report routing, and a Continue that records the
-  sign-off. Settled sources are stepped over rather than presented. **Still to
-  land:** report-section review (#73), the finish step and the specialist escape
-  hatches (#74), and the accessibility / keyboard / narrow-screen pass (#75).
+  sign-off. Settled sources are stepped over rather than presented; and
+  **report-section review interleaved into the flow** (#73) — the other half of
+  the interleave: what the section now concludes, the consistency warnings on the
+  screen where they can still be acted on, the detail with a draft on offer, the
+  three-way evidence split, and a Continue that ticks the section reviewed. A
+  source name in the evidence is an errand — it goes to that source and Continue
+  brings you straight back. A gate that re-opens keeps everything already written.
+  **Still to land:** the finish step and the specialist escape hatches (#74), and
+  the accessibility / keyboard / narrow-screen pass (#75).
   Until a step has its own body it states what it is for and hands off to the
   workbench, so nothing is reachable in only one mode.
   See `docs/ARCHITECTURE.md` → *Focus mode*.

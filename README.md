@@ -64,9 +64,24 @@ file, so the choice is only about how you like to work.
   Sources that are already settled are stepped over rather than shown again; they
   are still one click away in **All steps ▾**. Anything specialist that belongs to a
   particular source — Queensland Globe's site map, the PMST spreadsheet import, the
-  live API checks — is right there on that source's own screen. *Focus is still
-  being built out — steps that don't yet have their own controls say what they are
-  for and hand you to the workbench, so nothing is out of reach.*
+  live API checks — is right there on that source's own screen.
+
+  And then, the moment the last source feeding a section has an answer, **that
+  section of the report**, while the evidence is still in your head: what it now
+  concludes, anything inconsistent about that, the detail (with a draft on offer
+  from the evidence and the standard wording), and what the whole thing rests on —
+  the findings at full weight, *checked, nothing found* on one line, and **⚠ not yet
+  checked** as a caveat. The consistency warnings are the point of putting it here:
+  in the workbench they sit in the right pane, where you may never look; on the step
+  they are in front of you at the moment you can still act on them. Any source name
+  in the evidence takes you to that source and **Continue brings you straight back**,
+  with the section exactly as you left it. **Continue** ticks the section reviewed —
+  the same tick, and the same tally, as the report pane's checkbox. A section that
+  nothing on this site feeds still gets a screen saying so; a section you have
+  already reviewed whose sources go back to *Not checked* says it needs another look,
+  and keeps everything you wrote. *Focus is still being built out — steps that don't
+  yet have their own controls say what they are for and hand you to the workbench, so
+  nothing is out of reach.*
 - **Workbench** — the two-pane view described in the rest of this README:
   everything reachable at once, and you choose what to look at next.
 
