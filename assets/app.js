@@ -2687,10 +2687,13 @@
     // Three passes rather than one: writing and reading a height per textarea in
     // the same loop forces a reflow per card. Reset every one, measure every one,
     // then write — two reflows for the whole dashboard.
-    const notes = $$("#dashboard-groups .note-field");
+    // Both modes' notes: exactly one of the two selectors can match at a time, and
+    // a Focus step's single note wants sizing for the same reason 23 cards' do.
+    const notes = $$("#dashboard-groups .note-field, #focus .note-field");
     notes.forEach((ta) => { ta.style.height = "auto"; });
     const heights = notes.map((ta) => Math.max(ta.scrollHeight, 28));
     notes.forEach((ta, i) => { ta.style.height = `${heights[i]}px`; });
+    // Clamping is the dashboard's alone — a Focus step shows the finding in full.
     $$("#dashboard-groups .src-result.show").forEach(syncResultClamp);
   }
 
@@ -3051,7 +3054,14 @@
   // all saying "found" at once — and clicking it brings the four-way picker back.
   // An unanswered card keeps the picker open: recording the result is the whole
   // job of that card, and it stays one click.
-  function renderStatusControl(src, f) {
+  //
+  // `opts.open` holds the picker open at every status. Focus mode passes it: there
+  // the step IS the card, recording the result is the step's whole question, and a
+  // Manual or Failed source that collapsed to a chip would ask for a click before
+  // it could be changed. The workbench keeps the collapse — it is what stops the
+  // border, the tinted panel and the chip all shouting "found" at once.
+  function renderStatusControl(src, f, opts) {
+    const o = opts || {};
     const slot = el("div", { class: "result-slot" });
     // A radiogroup, not four buttons: the four are mutually exclusive and exactly
     // one of them is the card's answer, which `aria-pressed` on four independent
@@ -3105,7 +3115,7 @@
       sel.append(...radios);
       return sel;
     };
-    if (f.status === STATUS.UNSET) { slot.append(picker()); return slot; }
+    if (o.open || f.status === STATUS.UNSET) { slot.append(picker()); return slot; }
     slot.append(el("button", {
       type: "button", class: `chip result-chip ${f.status}`, "aria-expanded": "false",
       "aria-label": `Result: ${STATUS_LABEL[f.status]} — change it`,
@@ -3127,8 +3137,10 @@
   // return focus to the radio they just landed on, so ←/→ walk all four.
   function refocusStatus(id, status) {
     CARD_OPEN.expanded.add(id);
-    refreshCard(id);
-    const card = $(`#src-${id}`);
+    refreshCard(id); // in Focus this re-renders the step instead — see refreshCard
+    // Focus has no #src- card: the step is the card, and its picker never collapses,
+    // so the radio is found without the chip round trip below.
+    const card = focusLive() ? $("#focus") : $(`#src-${id}`);
     if (!card) return;
     const chip = card.querySelector(".result-slot .result-chip");
     if (chip) chip.click(); // swaps the chip back for the picker (see renderStatusControl)
@@ -3141,7 +3153,13 @@
   // old action row: rare, recoverable, or duplicating something the card already
   // does. Items are built on first open, so a resting card carries one button
   // rather than five, and they are plain text — the ⋯ has already said "more".
-  function renderCardMenu(src, note) {
+  //
+  // `opts.handoff` is the Focus step this menu is standing in. Focus's escape hatch
+  // to the full card belongs here rather than as a visible button: it is exactly
+  // the kind of occasional utility this tier is for, and the step has no row to
+  // spare for one.
+  function renderCardMenu(src, note, opts) {
+    const o = opts || {};
     const list = el("div", { class: "menu-list", role: "menu", hidden: true });
     const toggle = el("button", {
       type: "button", class: "btn tiny tertiary menu-toggle", "aria-haspopup": "true", "aria-expanded": "false",
@@ -3157,6 +3175,8 @@
           }
           list.append(el("button", { class: "menu-item", role: "menuitem",
             onclick: () => showReportSection(targetSectionOf(src)) }, "Show in the report"));
+          if (o.handoff) list.append(el("button", { class: "menu-item", role: "menuitem",
+            onclick: () => focusHandoffTo(o.handoff) }, "Open the full card in the workbench ↗"));
           // Destructive, and no undo — ruled off and coloured as such (.danger).
           list.append(el("button", { class: "menu-item danger", role: "menuitem",
             onclick: () => clearNote(src.id, note) }, "Clear my note"));
@@ -3244,7 +3264,10 @@
     if (open && !tools.childElementCount) {
       const input = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
       const pickBtn = el("button", { type: "button", class: "pick-btn" }, "choose a file");
-      const zone = el("div", { class: "dropzone small", tabindex: "0", "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
+      // id: a photo landing re-renders the card (or, in Focus, the whole step), and
+      // the zone is where the keyboard was — an id is what lets it be handed back.
+      const zone = el("div", { class: "dropzone small", id: `drop-${src.id}`, tabindex: "0",
+        "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
         "📷 Drag & drop, paste, or ", pickBtn);
       wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
       tools.append(zone, input);
@@ -3339,6 +3362,12 @@
   // when that changes the density under a keyboard user, focus is handed to the
   // card's new primary control instead of being dropped on the floor.
   function refreshCard(id) {
+    // Focus mode has no card to refresh — the step IS the card. Every mutation in
+    // the app (a status tick, a photo, an API result, an import, an agent write)
+    // already calls through here, so this one branch is what makes both modes
+    // repaint from the same call sites. `focus: false` because none of those
+    // mutations is a navigation: it must not yank the caret out of the note.
+    if (focusLive()) { renderFocus({ focus: false }); return; }
     const src = DATA.sources.find((s) => s.id === id);
     const old = $(`#src-${id}`);
     if (!old || !src) return;
@@ -4020,7 +4049,9 @@
       INCLUDE_FLASH.add(id);
       setTimeout(() => {
         if (!INCLUDE_FLASH.delete(id)) return;
-        if (document.getElementById(`src-${id}`)) refreshCard(id);
+        // Focus carries the same receipt on its source step, and has no #src- card
+        // to test for — refreshCard re-renders the step there instead.
+        if (focusLive() || document.getElementById(`src-${id}`)) refreshCard(id);
       }, INCLUDE_FLASH_MS);
     } else {
       INCLUDE_FLASH.delete(id);
@@ -4084,6 +4115,13 @@
   // Sending someone to a pane they have collapsed is a dead end, so the jump
   // opens it first.
   function showReportSection(sectionId) {
+    // In Focus there is no report pane to scroll to — but the section has a step of
+    // its own, carrying the same content and the same Reviewed tick, so "show me
+    // that section" means going there rather than doing nothing.
+    if (focusLive()) {
+      focusGoTo(sectionId === IDENTITY_SECTION ? "out:identity" : `sec:${sectionId}`);
+      return;
+    }
     const node = document.getElementById(`rsec-${sectionId}`);
     if (!node) return;
     revealRightPane();
@@ -4093,6 +4131,10 @@
   // card may be hidden by the active dashboard filter, so drop back to "All" and
   // re-render first if it isn't currently on screen.
   function showSourceCard(sourceId) {
+    // …and the same the other way: the source's own step is where it is shown.
+    // (focusHandoffTo switches modes BEFORE calling this, so the handoff still
+    // lands on the real card.)
+    if (focusLive()) { focusGoTo(`src:${sourceId}`); return; }
     revealLeftPane();
     let node = document.getElementById(`src-${sourceId}`);
     if (!node) {
@@ -4184,7 +4226,11 @@
   // every card, permanently — heavy machinery for a choice the default gets right
   // nearly every time. It reads as text now, with the full picker one click
   // behind "change", and including the card says where it went.
-  function renderIncludeRow(src) {
+  // `opts.signoff: false` drops the sign-off pill from the row. Focus mode passes
+  // it: there the step's Continue records the sign-off, and a pill beside it would
+  // be a second control for one judgement.
+  function renderIncludeRow(src, opts) {
+    const o = opts || {};
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     const included = cardIncluded(f);
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
@@ -4192,7 +4238,8 @@
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
 
     const row = el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
-      el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn, renderSignOff(src, f));
+      el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn,
+      o.signoff === false ? null : renderSignOff(src, f));
 
     // The flight path: pressing Include used to land 3,000px down the other pane
     // with nothing on the card to say so. This names where it went, and the name
@@ -5211,7 +5258,11 @@
       const f = state.findings[src.id] || {};
       add(`src:${src.id}`, "sources", "input", src.name, {
         ref: src.id,
-        done: !isOutstanding(f),
+        // Settled: signed off, or answered and not outstanding. Either way there is
+        // nothing left to ask of this source, and re-walking twelve of those is
+        // exactly the volume complaint this mode exists to answer — forward
+        // movement steps over them (focusMove) and the step list reaches them.
+        done: isSignedOff(f) || !isOutstanding(f),
         // Anything recorded here — a status, a note, a photo — means somebody (or
         // an import) has already been at this source, wherever the cursor sits.
         touched: hasAnswer(f) || !!(f.note && f.note.trim()) || !!(f.images && f.images.length),
@@ -5397,18 +5448,25 @@
     const o = opts || {};
     const active = document.activeElement;
     const inStep = !!active && root.contains(active);
-    // A BACKGROUND re-render — a result landing, an agent writing a note — must not
-    // yank the caret out of a control the operator is TYPING in. (The site picker's
-    // search box, the paste box and the correction fields are all borrowed into
-    // steps, so this is reachable.) The next navigation renders it fresh anyway.
+    // A BACKGROUND re-render — a result landing, a screenshot pasted in, an agent
+    // writing a note — must not yank the caret out of a control the operator is
+    // TYPING in. (The site picker's search box, the paste box, the correction
+    // fields and a source step's own note are all reachable this way.)
     //
-    // A tick or a radio is not typing, and skipping the render for one is how a
-    // step whose own state just moved ends up still saying "Needs you" underneath
-    // a box the operator has just ticked. Those re-render, and the refocusId path
-    // below hands the control its focus straight back.
-    if (o.focus === false && inStep && isTypingControl(active)) return;
-    // Ids are stable across renders, so a control that had keyboard focus can be
-    // handed it back rather than dropping it to <body>.
+    // It must not cost them the render either. Skipping it is how a step whose own
+    // state just moved ends up still saying "Needs you" under a box that was just
+    // ticked — or, worse, how a pasted screenshot lands in state and nowhere on
+    // screen, which reads as a paste that did nothing. So the caret is carried
+    // across instead of being defended by standing still: ids are stable across
+    // renders, and selection and scroll go with them.
+    const typing = o.focus === false && inStep && isTypingControl(active);
+    const caret = (typing && active.id) ? readCaret(active) : null;
+    // Only when there is no id to find the control by again is the render skipped
+    // — there would be nothing to put the caret back into. The next navigation
+    // renders fresh anyway.
+    if (typing && !caret) return;
+    // The same handing-back for controls that are not typed in: a radio, a tick, a
+    // dropzone that has just swallowed a photo.
     const refocusId = (o.focus === false && inStep && active.id) ? active.id : "";
     releaseAdoptedNodes(); // whatever the last render borrowed goes home first
     const steps = focusSteps();
@@ -5460,9 +5518,28 @@
     // false` is for the renders that are a side effect of something else (a result
     // landing, a batch restoring on page load), which nobody asked to be moved by.
     if (o.focus !== false) { heading.focus({ preventScroll: true }); return; }
-    if (!refocusId) return;
-    const back = root.querySelector(`#${window.CSS && CSS.escape ? CSS.escape(refocusId) : refocusId}`);
-    if (back) back.focus({ preventScroll: true });
+    const backId = caret ? caret.id : refocusId;
+    if (!backId) return;
+    const back = root.querySelector(`#${window.CSS && CSS.escape ? CSS.escape(backId) : backId}`);
+    if (!back) return;
+    back.focus({ preventScroll: true });
+    if (caret) writeCaret(back, caret);
+  }
+
+  // Where the caret is, so it can be put back after the node it was in has been
+  // rebuilt (or, for a borrowed node, re-parented — which blurs it either way).
+  // selectionStart is not readable on every input type, so both directions are
+  // guarded: losing the selection is a nuisance, throwing here would lose the render.
+  function readCaret(n) {
+    const c = { id: n.id, start: null, end: null, top: n.scrollTop };
+    try { c.start = n.selectionStart; c.end = n.selectionEnd; } catch (_) {}
+    return c;
+  }
+  function writeCaret(n, c) {
+    if (c.start != null && n.setSelectionRange) {
+      try { n.setSelectionRange(c.start, c.end); } catch (_) {}
+    }
+    n.scrollTop = c.top;
   }
 
   // Is this control one a person can be mid-keystroke in? Text inputs, textareas
@@ -5551,12 +5628,30 @@
     done: "✓", "needs-you": "●", skipped: "↷", blocked: "⋯", "not-reached": "○",
   };
 
+  // What Continue MEANS on this step, when it means more than "next". On a source
+  // it is the sign-off as well: the workbench's pill is one control among twelve,
+  // and here the step's conclusion IS the judgement, so the label says so —
+  // and says so only when there is an answer to sign off on. Continue is never
+  // blocked: leaving a source unanswered and coming back to it is legitimate, the
+  // step keeps saying it needs you, and Skip for now is the way past on purpose.
+  function focusContinue(step) {
+    if (!step.id.startsWith("src:")) return null;
+    const f = state.findings[step.ref] || {};
+    if (!hasAnswer(f) || isSignedOff(f)) return null;
+    return {
+      label: "Sign off and continue ▸",
+      hint: "Records your sign-off on this source, then moves to the next step",
+      run: () => setReviewed(step.ref, true),
+    };
+  }
+
   function renderFocusNav(step, steps, at) {
     // Before a site is picked there is exactly one step, and Back / Skip / Continue
     // would each be a lie about somewhere to go. The step's own control is the way
     // forward, and it is the only primary action on the surface.
     if (steps.length < 2) return null;
     const last = at >= steps.length - 1;
+    const cont = focusContinue(step);
     return el("div", { class: "fx-nav" },
       el("button", {
         type: "button", class: "btn tertiary", id: "fx-back", disabled: at <= 0 ? "disabled" : null,
@@ -5572,8 +5667,12 @@
       }, "Skip for now"),
       el("button", {
         type: "button", class: "btn primary", id: "fx-next",
-        onclick: () => (last ? focusGoTo(steps[0].id) : focusMove(1)),
-      }, last ? "Back to the start" : "Continue ▸"));
+        title: cont && !last ? cont.hint : null,
+        onclick: () => {
+          if (cont && !last) cont.run();
+          return last ? focusGoTo(steps[0].id) : focusMove(1);
+        },
+      }, last ? "Back to the start" : (cont ? cont.label : "Continue ▸")));
   }
 
   // Making Focus the default changes the tool for people who were happy with it, so
@@ -5608,10 +5707,23 @@
     save(); flushSave();
     renderFocus();
   }
+  // A source with nothing left to ask of it. The last step is never one (it is the
+  // finish step), so the walk below always terminates on something worth arriving at.
+  const isSettledSource = (s) => s.id.startsWith("src:") && s.state === "done";
+
+  // Forward movement steps OVER settled sources; Back never does.
+  //
+  // Twelve of a typical site's sources come back settled from the automated round
+  // trip, and presenting each of them as a screen that asks nothing is the volume
+  // this mode exists to answer. Back is the retracing motion, though — and by the
+  // time it is pressed, Continue has usually just SETTLED the source it would be
+  // retracing to — so it moves one step at a time and can always reach the step
+  // just left. Anything either of them passes is one click away in the step list.
   function focusMove(delta) {
     const steps = focusSteps();
     const at = resolveFocusCursor(steps);
-    const next = Math.max(0, Math.min(steps.length - 1, at + delta));
+    let next = Math.max(0, Math.min(steps.length - 1, at + delta));
+    if (delta > 0) while (next < steps.length - 1 && isSettledSource(steps[next])) next++;
     focusGoTo(steps[next].id);
   }
 
@@ -5819,20 +5931,167 @@
     "checks:paste": focusChecksBody,
   };
 
+  /* -------------------------------------------------------------- a source step
+     The headline step, and where most of an assessment is spent: one source,
+     alone on the screen, asking the one question that source exists to answer.
+
+     The workbench card already sequences this correctly — identity → what came
+     back → your answer → evidence → into the report → done — so that order stays,
+     and every control on it is the workbench's own renderer writing the same
+     state. There is no second implementation of anything here, which is what
+     makes "a source answered in Focus is answered in the workbench, and the other
+     way round" true by construction.
+
+     What changes is that the card IS the screen, so the things that had to be
+     folded away to fit 23 cards in a column are open by default: the instruction
+     (the ⓘ disclosure), the whole of the result text (the four-line clamp), and
+     the evidence zone once the result is Found. The ⋯ stays a ⋯ — those really
+     are occasional — and the sign-off pill becomes the step's Continue. */
   function focusSourceBody(step, body) {
     const src = DATA.sources.find((s) => s.id === step.ref);
-    const f = state.findings[step.ref] || {};
-    if (!src) { body.append(el("p", { class: "fx-lede" }, "This source is no longer in the registry.")); return body; }
-    if (src.what_to_find) body.append(el("p", { class: "fx-lede" }, src.what_to_find));
+    if (!src) {
+      body.append(el("p", { class: "fx-lede" },
+        "This source is no longer in the registry — nothing is asked of you here."));
+      return body;
+    }
+    const f = state.findings[src.id] || (state.findings[src.id] =
+      { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
+    if (!f.images) f.images = [];
+    body.classList.add("fx-source");
+
+    // The note is built first because the ⋯ menu's "Clear my note" needs it; it is
+    // appended in its own zone further down.
+    const note = el("textarea", {
+      class: "note-field", id: `fx-note-${src.id}`, rows: "1",
+      "aria-label": `Your note on ${src.name}`,
+      placeholder: "Your own words for the report…",
+      oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
+      onchange: () => { renderReport(); },
+    });
+    note.value = f.note || "";
+
+    // ---- 1. which source, and why -----------------------------------------
+    // Open, not behind ⓘ. On the card this is reference prose repeated 23 times
+    // down a column and it earns a disclosure; here it is the instruction for the
+    // step, and the operator who most needs it is the one who would never think
+    // to open a disclosure to find it.
     body.append(el("p", { class: "fx-facts" },
-      el("span", { class: `chip ${statusOf(f)}` }, STATUS_LABEL[statusOf(f)]),
-      el("span", { class: "fx-fact" }, src.jurisdiction || ""),
-      f.note && f.note.trim() ? el("span", { class: "fx-fact" }, "has a note") : null));
+      el("span", { class: "tag jur" }, src.jurisdiction === "national" ? "National" : (state.site.state || "State")),
+      src.method === "api"
+        ? el("span", { class: "tag api" }, "Queried by API")
+        : el("span", { class: "tag method" }, "Checked by hand"),
+      src.internal ? el("span", { class: "tag internal" }, "Internal — BOM staff only") : null,
+      // Sign-off is normally recorded BY Continue, so the only time it needs
+      // stating is when it has already happened and the step is being revisited.
+      isSignedOff(f) ? el("span", { class: "fx-fact" }, "✓ Signed off") : null));
+    if (src.what_to_find)
+      body.append(el("p", { class: "fx-lede" }, el("b", {}, "What to look for: "), src.what_to_find));
+    if (src.instructions)
+      body.append(el("p", { class: "fx-lede" }, el("b", {}, "How to run it: "), src.instructions));
+
+    // ---- 2. open the source -----------------------------------------------
+    // The whole point of the step, and its one filled button. Same handler the
+    // card's primary carries: the click copies the coordinates on the way out, so
+    // the source's own search box can be filled by paste.
+    const tools = el("div", { class: "fx-actions" });
     const url = buildUrl(src);
-    body.append(el("div", { class: "fx-actions" },
-      url ? el("a", { class: "btn secondary", href: url, target: "_blank", rel: "noopener" }, "Open the source ↗") : null,
-      focusHandoffBtn(step, "Answer this in the workbench")));
+    if (url) tools.append(el("a", {
+      class: "btn primary", href: url, target: "_blank", rel: "noopener",
+      onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
+    }, "Open the source ↗"));
+    // The specialist tools stay on their own source, where they belong — each
+    // opens the workbench's own handler, from here, with no trip through the
+    // other mode. They are alternatives to "go and look", never a second filled
+    // button competing with it.
+    if (src.id === "qld-globe" && state.site.state === "QLD")
+      tools.append(el("button", { type: "button", class: "btn secondary",
+        onclick: () => openQldGlobeMap(src) }, "Open site map"));
+    const runner = apiRunnerFor(src);
+    // id: the runner paints its progress into #run-… / #res-… by document lookup.
+    // Only one mode's copy of those ids is ever in the document — the workbench's
+    // dashboard is dropped while Focus is live — so they cannot collide.
+    if (runner) tools.append(el("button", { type: "button", class: "btn secondary",
+      id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
+    if (src.xlsx_import === "pmst_mnes") {
+      const fileInput = el("input", {
+        type: "file", accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", hidden: true,
+        onchange: (e) => { const file = e.target.files && e.target.files[0]; if (file) importPmstXlsx(src.id, file, importBtn); e.target.value = ""; },
+      });
+      const importBtn = el("button", { type: "button", class: "btn secondary",
+        onclick: () => fileInput.click() }, "Import PMST Excel");
+      tools.append(importBtn, fileInput);
+    }
+    tools.append(renderCardMenu(src, note, { handoff: step }));
+    body.append(tools);
+
+    // ---- 3. what came back -------------------------------------------------
+    // In full. The four-line clamp exists because 23 cards share one column; here
+    // there is one, and a truncated finding is the operator reading half of what
+    // the machine actually found. A source nobody has run has none of this, and
+    // the step then reads as "go and look" — which is exactly what it is.
+    const resultPanel = el("div", { class: "src-result", id: `res-${src.id}` });
+    if (f.result) paintResult(resultPanel, f.result.html, { status: f.status, err: f.result.err });
+    body.append(resultPanel);
+
+    // ---- 4. your answer ----------------------------------------------------
+    // Stated once, and always open: on a screen of its own the answer IS the
+    // question, and a Manual or Failed source collapsing to a chip would ask for a
+    // click before it could be changed.
+    const hint = el("p", { class: "do-hint", id: `fx-hint-${src.id}`, hidden: true },
+      "Found ≠ good news — a protected species means caution on site. Signing off is your judgement about this source, tracked separately from the result.");
+    const lead = el("button", {
+      type: "button", class: "do-lead do-lead-info", "aria-expanded": "false", "aria-controls": hint.id,
+      title: "What Result means, and how it relates to signing off",
+      onclick: () => {
+        const open = hint.hidden;
+        hint.hidden = !open;
+        lead.setAttribute("aria-expanded", open ? "true" : "false");
+        lead.classList.toggle("on", open);
+      },
+    }, "Result", el("span", { class: "do-lead-mark", "aria-hidden": "true" }, "ⓘ"));
+    body.append(el("div", { class: "fx-answer" },
+      el("div", { class: "do-row" }, lead, renderStatusControl(src, f, { open: true })),
+      hint));
+
+    // ---- 5. your note ------------------------------------------------------
+    body.append(el("div", { class: "src-note" },
+      el("div", { class: "note-head" }, el("span", { class: "zone-label" }, "Your note")),
+      note));
+
+    // ---- 6. evidence -------------------------------------------------------
+    // Revealed when the result is Found, which is when evidence is wanted — the
+    // same set the card opens, so a zone opened in either mode is open in both.
+    // Everything in it is renderPhotoBlock's: the drop/paste/pick zone and, on
+    // species cards, both Wikipedia reference-image controls.
+    if (PHOTO_CATEGORIES.has(src.category)) {
+      if (f.status === STATUS.FOUND) CARD_OPEN.photos.add(src.id);
+      const photos = renderPhotoBlock(src, f);
+      body.append(el("div", { class: "fx-evidence" },
+        el("div", { class: "note-head" },
+          el("span", { class: "zone-label" }, "Evidence"), photos.addBtn),
+        photos.body));
+    }
+
+    // ---- 7. where it goes --------------------------------------------------
+    // Quieter here than on the card, and without the sign-off pill: the default
+    // routing is right nearly always, and this section is a few steps away, where
+    // a mistake in it is obvious and correctable.
+    body.append(renderIncludeRow(src, { signoff: false }));
+    // The note can only be sized once it is laid out; the batched frame this
+    // queues runs after the step has been appended to the document.
+    queueCardMetrics();
     return body;
+  }
+
+  // The source a stray Ctrl+V belongs to. In Focus a source step IS the screen, so
+  // a screenshot pasted anywhere on it is that source's evidence rather than a
+  // station photo. The evidence zone's own listener still claims the pastes made
+  // into it (and calls preventDefault); this only names where the rest should go.
+  function focusPasteSourceId() {
+    if (!focusLive() || !focusCursor || !focusCursor.startsWith("src:")) return null;
+    const id = focusCursor.slice(4);
+    const src = DATA.sources.find((s) => s.id === id);
+    return src && PHOTO_CATEGORIES.has(src.category) ? id : null;
   }
 
   function focusSectionBody(step, body) {
@@ -7150,6 +7409,14 @@
       const files = filesFromClipboard(e);
       if (!files.length) return;
       e.preventDefault();
+      // …unless Focus is showing a source step, in which case the screen the paste
+      // was aimed at is that source, and its evidence is where it belongs.
+      const onSource = focusPasteSourceId();
+      if (onSource) {
+        addFindingImages(onSource, files);
+        toast(files.length > 1 ? `${files.length} photos added to this source` : "Photo added to this source");
+        return;
+      }
       addSiteImages(files);
       toast(files.length > 1 ? `${files.length} photos added to the site` : "Photo added to the site");
     });

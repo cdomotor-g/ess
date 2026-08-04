@@ -53,9 +53,20 @@ file, so the choice is only about how you like to work.
   straight away, while it is all still fresh — **the report's front page as it now
   reads**, to be checked and ticked off. The three automated passes follow, one per
   step; applying an assistant's reply says what it answered and drops you at the
-  first source that still needs a human. *Focus is still being built out — steps
-  that don't yet have their own controls say what they are for and hand you to the
-  workbench, so nothing is out of reach.*
+  first source that still needs a human.
+
+  Then the bulk of the work: **one source per screen**. What that source is for and
+  what to look for are simply written there, not folded behind an ⓘ; whatever came
+  back from it is shown in full, not clipped to four lines; and the screen asks one
+  question — Found, Nothing, Failed or Manual — with room for your note, a place to
+  drop a screenshot once you have found something, and a quiet line saying which
+  report section it will feed. **Continue** records your sign-off and moves on.
+  Sources that are already settled are stepped over rather than shown again; they
+  are still one click away in **All steps ▾**. Anything specialist that belongs to a
+  particular source — Queensland Globe's site map, the PMST spreadsheet import, the
+  live API checks — is right there on that source's own screen. *Focus is still
+  being built out — steps that don't yet have their own controls say what they are
+  for and hand you to the workbench, so nothing is out of reach.*
 - **Workbench** — the two-pane view described in the rest of this README:
   everything reachable at once, and you choose what to look at next.
 

@@ -315,7 +315,10 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-step-state[data-state="needs-you"] { color: var(--caution); }
 .fx-title { margin: 0 0 var(--sp-3); font-size: var(--fs-display); line-height: 1.25; }
 .fx-title:focus-visible { border-radius: 6px; }
-.fx-body { display: flex; flex-direction: column; gap: var(--sp-3); }
+/* The step's body is one div the step itself builds and fills, so the stack
+   rhythm has to reach through it — otherwise the gap lands between .fx-body and
+   its single child and everything the step appended sits flush. */
+.fx-body, .fx-body > div { display: flex; flex-direction: column; gap: var(--sp-3); }
 .fx-lede { margin: 0; font-size: var(--fs-body); color: var(--ink-soft); line-height: 1.5; }
 .fx-facts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; }
 .fx-fact { font-size: var(--fs-meta); color: var(--ink-soft); }
@@ -390,6 +393,43 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
   -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .fx-body .photo-grid.report-large .photo-thumb { width: 150px; }
 .fx-body .photo-grid.report-large .photo-thumb img { max-height: 110px; }
+
+/* ---- a source step. The workbench card's own zones — .src-result, .src-note,
+   .src-photos, .do-row, .include-row — standing on their own instead of stacked
+   23 deep in a column, so almost everything here is a matter of taking the
+   card's compaction back off rather than restyling anything.
+
+   The one structural change is the FINDING: no four-line clamp. The clamp exists
+   because 23 cards share one column; a step that hid half of what the machine
+   found behind a "Show all" would be hiding the thing the step is about. */
+.fx-source .src-result-body { display: block; -webkit-line-clamp: none; line-clamp: none; overflow: visible; }
+.fx-source .src-result { font-size: var(--fs-body); line-height: 1.55; }
+/* The result is the answer to the step's question, so it is given the room to
+   read as one — the card's tighter padding is a column-density compromise. */
+.fx-source .src-result { padding: var(--sp-3); }
+/* Identity prose. "What to look for" and "How to run it" are the instruction for
+   this step, not captions under a heading, so they are set at reading size — the
+   bold lead-in is what keeps the two apart. */
+.fx-source > .fx-lede > b { color: var(--ink); }
+/* The answer, given the weight of the thing being asked. The picker is one Tab
+   stop and four targets; at card size those targets are 24 px high, which is the
+   compromise a column of 23 forces and this step does not have to make. */
+.fx-source .status-select button { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-body); }
+.fx-source .do-row { gap: var(--sp-3); }
+.fx-answer { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* A note on a screen of its own starts at a size that invites a sentence, and
+   still grows to whatever is typed (autoGrow / syncCardMetrics). */
+.fx-source .note-field { min-height: 66px; font-size: var(--fs-body); }
+.fx-source .src-note, .fx-source .fx-evidence { display: flex; flex-direction: column; }
+.fx-source .fx-evidence .note-head { margin-bottom: var(--sp-1); }
+/* Evidence: open when the result is Found, which is when there is something to
+   attach. The zone is the card's, at a size that reads as an invitation rather
+   than the compact strip a column of cards can afford. */
+.fx-source .dropzone.small { padding: var(--sp-3); }
+/* Where it goes — deliberately the quietest row on the step. The default routing
+   is right nearly always, and the section itself is a few steps ahead, where a
+   mistake in it is obvious and correctable. */
+.fx-source .include-row { padding-top: var(--sp-2); border-top: 1px dashed var(--line); }
 
 /* ---- a step-3 pass, borrowed. Its padding belongs to the row it normally sits
    in beside the description; here the step's heading and lede have already said
