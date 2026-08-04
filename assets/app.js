@@ -2495,10 +2495,16 @@
   // The shell every density shares: the status edge, the reviewed tint, the
   // category colour the monogram picks up, and the id the rail and the report's
   // cross-pane jumps both scroll to.
+  //
+  // data-section is the other half of the split view: it names the report section
+  // this card feeds, and it is what the reciprocal highlight and the scroll sync
+  // both read. Every density carries it, so the relationship survives a card
+  // settling down to one line.
   function cardShell(src, f, density) {
     const card = el("div", {
       class: `src status-${f.status} density-${density}${f.reviewed ? " is-reviewed" : ""}`,
       id: `src-${src.id}`, "data-src": src.id, "data-density": density,
+      "data-section": targetSectionOf(src, f) || null,
     });
     card.style.setProperty("--cat", `var(--cat-${src.category})`);
     return card;
@@ -3501,9 +3507,45 @@
     else if (!$("#cs-detail").hidden) renderStatusDetail();
     refreshRailBadges(); // same definition of "outstanding", shown per category on the rail
     refreshGroupHeads(); // …and per category on each group's roll-up
+    renderStarvedSections(); // …and which report sections are still empty, from over here
     // The sentence just changed width/wrap, and this card is what the sticky group
     // headers pin under (covers browsers without ResizeObserver too).
     measureStatusBar();
+  }
+
+  // Report sections this site's sources could fill, but nothing has been included
+  // into yet. A section is only "in play" when at least one source that applies
+  // here belongs to one of its categories — otherwise a site with no permits
+  // sources would be told forever that Permits and permissions is empty.
+  function starvedSections() {
+    if (!state.site || !REPORT_SECTIONS.length) return [];
+    const cats = new Set(sourcesForSite().filter((s) => !s.internal).map((s) => s.category));
+    return REPORT_SECTIONS.filter((sec) =>
+      (sec.cats || []).some((c) => cats.has(c)) && !includedCardsForSection(sec.id).length);
+  }
+
+  // …shown from the collection pane, because that is where the evidence comes
+  // from. Before this, an empty section could only be discovered by scrolling the
+  // report. Names are buttons, so the row is also the way to each one.
+  const STARVED_NAMED = 4; // beyond this, the row states the count and stops listing
+  function renderStarvedSections() {
+    const row = $("#cs-starved");
+    if (!row) return;
+    const starved = starvedSections();
+    row.hidden = !starved.length;
+    if (!starved.length) { row.replaceChildren(); return; }
+    const kids = [el("span", { class: "cs-starved-lead" },
+      el("span", { class: "cs-starved-mark", "aria-hidden": "true" }, "○"),
+      `${starved.length} report section${starved.length === 1 ? "" : "s"} with no evidence`)];
+    starved.slice(0, STARVED_NAMED).forEach((sec, i) => {
+      if (i) kids.push(el("span", { class: "r-ev-sep", "aria-hidden": "true" }, "·"));
+      kids.push(el("button", { type: "button", class: "cs-starved-sec",
+        "aria-label": `${sec.title} has no evidence yet — show it in the report`,
+        onclick: () => showReportSection(sec.id) }, sec.title));
+    });
+    if (starved.length > STARVED_NAMED)
+      kids.push(el("span", { class: "cs-starved-rest" }, `+${starved.length - STARVED_NAMED} more`));
+    row.replaceChildren(...kids);
   }
 
   const SEG_HINT = {
@@ -3650,10 +3692,39 @@
     f.included = true;
     save(); refreshCard(id); renderReport();
   }
+  // Cards showing the "added to …" receipt. Transient and deliberately not
+  // persisted: it is feedback on an action just taken, not card state, so a
+  // reload — or the next full dashboard render — clears it.
+  const INCLUDE_FLASH = new Set();
+  const INCLUDE_FLASH_MS = 6000;
+
   function toggleInclude(id) {
     const f = state.findings[id] || (state.findings[id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
-    f.included = !cardIncluded(f);
-    save(); refreshCard(id); renderReport();
+    const now = f.included = !cardIncluded(f);
+    save();
+    if (now) {
+      INCLUDE_FLASH.add(id);
+      setTimeout(() => {
+        if (!INCLUDE_FLASH.delete(id)) return;
+        if (document.getElementById(`src-${id}`)) refreshCard(id);
+      }, INCLUDE_FLASH_MS);
+    } else {
+      INCLUDE_FLASH.delete(id);
+    }
+    refreshCard(id); renderReport();
+    // …and the destination lights up, so the effect is visible on both sides even
+    // when the operator's eye stays on the card. Pure accent change, no motion.
+    const src = DATA.sources.find((s) => s.id === id);
+    if (now && src) flashSectionLink(targetSectionOf(src, f));
+  }
+
+  // Briefly wear the same accent the reciprocal highlight uses, so "it landed
+  // there" is said in the vocabulary the operator already learned by hovering.
+  function flashSectionLink(sectionId) {
+    const node = sectionId && document.getElementById(`rsec-${sectionId}`);
+    if (!node) return;
+    node.classList.add("is-linked");
+    setTimeout(() => { if (!LINKED.includes(node)) node.classList.remove("is-linked"); }, INCLUDE_FLASH_MS);
   }
 
   // -------------------------------------------------- cross-column "Show" jumps
@@ -3667,17 +3738,21 @@
     node.classList.add("flash-target");
     setTimeout(() => node.classList.remove("flash-target"), 1500);
   }
-  // Left card's "Show" → scroll the report (right) to this card's target section.
+  // A card's destination link → scroll the report (right) to its target section.
+  // Sending someone to a pane they have collapsed is a dead end, so the jump
+  // opens it first.
   function showReportSection(sectionId) {
     const node = document.getElementById(`rsec-${sectionId}`);
     if (!node) return;
+    revealRightPane();
     node.scrollIntoView({ behavior: "smooth", block: "start" });
     flashTarget(node);
   }
-  // Report block's "Show" → scroll the collection (left) to the source card. The
+  // A report evidence name → scroll the collection (left) to the source card. The
   // card may be hidden by the active dashboard filter, so drop back to "All" and
   // re-render first if it isn't currently on screen.
   function showSourceCard(sourceId) {
+    revealLeftPane();
     let node = document.getElementById(`src-${sourceId}`);
     if (!node) {
       state.filter = "all";
@@ -3701,24 +3776,123 @@
     flashTarget(node);
   }
 
+  // ------------------------------------------------- reciprocal pane highlight
+  // The split view's best structural idea — collect on the left, watch the report
+  // build on the right — used to be joined only by a small repeated number and 43
+  // buttons whose whole job was "find the other half of this". Hovering or
+  // focusing either half now tints the other, which teaches the mapping without a
+  // word of documentation and without moving anything on screen. Pure accent
+  // change: nothing to suppress under prefers-reduced-motion.
+  let LINKED = []; // nodes currently wearing .is-linked
+
+  function clearLinkHighlight() {
+    LINKED.forEach((n) => n.classList.remove("is-linked"));
+    LINKED = [];
+  }
+
+  // What is the other half of whatever the pointer/focus is on? Collection card →
+  // the one report section it feeds. Report section (or one of its evidence
+  // entries) → every card feeding it.
+  function linkPartners(node) {
+    if (!node || !node.closest) return [];
+    const card = node.closest(".src[data-section]");
+    if (card) {
+      const sec = document.getElementById(`rsec-${card.dataset.section}`);
+      return sec ? [sec] : [];
+    }
+    // Evidence entries name their source, so they point at one card each.
+    const ev = node.closest("[data-ev-src]");
+    if (ev) {
+      const one = document.getElementById(`src-${ev.dataset.evSrc}`);
+      return one ? [one] : [];
+    }
+    const sec = node.closest(".rsection[data-section]");
+    if (sec) return $$("#col-left .src[data-section]").filter((c) => c.dataset.section === sec.dataset.section);
+    return [];
+  }
+
+  function setLinkHighlight(origin) {
+    const next = linkPartners(origin);
+    // Same partners AND they still wear the class — the include flash's cleanup
+    // and a re-render in between can both strip it, and a highlight that has
+    // silently gone missing must not be treated as still applied.
+    if (next.length === LINKED.length && next.every((n, i) => n === LINKED[i] && n.classList.contains("is-linked"))) return;
+    clearLinkHighlight();
+    next.forEach((n) => n.classList.add("is-linked"));
+    LINKED = next;
+  }
+
+  // One delegated pair on the document rather than listeners per card: both panes
+  // re-render constantly, and a card that has just been replaced would otherwise
+  // lose its wiring. Keyboard focus feeds the same setter, so tabbing the list
+  // shows the same relationship the mouse does.
+  function wirePaneLinking() {
+    document.addEventListener("pointerover", (e) => setLinkHighlight(e.target));
+    document.addEventListener("focusin", (e) => setLinkHighlight(e.target));
+    // The pointer can leave the window without ever crossing an unrelated element.
+    document.documentElement.addEventListener("pointerleave", clearLinkHighlight);
+  }
+
   // The bottom row of a card's disposition zone: where this card lands in the
   // report, then — last on the card, in DOM order and on screen, where the
   // instructions have always said it belongs — the sign-off. Editing the card's
   // notes/photos afterwards updates the report live (the report re-renders from
   // state), so multiple sources can land in one section and stay in sync without
-  // any copy/paste going stale. "Show in the report" moved to the card's ⋯ menu.
+  // any copy/paste going stale.
+  //
+  // The destination used to be a 200px <select> carrying all eleven sections, on
+  // every card, permanently — heavy machinery for a choice the default gets right
+  // nearly every time. It reads as text now, with the full picker one click
+  // behind "change", and including the card says where it went.
   function renderIncludeRow(src) {
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     const included = cardIncluded(f);
-    const target = targetSectionOf(src, f);
-    const sel = el("select", { class: "inc-target", "aria-label": "Report section this card feeds",
-      onchange: (e) => setTargetSection(src.id, e.target.value) });
-    REPORT_SECTIONS.forEach((s) => sel.append(el("option", { value: s.id, selected: s.id === target ? "selected" : null }, s.title)));
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
 
-    return el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
-      el("span", { class: "do-lead" }, "Report"), sel, btn, renderSignOff(src, f));
+    const row = el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
+      el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn, renderSignOff(src, f));
+
+    // The flight path: pressing Include used to land 3,000px down the other pane
+    // with nothing on the card to say so. This names where it went, and the name
+    // is the way there. Transient — see INCLUDE_FLASH.
+    if (INCLUDE_FLASH.has(src.id))
+      row.append(el("p", { class: "inc-receipt", role: "status" },
+        el("span", { class: "inc-receipt-tick", "aria-hidden": "true" }, "✓"),
+        "Added to ",
+        el("button", { type: "button", class: "inc-dest-link",
+          onclick: () => showReportSection(targetSectionOf(src, f)) }, sectionTitleOf(src, f)),
+        el("span", { class: "inc-receipt-arrow", "aria-hidden": "true" }, "⇢")));
+    return row;
+  }
+
+  // Where this card lands, as text. Deliberately NOT a link: the destination is
+  // information at rest, and the trips to it are made where they are relevant —
+  // the receipt after including, the reciprocal highlight on hover, and "Show in
+  // the report" in the card's ⋯. "change" swaps in the real <select>, which is
+  // where a correction belongs: one click away, not on all 23 cards at once.
+  function renderIncludeTarget(src, f) {
+    const wrap = el("span", { class: "inc-where" });
+    const draw = () => {
+      wrap.replaceChildren(
+        el("span", { class: "inc-dest" },
+          el("span", { class: "inc-dest-arrow", "aria-hidden": "true" }, "→"), sectionTitleOf(src, f)),
+        el("button", { type: "button", class: "btn tiny tertiary inc-change",
+          "aria-label": `Send ${src.name} to a different report section`,
+          onclick: () => pick() }, "change"));
+    };
+    const pick = () => {
+      const target = targetSectionOf(src, f);
+      const sel = el("select", { class: "inc-target", "aria-label": `Report section ${src.name} feeds`,
+        onchange: (e) => setTargetSection(src.id, e.target.value),
+        // Leaving it without choosing anything is a cancel, not a commitment.
+        onblur: () => { if (wrap.isConnected && wrap.contains(sel)) draw(); } });
+      REPORT_SECTIONS.forEach((s) => sel.append(el("option", { value: s.id, selected: s.id === target ? "selected" : null }, s.title)));
+      wrap.replaceChildren(sel);
+      sel.focus();
+    };
+    draw();
+    return wrap;
   }
 
   // Suggest a dropdown option based on the findings in the relevant categories.
@@ -3974,7 +4148,10 @@
       const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
       if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
 
-      const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""), id: `rsec-${section.id}` });
+      // data-section is the join to the collection pane — see linkPartners() and
+      // the scroll sync. Every card feeding this section carries the same value.
+      const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""),
+        id: `rsec-${section.id}`, "data-section": section.id });
       // Per-section "Reviewed" tickbox — the REPORT's own tally, deliberately not the
       // collection card's "Sign off": different word, different control (a checkbox,
       // not a pressed pill) and a different accent, because the two used to be
@@ -4055,6 +4232,7 @@
     }
     measureClamps(clamps); // now everything is in the document, so heights are real
     renderReportHeader(); // identity + roll-ups, from the state just rendered
+    renderStarvedSections(); // …and the collection pane's view of which are still empty
   }
 
   /* ------------------------------------------------ a section's evidence, split
@@ -4162,14 +4340,18 @@
     // number is NOT part of reportObject()/buildReportHtml, so it never reaches
     // the exported/printed report.
     const num = cardNumbers[src.id];
+    // The source's NAME is the way back to its card — the same pattern the
+    // collapsed strips below already use. It replaces a standing "⇠ Show" button
+    // on every entry whose visible label never said where it went.
     const head = el("div", { class: "r-inc-head" },
       num ? el("span", { class: "src-num", title: "Collection card number (left pane)" }, `${num}`) : null,
       el("span", { class: "chip " + (st === STATUS.UNSET ? "manual" : st), style: st === STATUS.UNSET ? "opacity:.5" : "" }, STATUS_LABEL[st]),
-      el("span", { class: "r-inc-name" }, src.name),
+      el("button", { type: "button", class: "r-inc-name",
+        "aria-label": `${src.name} — go to its card on the collection list`,
+        onclick: () => showSourceCard(src.id) }, src.name),
       el("div", { class: "r-inc-actions" },
-        el("button", { type: "button", class: "btn tiny r-inc-show", title: "Scroll the collection (left) to this source's card", onclick: () => showSourceCard(src.id) }, "⇠ Show"),
         el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
-    const item = el("div", { class: "r-inc-item status-" + st }, head);
+    const item = el("div", { class: "r-inc-item status-" + st, "data-ev-src": src.id }, head);
     if (f.note && f.note.trim()) {
       const note = el("div", { class: "r-inc-note is-clamped" }, f.note.trim());
       // Hidden until measurement proves there is more to show — a two-line note
@@ -4215,7 +4397,7 @@
     rows.forEach(({ src, f }, i) => {
       if (i) out.push(el("span", { class: "r-ev-sep", "aria-hidden": "true" }, "·"));
       const num = cardNumbers[src.id];
-      out.push(el("button", { type: "button", class: "r-ev-src",
+      out.push(el("button", { type: "button", class: "r-ev-src", "data-ev-src": src.id,
         title: `Go to ${src.name} on the collection list`, onclick: () => showSourceCard(src.id) },
         num ? el("span", { class: "src-num" }, `${num}`) : null,
         src.name + (suffixOf ? suffixOf(f) : "")));
@@ -5819,12 +6001,88 @@
       btn.setAttribute("aria-label", label);
     }
     if (persist) { try { localStorage.setItem(LS_PANE, paneMode); } catch (_) {} }
+    syncSyncButton();
   }
 
   // Anything that lives in the left column and can be summoned from outside it
   // (the agent panel, from the topbar key button) has to bring the column back
   // first, or it opens into a hidden pane.
   function revealLeftPane() { if (paneMode === "hide-left") setPaneMode("split"); }
+  // …and the same for the report, so an include receipt, a starved-section name
+  // or the card's "Show in the report" never points into a collapsed pane.
+  function revealRightPane() { if (paneMode === "hide-right") setPaneMode("split"); }
+
+  // ---------------------------------------------------------------- scroll sync
+  // Optional: keep the two panes roughly aligned by report section while
+  // scrolling, so the report stays on whatever the collection pane is showing
+  // (and back again). Off by default — it moves a pane the operator did not
+  // touch, which has to be asked for — and the choice is remembered.
+  const LS_SYNC = LS_PREFIX + "panesync";
+  let scrollSync = false;
+  let syncLock = 0; // ms: ignore scroll events until then, they are our own doing
+
+  const wideLayout = () => !window.matchMedia || window.matchMedia("(min-width: 981px)").matches;
+  // Nothing to align when a pane is collapsed, or when the layout has stacked the
+  // two columns into one page scroll.
+  const syncActive = () => scrollSync && paneMode === "split" && wideLayout();
+
+  function setScrollSync(on, persist = true) {
+    scrollSync = !!on;
+    if (persist) { try { localStorage.setItem(LS_SYNC, scrollSync ? "1" : "0"); } catch (_) {} }
+    syncSyncButton();
+    if (syncActive()) alignPanes("left");
+  }
+
+  function syncSyncButton() {
+    const btn = $("#btn-pane-sync");
+    if (!btn) return;
+    btn.classList.toggle("on", scrollSync);
+    btn.setAttribute("aria-pressed", scrollSync ? "true" : "false");
+    // A pane is collapsed: the control has nothing to align, and says so rather
+    // than sitting there lit and inert.
+    const idle = paneMode !== "split";
+    btn.disabled = idle;
+    const label = idle
+      ? "Linked scrolling — needs both panes open"
+      : scrollSync
+        ? "Linked scrolling is on — the panes follow each other by report section. Turn it off."
+        : "Link the two panes' scrolling, so each follows the other by report section";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
+
+  // The topmost thing still in view in `col` that names a report section.
+  function topSectionIn(col, sel) {
+    const top = col.getBoundingClientRect().top;
+    for (const node of $$(sel, col)) {
+      if (!node.offsetParent) continue; // inside a folded group, or a hidden pane
+      if (node.getBoundingClientRect().bottom > top + 4) return node.dataset.section || null;
+    }
+    return null;
+  }
+
+  function alignPanes(from) {
+    if (!syncActive()) return;
+    const now = Date.now();
+    if (now < syncLock) return;
+    const left = $("#col-left"), right = $("#col-right");
+    if (!left || !right) return;
+    const fromLeft = from === "left";
+    const id = topSectionIn(fromLeft ? left : right, fromLeft ? ".src[data-section]" : ".rsection[data-section]");
+    if (!id || !/^[\w-]+$/.test(id)) return;
+    const target = fromLeft ? right : left;
+    const node = fromLeft
+      ? document.getElementById(`rsec-${id}`)
+      : $$(`#col-left .src[data-section="${id}"]`).find((c) => c.offsetParent);
+    if (!node || !node.offsetParent) return;
+    // Land clear of whatever is pinned at the top of the target pane — the same
+    // offset a jump uses (--rdoc-h on the right, --status-h on the left).
+    const pad = parseFloat(getComputedStyle(target).scrollPaddingTop) || 0;
+    const delta = node.getBoundingClientRect().top - target.getBoundingClientRect().top - pad;
+    if (Math.abs(delta) < 8) return; // close enough — don't fight the operator's scroll
+    syncLock = now + 180; // swallow the echo our own scroll is about to raise
+    target.scrollTop += delta;
+  }
 
   // ---------------------------------------------------------------- lightbox
   // One reusable full-screen overlay for viewing an image — a site/evidence photo
@@ -6027,6 +6285,15 @@
     let savedPane = null;
     try { savedPane = localStorage.getItem(LS_PANE); } catch (_) {}
     setPaneMode(savedPane || "split", false);
+    // Linked scrolling — off unless this browser has been told otherwise.
+    const syncBtn = $("#btn-pane-sync");
+    if (syncBtn) syncBtn.addEventListener("click", () => setScrollSync(!scrollSync));
+    let savedSync = null;
+    try { savedSync = localStorage.getItem(LS_SYNC); } catch (_) {}
+    setScrollSync(savedSync === "1", false);
+    // The two panes teach each other by highlight rather than by 43 "find the
+    // other half of this" buttons.
+    wirePaneLinking();
     // agent.js opens its panel from the topbar; the panel is in the left column.
     const agentBtn = $("#btn-agent-settings");
     if (agentBtn) agentBtn.addEventListener("click", revealLeftPane);
@@ -6055,7 +6322,16 @@
       colLeft.addEventListener("scroll", () => {
         if (queued) return;
         queued = true;
-        requestAnimationFrame(() => { queued = false; syncProgressPinned(); });
+        requestAnimationFrame(() => { queued = false; syncProgressPinned(); alignPanes("left"); });
+      }, { passive: true });
+    }
+    const colRight = $("#col-right");
+    if (colRight) {
+      let queued = false;
+      colRight.addEventListener("scroll", () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; alignPanes("right"); });
       }, { passive: true });
     }
   }

@@ -195,6 +195,9 @@
           <button type="button" class="cs-sort" id="cs-sort"><!-- filled by JS: syncSortToggle() --></button>
         </div>
         <div class="cs-detail" id="cs-detail" hidden><!-- filled by JS: renderStatusDetail() --></div>
+        <!-- Which report sections are still empty, said from the pane the evidence
+             comes from. Hidden once every section in play has something in it. -->
+        <p class="cs-starved" id="cs-starved" hidden><!-- filled by JS: renderStarvedSections() --></p>
       </section>
 
       <!-- STEP 3 — the two automated passes. Copy prompt and the box you paste the
@@ -412,13 +415,20 @@
     <!-- Pane handles — sit on the seam between the two columns. Each button hides
          its own side and hands the width to the other; only one side can be
          collapsed at a time, so the pair reads as a three-state control
-         (split / collection only / report only). Wide layout only. -->
+         (split / collection only / report only). Wide layout only.
+
+         The third handle links the two panes' scrolling, so each follows the
+         other by report section. It lives here because the seam is where the
+         relationship between the columns belongs — and it is off until asked
+         for: moving a pane nobody touched is a surprise, not a default. -->
     <div class="pane-divider" id="pane-divider">
       <div class="pane-btns">
         <button class="pane-btn" id="btn-pane-left" type="button" aria-controls="col-left" aria-expanded="true"
                 title="Hide the collection pane — give the report the full width">&#9664;</button>
         <button class="pane-btn" id="btn-pane-right" type="button" aria-controls="col-right" aria-expanded="true"
                 title="Hide the report pane — give collection the full width">&#9654;</button>
+        <button class="pane-btn pane-sync" id="btn-pane-sync" type="button" aria-pressed="false"
+                title="Link the two panes' scrolling, so each follows the other by report section">&#8646;</button>
       </div>
     </div>
 
