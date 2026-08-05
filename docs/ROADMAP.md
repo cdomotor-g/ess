@@ -100,11 +100,20 @@ slice. Each backlog item names the files to touch and how to verify.
   screen where they can still be acted on, the detail with a draft on offer, the
   three-way evidence split, and a Continue that ticks the section reviewed. A
   source name in the evidence is an errand — it goes to that source and Continue
-  brings you straight back. A gate that re-opens keeps everything already written.
-  **Still to land:** the finish step and the specialist escape hatches (#74), and
-  the accessibility / keyboard / narrow-screen pass (#75).
-  Until a step has its own body it states what it is for and hands off to the
-  workbench, so nothing is reachable in only one mode.
+  brings you straight back. A gate that re-opens keeps everything already written;
+  **the finish step and the specialist escape hatches** (#74) — what is still
+  outstanding, every way the report leaves the app, and a labelled handoff for each
+  surface that stays in the workbench; and **the accessibility, keyboard and
+  narrow-screen pass** (#75) — every navigation lands focus on the new step's
+  heading, whose accessible name carries its position ("Step 14 of 41 — Queensland
+  Globe") as one announcement and no more; `Alt+→` / `Alt+←` move, documented on
+  the chrome; the step list is a real menu with ↑/↓, Home/End and Esc; no keyboard
+  trap, and focus is never left on `<body>`, including out of the Queensland Globe
+  map; every state carries a glyph and a word, so the mode reads in greyscale; and
+  below 620px the chrome collapses, the nav footer becomes a sticky thumb-reachable
+  bar, and the photo zones offer a real pick/camera control instead of paste-only
+  affordances. Step transitions are suppressed under `prefers-reduced-motion`.
+  That completes epic #68.
   See `docs/ARCHITECTURE.md` → *Focus mode*.
 
 ## Deliberately manual (by nature, not backlog)

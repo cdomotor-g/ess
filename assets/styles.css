@@ -268,8 +268,22 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-where { grid-area: 1 / 1; margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
 .fx-phase { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--brand); }
 .fx-of { font-size: var(--fs-meta); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+/* Progress in words, beside the bar that draws it. The bar is aria-hidden and
+   says nothing in greyscale; this is the same number, readable by both. */
+.fx-done { font-size: var(--fs-micro); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.fx-done::before { content: "· "; }
 .fx-list-btn { grid-area: 1 / 2; justify-self: end; }
 .fx-track { grid-area: 2 / 1 / 3 / 3; flex: none; width: 100%; }
+
+/* ---- the shortcuts, documented where the movement they drive is described. A
+   shortcut nobody is told about is not an accessibility feature. */
+.fx-keys { grid-area: 3 / 1 / 4 / 3; margin: 0; display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--sp-hair) var(--sp-1); font-size: var(--fs-micro); color: var(--ink-soft); }
+.fx-keys kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-micro);
+  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 4px; }
+/* Trailing space before the next pair, so the two read as two. */
+.fx-keys-what { margin-right: var(--sp-3); }
 
 /* ---- the step list: Focus mode's answer to the nav rail, and what keeps "the
    tool proposes an order, it does not impose one" true. Every step, its state,
@@ -280,14 +294,21 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-list { display: flex; flex-direction: column; gap: var(--sp-hair); max-height: 46vh; overflow-y: auto;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
   padding: var(--sp-2); box-shadow: var(--shadow); }
+/* One role="group" per phase, labelled by its heading — a menu whose children are
+   anything other than menuitems is one a screen reader may flatten. The group is
+   the flex column the list used to be, so nothing about the layout moved. */
+.fx-list-group { display: flex; flex-direction: column; gap: var(--sp-hair); }
 .fx-list-phase { margin: var(--sp-2) 0 var(--sp-0); font-size: var(--fs-micro); font-weight: 700;
   text-transform: uppercase; letter-spacing: .07em; color: var(--ink-soft); }
-.fx-list-phase:first-child { margin-top: 0; }
+.fx-list-group:first-child .fx-list-phase { margin-top: 0; }
 .fx-list-item { display: grid; grid-template-columns: 1.2em 1fr auto; align-items: baseline; gap: var(--sp-2);
   width: 100%; text-align: left; font: inherit; font-size: var(--fs-body); color: var(--ink);
   background: transparent; border: 1px solid transparent; border-radius: 8px;
   padding: var(--sp-1) var(--sp-2); cursor: pointer; }
 .fx-list-item:hover { background: var(--surface-2); }
+/* Inside a scrolling box, so the ring is drawn within the item's own bounds — a
+   positive offset is clipped by the overflow at the ends of the list. */
+.fx-list-item:focus-visible { --focus-offset: -2px; background: var(--surface-2); }
 .fx-list-item.is-here { border-color: var(--brand); background: var(--link-bg); font-weight: 650; }
 .fx-list-name { min-width: 0; overflow-wrap: anywhere; }
 .fx-list-state { font-size: var(--fs-micro); color: var(--ink-soft); white-space: nowrap; }
@@ -558,15 +579,58 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-nav { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .fx-nav-gap { flex: 1 1 auto; }
 
+/* The step transition — the one animation this mode wants, and exactly the kind
+   that causes trouble, so it is opt-in on motion and opt-in on navigation both.
+   `is-entering` is set by renderFocus() only when the step actually changed;
+   without it a keystroke in a note would re-run this on every character. */
+@media (prefers-reduced-motion: no-preference) {
+  .fx-step.is-entering { animation: fx-step-in .16s ease-out; }
+}
+@keyframes fx-step-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- narrow screens. Focus mode should be BETTER on a phone than the workbench
+   is: one column, one question, and no tab bar to switch panes is the natural
+   mobile shape — it is the layout the split could never fit into. */
 @media (max-width: 620px) {
-  .focus { padding: var(--sp-3) 0 var(--sp-7); }
+  /* Barely any tail padding: the sticky footer below is now what the end of the
+     step looks like, and sp-7 of empty page under it just pushed the one control
+     that matters up off the thumb's reach at the bottom of the scroll. */
+  .focus { padding: var(--sp-3) 0 var(--sp-2); }
   .fx-step { padding: var(--sp-4) var(--sp-3); }
-  /* Continue keeps the end of the row; Back and Skip share the start of it. */
-  .fx-nav #fx-next { flex: 1 1 100%; order: -1; }
+  /* The chrome collapses to phase + n of m. The bar stays (it costs one line and
+     no text), the shortcuts go — there is no Alt key to press on a phone. */
+  .fx-keys { display: none; }
+  /* Thumb-reachable, and sticky rather than fixed so it can never overlap the
+     last control: sticky keeps its space in the flow, fixed would sit on top of
+     whatever the step ends with. */
+  .fx-nav { position: sticky; bottom: 0; z-index: 3; gap: var(--sp-2);
+    margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3);
+    padding-bottom: calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+    background: var(--bg); border-top: 1px solid var(--line); }
+  .fx-nav .btn { min-height: 44px; }
+  /* Continue takes a line of its own, below Back and Skip — which is both the
+     easiest reach for a thumb and, unlike the `order: -1` this replaces, an
+     arrangement whose visual order still matches the tab order. Reordering in CSS
+     moved Continue above the two controls that come before it in the DOM, so a
+     keyboard user tabbed backwards through the footer to reach it. */
+  .fx-nav #fx-next { flex: 1 1 100%; }
   /* Two squares side by side stop being maps at this width. */
   .fx-maps .site-maps { grid-template-columns: 1fr; }
   .fx-record-row { flex-direction: column; gap: 0; }
   .fx-record-row dd { text-align: left; }
+  /* The step list is a menu the thumb has to hit, not a dense rail. */
+  .fx-list { max-height: 60vh; }
+  .fx-list-item { padding: var(--sp-2); }
+}
+
+/* ---- 360px. The narrowest screen this is tested at, and the width at which the
+   step list's three columns and the chrome's third fact stop fitting on a line. */
+@media (max-width: 420px) {
+  /* Phase + n of m, and nothing else — the bar still carries the same number. */
+  .fx-done { display: none; }
+  /* The state word goes under the step name rather than squeezing it to nothing. */
+  .fx-list-item { grid-template-columns: 1.2em 1fr; }
+  .fx-list-state { grid-column: 2; }
 }
 
 /* The mode switch is navigation, not a preference, so it is the one control in the
@@ -1822,6 +1886,20 @@ body.qm-open { overflow: hidden; }
 .dropzone.small { padding: var(--sp-2); font-size: var(--fs-meta); }
 .dropzone .pick-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; font-weight: 600;
   color: var(--brand); text-decoration: underline; cursor: pointer; }
+/* Ctrl+V has no mobile equivalent and neither does drag-and-drop, so below 620px
+   the paste prose goes and the pick button becomes the zone's real control — a
+   full-width thumb target rather than an underlined word inside a sentence about
+   gestures the device cannot make. The file input is accept="image/*" with no
+   capture attribute, so the OS picker offers the camera AND the camera roll. */
+.dz-pick { display: none; }
+@media (max-width: 620px) {
+  .dz-paste { display: none; }
+  .dz-pick { display: inline; }
+  .dropzone { padding: var(--sp-2); }
+  .dropzone .pick-btn { display: block; width: 100%; min-height: 44px; text-decoration: none;
+    border: 1.5px solid var(--brand); border-radius: 8px; background: var(--link-bg); }
+  .dropzone.small .pick-btn { min-height: 40px; }
+}
 .photo-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
 .photo-grid:empty { margin-top: 0; }
 .photo-grid.small { gap: var(--sp-2); margin-top: var(--sp-2); }

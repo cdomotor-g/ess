@@ -3206,9 +3206,12 @@
     const first = list.querySelector(".menu-item");
     if (first) first.focus();
   }
-  function wireMenuKeys(toggle, list, setOpen) {
+  // `sel` names the item class, so the same keys serve both overflow menus and
+  // Focus mode's step list (.fx-list-item) — one implementation of ↑/↓/Home/End/Esc
+  // rather than a second one that drifts from it.
+  function wireMenuKeys(toggle, list, setOpen, sel) {
     list.addEventListener("keydown", (e) => {
-      const items = [...list.querySelectorAll(".menu-item")];
+      const items = [...list.querySelectorAll(sel || ".menu-item")];
       if (!items.length) return;
       const i = items.indexOf(document.activeElement);
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -3220,9 +3223,21 @@
       else if (e.key === "Escape" || e.key === "Tab") {
         // Esc closes deliberately; Tab closes because focus is leaving anyway —
         // only Esc hands focus back, so tabbing on still moves forward.
+        const wasOn = document.activeElement;
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); }
         setOpen(false);
-        if (e.key === "Escape") toggle.focus();
+        // Closing can REBUILD the surface this menu lives on — Focus mode's step
+        // list closes by re-rendering the whole step shell — which detaches both
+        // the item that had focus and the trigger remembered in this closure.
+        // Focusing a detached node drops focus on <body>: Esc would land nowhere,
+        // and Tab would resume from the top of the page instead of from here. Ids
+        // survive a rebuild where nodes do not, so the trigger is looked up again.
+        const live = document.contains(toggle) ? toggle
+          : (toggle.id ? document.getElementById(toggle.id) : null);
+        // Esc always goes back to the trigger. Tab only needs it when the close
+        // pulled the ground out from under focus — the overflow menus do not
+        // rebuild, so Tab there behaves exactly as it always has.
+        if (live && (e.key === "Escape" || !document.contains(wasOn))) live.focus();
       }
     });
     toggle.addEventListener("keydown", (e) => {
@@ -3265,12 +3280,19 @@
   function setPhotoTools(src, btn, tools, open, focus) {
     if (open && !tools.childElementCount) {
       const input = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
-      const pickBtn = el("button", { type: "button", class: "pick-btn" }, "choose a file");
+      // Two labels, one button. Drag, drop and Ctrl+V do not exist on a phone, so
+      // below 620px the stylesheet drops the paste prose and promotes this to a
+      // full-width thumb target — the pick control is the only one that works on
+      // every device, and it is never the small print. (Same reasoning, and the
+      // same classes, as the station-photo zone in index.html.)
+      const pickBtn = el("button", { type: "button", class: "pick-btn" },
+        el("span", { class: "dz-paste" }, "choose a file"),
+        el("span", { class: "dz-pick" }, "📷 Take or choose a photo"));
       // id: a photo landing re-renders the card (or, in Focus, the whole step), and
       // the zone is where the keyboard was — an id is what lets it be handed back.
       const zone = el("div", { class: "dropzone small", id: `drop-${src.id}`, tabindex: "0",
         "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
-        "📷 Drag & drop, paste, or ", pickBtn);
+        el("span", { class: "dz-paste" }, "📷 Drag & drop, paste, or "), pickBtn);
       wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
       tools.append(zone, input);
       if (WIKI_IMAGE_CATEGORIES.has(src.category)) tools.append(renderWikiImageRow(src));
@@ -5580,16 +5602,36 @@
     if (!step) return;
 
     const done = steps.filter((s) => s.state === "done").length;
-    const heading = el("h2", { class: "fx-title", id: "fx-title", tabindex: "-1" }, step.title);
+    // Every arrival lands focus on this heading, so its ACCESSIBLE NAME is the
+    // whole of what a screen reader says about the new screen — and where you are
+    // belongs in it. Hence the hidden prefix: the announcement reads "Step 14 of
+    // 41 — Queensland Globe", one utterance, on the one event that means the
+    // screen changed.
+    //
+    // Deliberately NOT an aria-live region. Live and focus together announce the
+    // same step twice, and a live region on a node this mode re-renders on every
+    // keystroke would read the step's name over the top of the operator's own
+    // typing. Moving focus is already the announcement; nothing else has to fire.
+    const heading = el("h2", { class: "fx-title", id: "fx-title", tabindex: "-1" },
+      el("span", { class: "sr-only" }, `Step ${at + 1} of ${steps.length} — `),
+      step.title);
 
+    fxSpokenNow = new Set(); // …filled by whichever notices this render shows
+    const chrome = renderFocusChrome(step, steps, at, done);
     root.append(
       el("div", { class: "fx-shell" },
         renderFocusIntro(),
         renderFocusBatchOffer(),
         renderFocusFlash(),
-        renderFocusChrome(step, steps, at, done),
-        renderFocusList(steps, at),
-        el("div", { class: "fx-step", "data-kind": step.kind, "data-state": step.state },
+        chrome,
+        renderFocusList(steps, at, chrome.querySelector("#fx-list-btn")),
+        // `is-entering` is what the step transition hangs off, and it is set only
+        // on a navigation. This shell is rebuilt on every background re-render —
+        // every keystroke in a note — and a transition on those would flicker the
+        // whole step under the operator's own typing. (Suppressed entirely under
+        // prefers-reduced-motion; see the stylesheet.)
+        el("div", { class: "fx-step" + (o.focus === false ? "" : " is-entering"),
+          "data-kind": step.kind, "data-state": step.state },
           renderFocusReturn(step),
           el("p", { class: "fx-kicker" },
             el("span", { class: "fx-kind" }, step.kind === "output" ? "Review" : "Do"),
@@ -5597,6 +5639,7 @@
           heading,
           el("div", { class: "fx-body" }, focusStepBody(step))),
         renderFocusNav(step, steps, at)));
+    fxSpokenPrev = fxSpokenNow;
 
     // ONE primary action per step. Continue is it on most of them — but a step
     // whose body carries its own filled button (the picker's Load site, the step-3
@@ -5679,7 +5722,25 @@
   let focusFlash = null;
   function renderFocusFlash() {
     if (!focusFlash) return null;
-    return el("p", { class: "fx-flash", role: "status" }, focusFlash);
+    return el("p", { class: "fx-flash", role: fxLive(`flash:${focusFlash}`) }, focusFlash);
+  }
+
+  /* A live region announces itself whenever it APPEARS — and this shell is rebuilt
+     from scratch on every background re-render, which in Focus means every
+     keystroke in a note, every map that lands and every result an agent writes.
+     A notice that merely persists across those renders is a brand new node in a
+     brand new live region each time, so a screen reader reads it again on each
+     one: "The assistant answered 19 of the 23 sources" over and over, under the
+     operator's own typing.
+
+     So a notice is live on the render that first shows it and inert on every
+     render after, keyed by its content — a DIFFERENT flash is a different message
+     and does get announced. Anything that stopped showing is dropped from the set,
+     so a notice that comes back later is announced again, correctly. */
+  let fxSpokenPrev = new Set(), fxSpokenNow = new Set();
+  function fxLive(key) {
+    fxSpokenNow.add(key);
+    return fxSpokenPrev.has(key) ? null : "status";
   }
 
   const FOCUS_STATE_LABEL = {
@@ -5710,7 +5771,7 @@
   function renderFocusBatchOffer() {
     const n = focusBatchOffer;
     if (!n) return null;
-    return el("div", { class: "fx-handoff", role: "status" },
+    return el("div", { class: "fx-handoff", role: fxLive(`batch:${n}`) },
       el("p", { class: "fx-handoff-lead" },
         `A batch of ${n} site${n === 1 ? "" : "s"} is loaded, and the first one is open here.`),
       el("p", { class: "fx-lede" },
@@ -5735,39 +5796,91 @@
     return el("div", { class: "fx-chrome" },
       el("p", { class: "fx-where" },
         el("span", { class: "fx-phase", "data-phase": step.phase }, FOCUS_PHASE[step.phase] || ""),
-        el("span", { class: "fx-of", role: "status" }, `Step ${at + 1} of ${steps.length}`)),
+        // No role="status" on either of these. The chrome is rebuilt by every
+        // background re-render — a keystroke in a note, a map landing, an agent
+        // writing a result — and as a live region it announced "Step 14 of 41"
+        // over the top of each one. Arrival is announced once, by focus moving to
+        // the heading, which is the only moment the step actually changed.
+        el("span", { class: "fx-of" }, `Step ${at + 1} of ${steps.length}`),
+        // Progress in words beside the bar. The bar is aria-hidden — it has no
+        // accessible name to give and reads as nothing in greyscale — so the
+        // number it draws is also said plainly, which is what a screen reader and
+        // a greyscale screen both get.
+        el("span", { class: "fx-done" }, `${done} done`)),
       el("span", { class: "cs-track fx-track", "aria-hidden": "true" },
         el("span", { class: "cs-fill", style: `width:${pct}%` })),
       el("button", {
         type: "button", class: "btn tertiary fx-list-btn", id: "fx-list-btn",
         "aria-expanded": focusListOpen ? "true" : "false", "aria-controls": "fx-list",
         title: "Every step, in order, with what each one still needs — and a jump to any of them",
-        onclick: () => { focusListOpen = !focusListOpen; renderFocus({ focus: false }); },
-      }, `All steps ${focusListOpen ? "▴" : "▾"}`));
+        onclick: () => toggleFocusList(),
+      }, `All steps ${focusListOpen ? "▴" : "▾"}`),
+      // The shortcuts, where the movement they drive is described. Hidden on
+      // narrow screens by the stylesheet — a phone has no Alt to press, and the
+      // chrome there collapses to phase + n of m.
+      el("p", { class: "fx-keys" },
+        el("kbd", {}, "Alt"), el("span", { "aria-hidden": "true" }, "+"), el("kbd", {}, "→"),
+        el("span", { class: "fx-keys-what" }, "continue"),
+        el("kbd", {}, "Alt"), el("span", { "aria-hidden": "true" }, "+"), el("kbd", {}, "←"),
+        el("span", { class: "fx-keys-what" }, "back")));
+  }
+
+  // Opening the step list puts the keyboard IN it, on the entry for where you are
+  // — a menu that opens with focus left on its trigger has nothing for ↑/↓ to
+  // walk, which makes it a mouse-only list with menu keys bolted on.
+  function toggleFocusList(open) {
+    focusListOpen = open === undefined ? !focusListOpen : !!open;
+    renderFocus({ focus: false }); // …which puts focus back on the trigger
+    if (!focusListOpen) return;
+    const list = $("#fx-list");
+    const here = list && (list.querySelector(".fx-list-item.is-here") || list.querySelector(".fx-list-item"));
+    if (here) here.focus();
   }
 
   // Focus mode's answer to the nav rail, and what keeps "the tool proposes an
   // order, it does not impose one" true: every step, its state, and a jump.
-  function renderFocusList(steps, at) {
-    const list = el("div", { class: "fx-list", id: "fx-list" });
+  // `toggle` is handed in rather than looked up: this runs while the shell is
+  // still being built, so the button it belongs to is not in the document yet.
+  function renderFocusList(steps, at, toggle) {
+    // A real menu, by the same contract the ⋯ menus keep: ↑/↓ walk it, Home/End
+    // jump the ends, Esc closes and hands focus back to the trigger, Tab closes
+    // because focus is leaving anyway. Forty-one entries is exactly the length at
+    // which arrowing beats tabbing.
+    const list = el("div", { class: "fx-list", id: "fx-list", role: "menu", "aria-label": "All steps" });
     list.hidden = !focusListOpen;
     if (!focusListOpen) return list;
-    let phase = null;
+    let phase = null, group = null, n = 0;
     steps.forEach((s, i) => {
       if (s.phase !== phase) {
         phase = s.phase;
-        list.append(el("p", { class: "fx-list-phase" }, FOCUS_PHASE[phase] || phase));
+        // role="group" with the phase heading as its label: a menu whose children
+        // are anything other than menuitems is one a screen reader may flatten or
+        // skip, and the phase names are worth keeping.
+        const label = el("p", { class: "fx-list-phase", id: `fx-ph-${++n}` }, FOCUS_PHASE[phase] || phase);
+        group = el("div", { class: "fx-list-group", role: "group", "aria-labelledby": label.id }, label);
+        list.append(group);
       }
       const here = i === at;
-      list.append(el("button", {
-        type: "button", class: "fx-list-item" + (here ? " is-here" : ""),
+      group.append(el("button", {
+        // id: the list stays open across background re-renders — a map landing, an
+        // agent writing a result — and each one rebuilds this button. Without an id
+        // renderFocus has no way to hand focus back, so an operator arrowing down
+        // the list at the moment a map resolved was dropped onto <body>.
+        type: "button", role: "menuitem", id: `fxli-${s.id}`,
+        class: "fx-list-item" + (here ? " is-here" : ""),
         "data-state": s.state, "aria-current": here ? "step" : null,
-        onclick: () => focusGoTo(s.id),
+        // Selecting closes, as a menu does — and so the jump ends with focus on
+        // the new step's heading rather than stranded in a list about a step the
+        // operator has already left.
+        onclick: () => { focusListOpen = false; focusGoTo(s.id); },
       },
         el("span", { class: "fx-list-mark", "aria-hidden": "true" }, FOCUS_STATE_MARK[s.state] || "·"),
         el("span", { class: "fx-list-name" }, s.title),
         el("span", { class: "fx-list-state" }, FOCUS_STATE_LABEL[s.state] || "")));
     });
+    // Wired per render because the list is rebuilt per render — these are fresh
+    // nodes every time, so there is nothing to accumulate listeners on.
+    if (toggle) wireMenuKeys(toggle, list, (open) => toggleFocusList(open), ".fx-list-item");
     return list;
   }
 
@@ -5883,7 +5996,7 @@
   function focusIntroSeen() { try { return localStorage.getItem(LS_FOCUS_SEEN) === "1"; } catch (_) { return true; } }
   function renderFocusIntro() {
     if (focusIntroSeen()) return null;
-    return el("p", { class: "fx-intro", role: "status" },
+    return el("p", { class: "fx-intro", role: fxLive("intro") },
       el("span", {},
         "This is ", el("b", {}, "Focus"), " — one step at a time, with the report built into the flow. ",
         "The full workbench is one click away, top right, whenever you want it."),
@@ -5932,6 +6045,51 @@
     focusGoTo(steps[next].id);
   }
 
+  /* --------------------------------------------------------------- the shortcuts
+     Documented on the step chrome, because a shortcut nobody is told about is not
+     an accessibility feature.
+
+     Alt is the modifier, and the choice is forced: this surface is full of
+     textareas, selects and a four-way radiogroup, so a bare arrow belongs to the
+     caret and to the roving tabindex, and Enter belongs to whatever control has
+     focus. Neither can be taken from them.
+
+     The keys press the buttons rather than reimplementing them, so Alt+→ cannot
+     drift from what Continue does — the sign-off it records, the errand it
+     returns from, the wrap-around on the last step all come along for free, and a
+     disabled Back is simply never pressed. */
+  const DIALOGS = ".qm-overlay, .bb-overlay, .rp-overlay, .lb-overlay";
+  // Is one of the app's four modals up? Each conceals itself differently — a
+  // `hidden` attribute, a .show class, or both — so the question is asked of the
+  // layout instead of any one of those flags. Same test trapFocus uses.
+  const dialogOpen = () => $$(DIALOGS).some((n) => n.getClientRects().length);
+
+  function wireFocusKeys() {
+    document.addEventListener("keydown", (e) => {
+      if (!focusLive() || e.defaultPrevented) return;
+      // A modal is its own world, with its own Escape and its own Tab trap.
+      // Moving the step underneath one would strand the operator in a dialog
+      // belonging to a step they are no longer on.
+      if (dialogOpen()) return;
+      if (e.key === "Escape") {
+        if (!focusListOpen) return;
+        e.preventDefault();
+        // Focus is left exactly where it is. Escape from INSIDE the list is
+        // wireMenuKeys' — it stops propagation before this runs, and hands focus
+        // back to the trigger. This branch is the other case, where the list is
+        // merely open and the operator is typing somewhere else entirely.
+        toggleFocusList(false);
+        return;
+      }
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const btn = $(e.key === "ArrowRight" ? "#fx-next" : "#fx-back");
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      btn.click(); // …which navigates, which moves focus to the new step's heading
+    });
+  }
+
   // ------------------------------------------------------------- the step bodies
   // Every step id in the graph resolves to a body now. The lede-plus-handoff
   // fallback at the foot of focusStepBody stays as the safety net for a step id
@@ -5940,7 +6098,11 @@
   const FOCUS_LEDE = {
     "site:details": "Filled in from the Bureau station list. Read it back — it is usually right — then set the date this assessment was made.",
     "site:maps": "Two satellite locators are stitched for every site: the close surrounds, and the region around them. Check they show the place you mean.",
-    "site:photos": "Optional. Paste a screenshot with Ctrl+V, drag an image in, or choose a file — they carry through to the report. Continue past this if you have none.",
+    // Leads with the gesture every device has. Ctrl+V and drag-and-drop are named
+    // second and qualified, because on the phone this step is read on they do not
+    // exist — and an instruction that opens with one of them reads as "you cannot
+    // do this here".
+    "site:photos": "Optional. Take a photo or choose one from this device — or, at a desktop, paste a screenshot with Ctrl+V or drag an image in. They carry through to the report. Continue past this if you have none.",
     "out:identity": "The front page of the deliverable, as it now reads. Nothing further is asked of you here — check it says the right site, and tick it off.",
     "checks:auto": "Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.",
     "checks:prompt": "One self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research the rest.",
@@ -6281,8 +6443,11 @@
     // opens the workbench's own handler, from here, with no trip through the
     // other mode. They are alternatives to "go and look", never a second filled
     // button competing with it.
+    // id: capturing a map writes a finding, which repaints this step while the
+    // map is still open — so the button that opened it has to be findable again
+    // by the time the map closes and hands focus back. See restoreFocusAfterDialog.
     if (src.id === "qld-globe" && state.site.state === "QLD")
-      tools.append(el("button", { type: "button", class: "btn secondary",
+      tools.append(el("button", { type: "button", class: "btn secondary", id: "fx-open-qldmap",
         onclick: () => openQldGlobeMap(src) }, "Open site map"));
     const runner = apiRunnerFor(src);
     // id: the runner paints its progress into #run-… / #res-… by document lookup.
@@ -7657,6 +7822,11 @@
   function trapFocus(dialog) {
     if (!dialog) return () => {};
     const opener = document.activeElement;
+    // Ids survive a re-render; nodes do not. A dialog can rebuild the surface that
+    // opened it while it is still up — capturing a Queensland Globe map writes a
+    // finding, which repaints the very step carrying "Open site map" — and by the
+    // time the dialog closes the opener is a detached node.
+    const openerId = opener && opener.id;
     const onKey = (e) => {
       if (e.key !== "Tab" || e.defaultPrevented) return;
       // Re-read every time: these dialogs grow and shrink as you use them (the
@@ -7679,10 +7849,23 @@
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
-      // Not if the opener has been re-rendered away underneath us — focusing a
-      // detached node silently drops focus on <body>, the exact bug this fixes.
-      if (opener && document.contains(opener) && opener.focus) opener.focus();
+      restoreFocusAfterDialog(opener, openerId);
     };
+  }
+
+  // Where focus goes when a dialog closes. In order: the opener, if it is still
+  // there; the node that replaced it, if it was re-rendered underneath; and
+  // failing both, the heading of the step the operator is standing on.
+  //
+  // Never nothing. Focusing a detached node silently drops focus on <body>, which
+  // is the same as losing it — the next Tab restarts from the top bar and a screen
+  // reader is left with no idea where it is. That was the whole point of the trap.
+  function restoreFocusAfterDialog(opener, openerId) {
+    if (opener && document.contains(opener) && opener.focus) { opener.focus(); return; }
+    const again = openerId && document.getElementById(openerId);
+    if (again && again.focus) { again.focus(); return; }
+    const heading = focusLive() && $("#fx-title");
+    if (heading) heading.focus();
   }
   window.ESSFocusTrap = trapFocus;
 
@@ -8700,6 +8883,7 @@
     syncModeButton();
     const modeBtn = $("#btn-mode");
     if (modeBtn) modeBtn.addEventListener("click", () => setUiMode(focusLive() ? "workbench" : "focus"));
+    wireFocusKeys();
 
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");
