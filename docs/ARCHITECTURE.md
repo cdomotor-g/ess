@@ -376,9 +376,9 @@ It is a presentation, not a second application:
   Continue has usually just settled the very source it would be retracing to.
 - **Nothing is trapped.** The step list (`All steps ▾`) shows every step with its
   state and jumps to any of them, `Skip for now` is always available, and no step
-  is a dead end. Steps whose bodies are still being built out state what they are
-  for and hand off to the workbench with a labelled button, so no capability
-  exists in only one mode. The cross-pane jumps (`showSourceCard`,
+  is a dead end. Where a surface is reached by handing over to the workbench
+  rather than by a Focus body, that handoff is a labelled button saying what it
+  opens, so no capability exists in only one mode. The cross-pane jumps (`showSourceCard`,
   `showReportSection`) resolve to the corresponding *step* while Focus is live,
   rather than silently doing nothing against a pane that isn't built.
 - **One primary action per step.** Continue is it on most steps — but when the
@@ -504,6 +504,73 @@ show, because the step reads the record back as a confirmation and a confirmatio
 you cannot act on is a dead end. Station number and coordinates are deliberately
 *not* editable there: `siteKey()` is built from them, so changing one is a
 different site rather than a typo, and *Change site* is the route to that.
+
+##### The finish step (`focusFinishBody`)
+Where the flow ends, and the only place in Focus that looks at the whole
+assessment at once. Every section has already been reviewed on a step of its own,
+so this is a last look and a handover, not a second review — six things, in the
+order a person leaving the building uses them:
+
+1. **At a glance** — `renderFindingsGlance()`, the traffic-light card: every
+   source grouped by what it came back with, findings first, then what a human
+   still owns, then the empty searches that are good news. Each row jumps to the
+   first source with that result. Count, word *and* `.s-dot` glyph, so it survives
+   greyscale and CVD. It is a free-standing node on purpose — the report pane can
+   mount the same card at its head without a second implementation appearing.
+2. **What's still missing** — `completenessGaps(reportRollup())`, the same gap
+   definition the pane's `#report-complete` box uses, so the two can never name
+   different gaps for the same state. Every count is a jump, and in Focus
+   `showReportSection` resolves to the `sec:…` **step** that fixes it.
+3. **Unresolved warnings** — the `reportRollup()` count and a jump to the first.
+4. **Read the whole report** — `openReportPreview()`: the assembled artefact on
+   screen, built from the same `buildReportHtml()` the printer gets and wearing
+   the same `.pr-paper` stylesheet as `#print-root`, so it is a preview of the
+   deliverable rather than a third rendering of the report.
+5. **Export ▾** and 6. **Check report** — `adoptNode`s of `#report-export-menu`
+   and `#btn-check-report`. Not copies: the same two controls with the same
+   handlers, which is what makes *an export from Focus is byte-identical to an
+   export from the workbench* true by construction rather than by testing.
+
+Finishing is **never gated on completeness** — a person who has to hand something
+over now gets to, with every gap named. The one thing an export says out loud is
+an open consistency warning (`guardExport`, wrapped around all four handlers so
+both modes get it): once, per site, per session, and only when the operator went
+ahead, because a dialog that fires on all four formats in turn is one that gets
+clicked through. `#focus` is hidden in `@media print`, so Print/PDF from Focus
+produces the report and not the step chrome.
+
+##### The escape hatches
+Four surfaces are large, specialised and used on a minority of assessments.
+Building Focus equivalents for all of them would roughly double the mode, so the
+rule is **reachable, not reimplemented** — and where one genuinely needs the
+cockpit, Focus says so in words and hands over.
+
+| Surface | In Focus |
+|---|---|
+| **Queensland Globe** (`openQldGlobeMap`) | Opened straight from the Queensland Globe source step. It is already a full-screen, single-purpose surface — the most Focus-shaped thing in the tool. |
+| **PMST Excel import** (`parsePmstMnes`) | Runs in place on the EPBC source step; the parsed matters and drafted narratives flow into the threatened-section steps as they do in the workbench. |
+| **BYOK agent** (`assets/agent.js`) | `focusAgentHatch()` on `checks:auto`, shut by default — an assessment about to be worked by hand should not open with a request for a credential. The panel is *borrowed*, so there is no second copy of a control holding an API key, and its own Close folds the disclosure with it. |
+| **Batch** (`importBatch`, `createBatchFromSites`) | **Handoff** (`offerBatchHandoff` / `renderFocusBatchOffer`). |
+
+The BYOK agent needs no Focus-specific plumbing to *run*: it writes through the
+same `window.ESS` seam everything else does, `setResult` calls `refreshCard`,
+which in Focus re-renders the step, and the graph is recomputed from state on
+every one of those — so the flow reshapes itself as the answers land. What Focus
+adds is the landing: `ESS.endRun` records the three round-trip passes' receipts
+(the run *is* that sequence, done in one action) and `focusAfterRun` resumes at
+the first step that still needs a human. Both are conditional on
+`agentRunWrote` — `endRun` fires from agent.js's `finally`, so a run that fell
+over on its first turn arrives there too and must not be recorded as done.
+
+Batch is the one surface that is genuinely not Focus-shaped: it is a way of
+working *across* sites, and Focus is a way of working *through* one. Loading a
+batch therefore offers a labelled switch and says why, in the shape every handoff
+here follows — a deliberate action naming what it opens, never a silent mode
+flip. Declining is a real answer: the first site is already open in Focus, the
+batch stays loaded, and the tray is in the workbench whenever it is wanted.
+`resetFocusCursor` clears the offer, so one site's can never be read as another's.
+Returning from any handoff lands on the same step, because the cursor is per-site
+state and no handoff touches it.
 
 ### Queensland Globe site map (`assets/qldmap.js`)
 A separate, lazily-initialised module behind `window.ESSQldMap`. It draws a
