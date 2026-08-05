@@ -26,17 +26,24 @@
           <p class="tagline">Environmental Site Summary — desktop assessment assistant</p>
         </div>
       </div>
-      <!-- Maintenance and preferences — never the work. On the wide layout they sit
-           inline; below 981px the same three controls become a ⋯ popover, so the
-           header is one row and "Clear cache" (destructive, no undo) is not one
-           mis-tap away from a half-finished assessment. The same nodes move rather
-           than being duplicated, so there is still only one theme button to keep
-           in sync. -->
+      <!-- Maintenance and preferences — never the work, with ONE deliberate
+           exception: the mode switch. Focus mode is the default view, and a
+           default only works if the way out of it is visible on first sight
+           rather than filed under a preference, so it rides here as real chrome.
+
+           On the wide layout these sit inline; below 981px the same controls
+           become a ⋯ popover, so the header is one row and "Clear cache"
+           (destructive, no undo) is not one mis-tap away from a half-finished
+           assessment. The same nodes move rather than being duplicated, so there
+           is still only one theme button — and one mode button — to keep in sync. -->
       <div class="topbar-meta-wrap">
         <button class="ghost-link topbar-more" id="btn-topbar-more" type="button"
                 aria-expanded="false" aria-controls="topbar-meta"
-                aria-label="Theme, cache and documentation" title="Theme, cache and documentation">⋯</button>
+                aria-label="View, theme, cache and documentation" title="View, theme, cache and documentation">⋯</button>
         <div class="topbar-meta" id="topbar-meta">
+          <!-- The label names the DESTINATION, never the current view, so it always
+               reads as a way out. Filled by syncModeButton() in assets/app.js. -->
+          <button class="ghost-link topbar-mode" id="btn-mode" type="button">Workbench ▸</button>
           <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">Dark</button>
           <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">Clear cache</button>
           <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
@@ -67,6 +74,20 @@
      <p class="msite" id="msite"><b class="msite-name" id="msite-name"></b><span class="msite-ids" id="msite-ids"></span></p>
      <div class="mjump" id="mjump" role="group" aria-label="Jump to a category" hidden><!-- filled by JS: renderMobileNav() --></div>
    </div>
+
+   <!-- FOCUS MODE — the other way through the same tool, and the default view.
+        One column, one step per screen, and the tool proposing what comes next
+        instead of the operator choosing on every screen. It REPLACES .split
+        rather than covering it: while this region is live the two columns below
+        are emptied (their children move into detached holders in app.js), because
+        hiding a 400-control DOM behind display:none is not the same as not
+        building it, and the point of this mode is that the rest is not there.
+
+        Everything inside is built by renderFocus(); the region carries only the
+        landmark. There is no second data model behind it — each step reads and
+        writes the same state.findings / state.report the workbench does, so
+        switching mode mid-assessment is a re-render and nothing else. -->
+   <section class="focus" id="focus" aria-label="Guided assessment" hidden><!-- filled by JS: renderFocus() --></section>
 
    <div class="split">
     <!-- Narrow jump rail — the four numbered steps, then one button per visible
@@ -189,6 +210,49 @@
           <p class="dash-note">Filled in from the Bureau station record and two auto-generated locator maps. Add the site photos here — they carry through to the report.</p>
           <div class="summary-grid" id="summary-grid"><!-- filled by JS --></div>
 
+          <!-- The station record comes from the Bureau's station list and is right
+               the overwhelming majority of the time, so it reads as a confirmation
+               rather than as six input boxes. The rare correction lives behind one
+               disclosure — and only for the DESCRIPTIVE fields: the station number
+               and the coordinates are what identify the site (they key its saved
+               work), so getting one of those wrong is a different site rather than
+               a typo, and Change site is the way out of it.
+               Focus mode borrows this whole block for its site-details step, so
+               there is one implementation of the correction and not two. -->
+          <details class="sd-correct" id="sd-correct">
+            <summary>Correct these details</summary>
+            <p class="dash-note">Overrides the station record for this assessment only — nothing is written back to the station list. The station number and coordinates identify the site; if one of those is wrong, use <b>Change site</b> instead.</p>
+            <div class="sd-correct-grid">
+              <div class="grow">
+                <label class="field-label" for="fld-site-name">Station name</label>
+                <input id="fld-site-name" type="text" autocomplete="off" />
+              </div>
+              <div>
+                <label class="field-label" for="fld-site-wmo">WMO number</label>
+                <input id="fld-site-wmo" type="text" autocomplete="off" />
+              </div>
+              <div>
+                <!-- The one correction with consequences: the state decides which
+                     sources apply at all, so changing it rebuilds the collection
+                     list (and, in Focus, the whole step graph). -->
+                <label class="field-label" for="fld-site-state">State / territory</label>
+                <select id="fld-site-state">
+                  <option value="">—</option>
+                  <option>QLD</option><option>NSW</option><option>VIC</option><option>TAS</option>
+                  <option>ACT</option><option>WA</option><option>NT</option><option>SA</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label" for="fld-site-group">Delivery group</label>
+                <input id="fld-site-group" type="text" autocomplete="off" />
+              </div>
+              <div class="grow">
+                <label class="field-label" for="fld-site-facility">Facility</label>
+                <input id="fld-site-facility" type="text" autocomplete="off" placeholder="e.g. AWS; rain gauge" />
+              </div>
+            </div>
+          </details>
+
           <!-- Two locator maps (hyper-local + greater-region), each with its own
                controls + figure, built dynamically by assets/app.js. Both are
                auto-populated and carried through to the report &amp; export. -->
@@ -206,7 +270,14 @@
           </div>
           <div class="photo-section">
             <label class="field-label">Station photos <span class="opt">(carried through to the report)</span></label>
-            <div class="dropzone" id="site-dropzone" tabindex="0" aria-label="Add station photo — paste, drag and drop, or choose a file">📷 Drag &amp; drop or paste (Ctrl/Cmd+V) an image here, or <button type="button" class="pick-btn">choose a file</button></div>
+            <!-- Drag, drop and Ctrl+V have no equivalent on a phone, so the pick
+                 button is the one affordance that works everywhere and it is never
+                 the small print: below 620px the stylesheet drops the paste prose
+                 and promotes the button to a full-width, thumb-sized control.
+                 accept="image/*" with NO capture attribute is deliberate — capture
+                 forces the camera and takes the camera roll away, and an existing
+                 photo of the station is the commoner case. -->
+            <div class="dropzone" id="site-dropzone" tabindex="0" aria-label="Add station photo — paste, drag and drop, or choose a file"><span class="dz-paste">📷 Drag &amp; drop or paste (Ctrl/Cmd+V) an image here, or </span><button type="button" class="pick-btn"><span class="dz-paste">choose a file</span><span class="dz-pick">📷 Take or choose a photo</span></button></div>
             <input id="site-photo-input" type="file" accept="image/*" multiple hidden />
             <div class="photo-grid" id="site-photo-grid"></div>
           </div>
@@ -590,7 +661,10 @@
   </div>
 
   <!-- report render target for export/print -->
-  <div id="print-root" aria-hidden="true"></div>
+  <!-- Where doPrint() builds the report for the printer. `pr-paper` carries the
+       report's own stylesheet, and Focus mode's on-screen "Read the whole report"
+       preview wears the same class, so the two can never render it differently. -->
+  <div id="print-root" class="pr-paper" aria-hidden="true"></div>
 
   <!-- Queensland Globe site map. Loaded before app.js so the button on the
        Queensland Globe card can hand straight off to it; the Esri bundle it

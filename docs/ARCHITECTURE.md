@@ -304,14 +304,312 @@ Vanilla JS, no dependencies, no build. It:
   small **text** key (findings text, report, prefs — rewritten on every keystroke)
   and a larger `…:img` key holding the photos + satellite map data URLs (rewritten
   only when images change). This keeps note editing fast on image-heavy sites;
-  legacy single-key saves are migrated to the split layout on first edit;
+  legacy single-key saves are migrated to the split layout on first edit. The
+  text key's `ui` block carries the per-site presentation state: `ui.groups`
+  (category collapses), `ui.filter`, `ui.flow` (how far step 3 got) and
+  `ui.focus.step` (Focus mode's cursor — see below);
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three. The consistency warnings are **not** written
-  into the two handover artefacts (Print/PDF, HTML): they address the operator
-  about their own draft, and the recipient cannot act on them. They stay
-  on-screen, in the header count, in the *Check report* prompt and in the JSON
-  (working state, not a document), and `confirmExportWithWarnings()` guards both
-  artefact paths so unresolved ones can't leave unnoticed.
+  into the handover artefacts (Print/PDF, HTML): they address the operator about
+  their own draft — *"reconsider the statement"* — and the recipient cannot act
+  on them. They stay on-screen, in the header count, on the Focus section step,
+  in the *Check report* prompt and in `sections[].warnings` in the JSON (working
+  state that round-trips back into the tool, not a document); `guardExport` is
+  what stops unresolved ones leaving unnoticed.
+
+### Focus mode — the second presentation (`#focus`, `assets/app.js`)
+The split view described above is a **cockpit**: everything reachable, nothing
+hidden, the operator choosing what to look at next. That suits some people
+exactly; for others the problem is not how much is on screen but that they have
+to decide what to do next on every screen. **Focus mode** is a second route
+through the same tool — one column, one step per screen, and the tool proposing
+the order. It is the **default view**; the workbench is one labelled click away
+in the top bar (`#btn-mode`, label always names the destination), and the choice
+is remembered per browser in `ess-workbench:v1:mode`.
+
+It is a presentation, not a second application:
+
+- **One state, two presentations.** Every step reads and writes the same
+  `state.findings` / `state.report`, the same `localStorage` schema and the same
+  `ess-findings/1` export. There is no per-mode data and nothing to migrate.
+  `setUiMode` calls `flushSave()` before either switch, so an in-flight debounced
+  keystroke is written before the DOM it was typed into goes away — switching
+  mid-edit is lossless in both directions.
+- **The other mode is not merely hidden.** While Focus is live the two columns
+  are *emptied*: their children move into detached holders (`detachWorkbench`),
+  and the dashboard and report-section regions — the purely derived ones — are
+  dropped entirely and rebuilt from state on the way back. `display:none` still
+  builds and keeps ~400 controls, which is the cost this mode exists to avoid.
+  Code that *reads* a stashed control rather than rendering into one (chiefly
+  `sourcesForSite()` reading `#toggle-manual-internal`) keeps working because a
+  document-rooted `$`/`$$` lookup that misses falls through to the holders.
+  A step whose body is already exactly a workbench control **borrows the node**
+  (`adoptNode`) rather than growing a second copy — the site picker is the first.
+- **The step graph is derived, never stored** (`focusSteps()`, pure). Each step
+  is `{ id, phase, kind, ref, state }` — `id` stable across recomputation
+  (`src:qld-globe`, `sec:invasive_plants`), `phase` one of *site · checks ·
+  sources · report · finish*, `kind` `input` or `output`, `state` one of *done ·
+  needs-you · skipped · blocked · not-reached*. Because it is recomputed on every
+  render, re-routing a card, importing a batch or applying an agent reply
+  reshapes the flow immediately and correctly.
+- **The interleave** is what makes this more than a wizard. Every card resolves
+  to exactly one report section via `targetSectionOf()`, so the order is a
+  grouping: *for each report section, in proforma order, its sources and then the
+  section itself*. Within a section the source steps use the dashboard's own
+  `sortCards()` ordering. The operator reviews each output while the evidence is
+  still in their head and reaches the end with a finished report rather than a
+  finished checklist.
+- **The gate.** A section step unlocks (`blocked` → `needs-you`) when every
+  source routed to it has a *recorded status*, not a sign-off: `manual` and
+  `failed` are final answers from the operator's point of view, and gating on
+  sign-off would strand the flow on exactly the sources that can never be closed
+  from a desk. "Still needs you" keeps its one definition (`isOutstanding`) and
+  is what a step's own state reports — so a manual source is simultaneously *an
+  answer the section can be written from* and *still on somebody's list*, which
+  is the truth. A section with no sources routed to it still gets a step, marked,
+  and never blocks progress.
+- **Only the cursor persists**, per site, as the step's **id** in `ui.focus.step`
+  — never an index, because the list re-orders as work lands. When the step it
+  names disappears, `resolveFocusCursor` lands on the nearest *earlier* survivor
+  rather than throwing the operator back to the start. Skips are session-only:
+  "skip" is *not now*, not a decision about the assessment.
+- **Settled work is not presented.** A source step is `done` once it is signed off
+  *or* answered and not outstanding, and forward movement (`Continue`, `Skip for
+  now`) steps over those rather than showing a screen that asks nothing — twelve
+  of a typical site's sources come back settled from the automated round trip, and
+  re-walking them is the volume this mode exists to answer. `Back` deliberately
+  does **not** skip: it is the retracing motion, and by the time it is pressed
+  Continue has usually just settled the very source it would be retracing to.
+- **Nothing is trapped.** The step list (`All steps ▾`) shows every step with its
+  state and jumps to any of them, `Skip for now` is always available, and no step
+  is a dead end. Where a surface is reached by handing over to the workbench
+  rather than by a Focus body, that handoff is a labelled button saying what it
+  opens, so no capability exists in only one mode. The cross-pane jumps (`showSourceCard`,
+  `showReportSection`) resolve to the corresponding *step* while Focus is live,
+  rather than silently doing nothing against a pane that isn't built.
+- **One primary action per step.** Continue is it on most steps — but when the
+  step's *body* carries a visible filled button (the pass this step is, the
+  picker's own action), Continue steps back to `secondary`. The borrowed node's
+  own classes are never touched; `syncFlowSteps` owns those and the workbench
+  wants them back exactly as they were.
+- **Arriving is one announcement, and it is the only one.** Every navigation moves
+  focus to the step's `<h2>`, and the heading carries an `sr-only` prefix so its
+  accessible *name* is "Step 14 of 41 — Queensland Globe". There is deliberately no
+  `aria-live` on it: focus and live together say the same step twice. The shell is
+  rebuilt by every background re-render — a keystroke in a note, a map landing, an
+  agent writing a result — so a notice that merely *persists* across renders is a
+  brand-new live region each time and gets read out again; `fxLive()` marks a
+  notice live on the render that first shows it and inert on the ones after, keyed
+  by its content. Progress is stated in words (`.fx-done`) beside the bar, which is
+  `aria-hidden`. Step state is a glyph *and* a word, never colour alone.
+- **Focus survives the re-render, because ids do.** Nothing in this mode may leave
+  focus on `<body>` — that is the same as losing it, and it is the failure a step
+  view invites, since the screen is replaced under the operator constantly. Every
+  control that can hold focus has a stable id (`fxli-src:qld-globe`,
+  `fx-open-qldmap`, …), which is what `renderFocus`'s caret hand-back and
+  `restoreFocusAfterDialog` both key on: a dialog that rebuilt its own opener while
+  it was up still finds the replacement, and failing that lands on the step
+  heading. `wireMenuKeys` re-resolves its trigger for the same reason.
+- **Keyboard.** `Alt+→` / `Alt+←` *press* `#fx-next` / `#fx-back` rather than
+  reimplementing them, so a shortcut can never drift from what Continue actually
+  does — the sign-off, the errand return, the last-step wrap all come with it. They
+  are inert while any modal is up (`dialogOpen()`). Alt is forced by the surface:
+  it is full of textareas, selects and a roving-tabindex radiogroup, so bare arrows
+  and Enter belong to the controls. The step list is a real `role="menu"`, one
+  `role="group"` per phase, sharing `wireMenuKeys` with the overflow menus.
+- **Narrow screens and motion.** Below 620px the chrome collapses to phase + *n of
+  m*, the nav footer goes `position: sticky` (never `fixed` — sticky keeps its
+  space in the flow, so it cannot cover the last control), every footer button is
+  ≥44px, and the photo zones drop their paste prose for a full-width pick control,
+  since Ctrl+V and drag-and-drop do not exist there. Tested at 360px. The step
+  transition is gated twice: on `prefers-reduced-motion: no-preference`, and on an
+  `is-entering` class that `renderFocus` sets only for a real navigation — without
+  the second gate a keystroke in a note would re-run it on every character.
+
+#### The step bodies (`FOCUS_BODY`, `focusStepBody`)
+A body is written once and used by both modes wherever that is possible at all,
+which in practice means one of three shapes:
+
+1. **Borrow the workbench's own node** (`adoptNode`), for a control that already
+   does exactly the step's job — the site picker, the correction disclosure
+   (`#sd-correct`), the date/maintenance fields, the two map sections
+   (`#site-maps`), the photo dropzone (`.photo-section`), and each step-3 pass's
+   `.flow-do`. Every listener, every piece of state-syncing and every receipt
+   comes with it, so a run in Focus *is* a run in the workbench; there is no
+   synchronisation routine because there is nothing to synchronise. What is
+   borrowed goes home on the next render or mode switch (`releaseAdoptedNodes`).
+   A borrowed node can be re-styled for the step it is standing in — the map
+   sections come square and side by side, and their tuning controls fold away
+   behind one button, because at rest that step asks *one* question.
+2. **Share the renderer**, where the report pane and a step must show the same
+   thing but cannot share a node (the pane isn't built while Focus is live):
+   `reportIdentityText()`, `reportMapsBlock()`, `reportPhotosBlock()` and
+   `sectionReviewToggle()` are called by `renderReport()`/`renderReportHeader()`
+   and by the `out:identity` and `sec:…` steps alike. A shared renderer may need
+   the *container* as well — `refreshSection`, `renderReportWarnings` and
+   `syncBioDetail` all take a `box` to find `.r-warns` / `#bio-detail` in — so a
+   step body passes itself, and only one mode's copy of either is ever live.
+3. **Read state directly**, for text — `stationRecordRows()` is the station
+   record for the metadata grid and for the step's read-back both.
+
+##### The source step (`focusSourceBody`)
+The headline step, and where most of an assessment is spent. It is shape 2 taken
+as far as it goes: `renderStatusControl`, `renderPhotoBlock`, `renderWikiImageRow`,
+`renderIncludeRow`/`renderIncludeTarget`, `renderCardMenu` and `paintResult` are
+the card's own renderers, so a source answered in Focus *is* answered in the
+workbench and the other way round — there is nothing to synchronise. Two of them
+take one option for this caller: `renderStatusControl(…, { open: true })` holds
+the four-way picker open at every status (on a screen of its own the answer is the
+whole question, and a Manual source collapsing to a chip would ask for a click
+before it could be changed), and `renderIncludeRow(…, { signoff: false })` drops
+the sign-off pill, because here the step's **Continue** records it.
+
+The card's sequence — *identity → what came back → your answer → evidence → into
+the report → done* — is kept exactly. What changes is that the card **is** the
+screen, so the compaction a column of 23 forces comes off: the `ⓘ` disclosure's
+"what to look for" is open prose, the finding is shown in full rather than clamped
+to four lines, and the evidence zone opens when the result is `Found` (via the
+same `CARD_OPEN.photos` set the card uses, so a zone opened in either mode is open
+in both). The `⋯` stays a `⋯` — those really are occasional — and it carries
+Focus's escape hatch to the full card. Specialist tools (Queensland Globe's site
+map, the PMST Excel import, the live API checks) are invoked from the step itself;
+the runners paint into `#run-…`/`#res-…` by document lookup, and only one mode's
+copy of those ids is ever in the document.
+
+Two mechanisms make this work from the app's existing call sites. `refreshCard(id)`
+re-renders the current **step** when Focus is live — every mutation in the app
+already calls through it, so both modes repaint from the same places. And a
+background re-render now *carries the caret across* (`readCaret`/`writeCaret`)
+instead of skipping itself to defend it: a screenshot pasted while the note has
+focus has to appear, or the paste reads as having done nothing.
+
+##### The report section step (`focusSectionBody`)
+The other half of the interleave, and the half that makes this more than a wizard.
+The operator has just worked through every source routed to this section; the
+evidence is still in their head. The step asks the one question worth asking at
+that moment — *here is what the report now says about Invasive Plants, is that
+right?* — in five parts, in the order a person answers them:
+
+1. **What this section concludes** — the standardized statement (`suggestChoice`
+   pre-suggests it from the evidence), and for Biosecurity the derived declaration
+   text (`syncBioDetail`, painted into the same `#bio-detail` id the report pane
+   uses; only one mode's copy is ever in the document).
+2. **⚠ Anything inconsistent** — `sectionWarnings`, inline, live on every keystroke
+   and every change of the statement (`refreshSection`). **This is the step those
+   warnings were written for.** In the workbench they sit in the right pane, where
+   an operator concentrating on collection may never look; here they are on screen
+   at the moment the operator is deciding, which is the only moment they can act on
+   them. They remain screen-only and never reach the exported artefact.
+3. **The detail** — the free-text note, with **Insert suggested detail**
+   (`sectionNarrative`) drafting from this section's evidence plus
+   `statements.json`. It appends below whatever is written; it has never
+   overwritten and must not start.
+4. **What it rests on** — `renderSectionEvidence`, unchanged: *Findings* at full
+   weight, *Checked, nothing found* on one line, *⚠ Not yet checked* as a caveat
+   strip. A collapsed entry's photographs are not collapsed with it.
+5. **Reviewed ✓** — `sectionReviewToggle`, the section's own tick. The same flag,
+   the same setter and the same `reportRollup()` tally as the report pane's
+   checkbox, and deliberately *not* the card-level sign-off.
+
+Four rules the shape follows from:
+
+- **The errand.** The caveat strip — *three of these sources were never checked* —
+  is a prompt to go and check one, and it is only worth putting on the step if
+  coming back is free. A jump that starts on a section step arms `focusReturn`
+  (in `showSourceCard`, so every route in — an evidence name, the caveat strip's
+  button, the waiting list — gets it for nothing). The step it lands on says where
+  it came from and its **Continue** is labelled with the way home; every other
+  navigation clears it, so the offer can never outlive the errand.
+- **A re-opened gate loses nothing.** A section step's `done` is `reviewed && gate`,
+  so a source reset to *Not checked* after sign-off re-locks the step — but the
+  statement, the note and the tick are recorded state and the graph never takes
+  them back. The step says it needs another look, in amber, above work that is all
+  still there.
+- **Nothing is trapped**, here too: a section reached before its gate opens is not
+  a form the operator is locked out of. The gate is about *ordering*, so an open
+  gate says what is outstanding and offers the errand, and the controls stay
+  usable below it.
+- **An empty section is one screen, not a blank form.** A section no source on this
+  site feeds says exactly that, and its **Continue** records the review — which is
+  what keeps `finish:export` reachable without a form that asks nothing.
+
+Two consequences worth stating. The report's **front page** (`#rsec-identity`,
+`state.report.identity`) became a real report section with its own Reviewed tick,
+because a Focus step needed one and a control that exists in only one mode is not
+allowed; the locator maps and the station photographs were two headed blocks
+before and are its two halves now. And the **station record is correctable** —
+name, WMO, delivery group, facility and state — from a disclosure that both modes
+show, because the step reads the record back as a confirmation and a confirmation
+you cannot act on is a dead end. Station number and coordinates are deliberately
+*not* editable there: `siteKey()` is built from them, so changing one is a
+different site rather than a typo, and *Change site* is the route to that.
+
+##### The finish step (`focusFinishBody`)
+Where the flow ends, and the only place in Focus that looks at the whole
+assessment at once. Every section has already been reviewed on a step of its own,
+so this is a last look and a handover, not a second review — six things, in the
+order a person leaving the building uses them:
+
+1. **At a glance** — `renderFindingsGlance()`, the traffic-light card: every
+   source grouped by what it came back with, findings first, then what a human
+   still owns, then the empty searches that are good news. Each row jumps to the
+   first source with that result. Count, word *and* `.s-dot` glyph, so it survives
+   greyscale and CVD. It is a free-standing node on purpose — the report pane can
+   mount the same card at its head without a second implementation appearing.
+2. **What's still missing** — `completenessGaps(reportRollup())`, the same gap
+   definition the pane's `#report-complete` box uses, so the two can never name
+   different gaps for the same state. Every count is a jump, and in Focus
+   `showReportSection` resolves to the `sec:…` **step** that fixes it.
+3. **Unresolved warnings** — the `reportRollup()` count and a jump to the first.
+4. **Read the whole report** — `openReportPreview()`: the assembled artefact on
+   screen, built from the same `buildReportHtml()` the printer gets and wearing
+   the same `.pr-paper` stylesheet as `#print-root`, so it is a preview of the
+   deliverable rather than a third rendering of the report.
+5. **Export ▾** and 6. **Check report** — `adoptNode`s of `#report-export-menu`
+   and `#btn-check-report`. Not copies: the same two controls with the same
+   handlers, which is what makes *an export from Focus is byte-identical to an
+   export from the workbench* true by construction rather than by testing.
+
+Finishing is **never gated on completeness** — a person who has to hand something
+over now gets to, with every gap named. The one thing an export says out loud is
+an open consistency warning (`guardExport`, wrapped around all four handlers so
+both modes get it): once, per site, per session, and only when the operator went
+ahead, because a dialog that fires on all four formats in turn is one that gets
+clicked through. `#focus` is hidden in `@media print`, so Print/PDF from Focus
+produces the report and not the step chrome.
+
+##### The escape hatches
+Four surfaces are large, specialised and used on a minority of assessments.
+Building Focus equivalents for all of them would roughly double the mode, so the
+rule is **reachable, not reimplemented** — and where one genuinely needs the
+cockpit, Focus says so in words and hands over.
+
+| Surface | In Focus |
+|---|---|
+| **Queensland Globe** (`openQldGlobeMap`) | Opened straight from the Queensland Globe source step. It is already a full-screen, single-purpose surface — the most Focus-shaped thing in the tool. |
+| **PMST Excel import** (`parsePmstMnes`) | Runs in place on the EPBC source step; the parsed matters and drafted narratives flow into the threatened-section steps as they do in the workbench. |
+| **BYOK agent** (`assets/agent.js`) | `focusAgentHatch()` on `checks:auto`, shut by default — an assessment about to be worked by hand should not open with a request for a credential. The panel is *borrowed*, so there is no second copy of a control holding an API key, and its own Close folds the disclosure with it. |
+| **Batch** (`importBatch`, `createBatchFromSites`) | **Handoff** (`offerBatchHandoff` / `renderFocusBatchOffer`). |
+
+The BYOK agent needs no Focus-specific plumbing to *run*: it writes through the
+same `window.ESS` seam everything else does, `setResult` calls `refreshCard`,
+which in Focus re-renders the step, and the graph is recomputed from state on
+every one of those — so the flow reshapes itself as the answers land. What Focus
+adds is the landing: `ESS.endRun` records the three round-trip passes' receipts
+(the run *is* that sequence, done in one action) and `focusAfterRun` resumes at
+the first step that still needs a human. Both are conditional on
+`agentRunWrote` — `endRun` fires from agent.js's `finally`, so a run that fell
+over on its first turn arrives there too and must not be recorded as done.
+
+Batch is the one surface that is genuinely not Focus-shaped: it is a way of
+working *across* sites, and Focus is a way of working *through* one. Loading a
+batch therefore offers a labelled switch and says why, in the shape every handoff
+here follows — a deliberate action naming what it opens, never a silent mode
+flip. Declining is a real answer: the first site is already open in Focus, the
+batch stays loaded, and the tray is in the workbench whenever it is wanted.
+`resetFocusCursor` clears the offer, so one site's can never be read as another's.
+Returning from any handoff lands on the same step, because the cursor is per-site
+state and no handoff touches it.
 
 ### Queensland Globe site map (`assets/qldmap.js`)
 A separate, lazily-initialised module behind `window.ESSQldMap`. It draws a

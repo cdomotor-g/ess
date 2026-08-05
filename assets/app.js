@@ -313,8 +313,58 @@
     return state.filter !== "all";
   }
 
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  // ------------------------------------------------------------------- ui mode
+  // Two presentations of ONE state (see the Focus mode section further down, and
+  // docs/ARCHITECTURE.md):
+  //
+  //   focus      (default) one column, one step per screen, the tool proposing
+  //                        what comes next
+  //   workbench            today's split view — both panes, the operator choosing
+  //
+  // A preference about how a person works rather than a property of a station, so
+  // it lives in the browser and not in the per-site payload — same pattern as
+  // LS_ADVANCED / LS_CARD_SORT above.
+  const LS_MODE = LS_PREFIX + "mode";
+  let uiMode = "focus";
+  const focusLive = () => uiMode === "focus";
+  const workbenchLive = () => uiMode === "workbench";
+
+  // While Focus is live the workbench's two columns are EMPTIED, not hidden: their
+  // children move into these detached holders, and the two purely-derived regions
+  // (the dashboard and the report sections) are dropped entirely and rebuilt from
+  // state on the way back. Event listeners ride on the nodes themselves, so nothing
+  // needs re-wiring in either direction.
+  const WB_COLS = ["col-left", "col-right"];
+  let wbStash = null; // { "col-left": <div>, "col-right": <div> } | null
+
+  // …with one wrinkle. Plenty of code READS a control rather than rendering into
+  // one — sourcesForSite() reads #toggle-manual-internal on every single recompute,
+  // including the ones Focus mode does — and those lookups have to keep resolving
+  // while the workbench is stashed. So a document-rooted query that misses falls
+  // through to the holders. A query with an explicit root never does: that caller
+  // has already said which subtree it means.
+  const $ = (sel, root = document) => {
+    const hit = root.querySelector(sel);
+    return hit || (root === document ? stashQuery(sel) : null);
+  };
+  const $$ = (sel, root = document) => {
+    const hits = Array.from(root.querySelectorAll(sel));
+    return (hits.length || root !== document) ? hits : stashQueryAll(sel);
+  };
+  function stashQuery(sel) {
+    if (!wbStash) return null;
+    for (const id of WB_COLS) {
+      const hit = wbStash[id] && wbStash[id].querySelector(sel);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  function stashQueryAll(sel) {
+    if (!wbStash) return [];
+    const out = [];
+    for (const id of WB_COLS) if (wbStash[id]) out.push(...wbStash[id].querySelectorAll(sel));
+    return out;
+  }
   const el = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -469,11 +519,18 @@
     const site = state.site;
     await addImagesTo(state.siteImages, files);
     if (state.site !== site) { toast("Site changed before the photo finished processing — discarded"); return; }
-    saveImages(); renderSiteImages(); renderReport();
+    saveImages(); renderSiteImages(); renderReport(); refreshFocusForPhotos();
   }
   function removeSiteImage(id) {
     state.siteImages = state.siteImages.filter((im) => im.id !== id);
-    saveImages(); renderSiteImages(); renderReport();
+    saveImages(); renderSiteImages(); renderReport(); refreshFocusForPhotos();
+  }
+  // The photos step's own state (and the report front page it feeds) both move
+  // when a picture is added or dropped, and neither renderSiteImages nor
+  // renderReport reaches Focus mode. Declared, not arrow, so it is hoisted above
+  // the image helpers that call it.
+  function refreshFocusForPhotos() {
+    if (focusLive()) renderFocus({ focus: false });
   }
 
   async function addFindingImages(sourceId, files) {
@@ -1085,6 +1142,7 @@
     state.filter = "all";  // restore() brings back this site's own filter choice
     state.groupOpen = {};  // …and its own collapse choices
     state.flow = freshFlow(); // …and how far it got through step 3
+    resetFocusCursor();    // …and where Focus mode had got to (restore() brings this site's back)
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
   }
@@ -1135,6 +1193,17 @@
     renderReport();
     $("#fld-date").value = state.date;
     $("#fld-maintenance").value = state.maintenance;
+    // Focus mode renders the same state as one step instead of two panes, and owns
+    // its own "where should the operator be looking" — so it returns here rather
+    // than falling through to the workbench's jump.
+    if (focusLive()) {
+      // A site that has just been chosen makes the picking step done; don't leave
+      // the operator sitting on it.
+      if (state.site && focusCursor === "site:pick") focusCursor = null;
+      renderCollectionStatus(); // renderDashboard() skipped it, and the step list counts it
+      renderFocus({ focus: !opts || opts.focus !== false });
+      return;
+    }
     // Choosing a site is a jump like any other, so focus follows it to the site
     // header — otherwise the operator picks a station and their next Tab restarts
     // from the top bar. The exception is the boot-time batch restore, which passes
@@ -1203,8 +1272,14 @@
     // already open confirms the round trip the operator just made, while a file
     // for a different site starts that sequence again.
     state.flow = sameSite ? normalizeFlow(prevFlow) : freshFlow();
+    // …and so does Focus mode's place in the flow: a reply for the site already open
+    // leaves the operator where they were (their step list simply gains a lot of
+    // answered steps); a file for a different site starts that walk again.
+    if (!sameSite) resetFocusCursor();
     state.report = {};
     (json.sections || []).forEach((s) => { if (s && s.id) state.report[s.id] = { choice: s.choice || null, note: s.note || "", reviewed: !!s.reviewed }; });
+    // …and the front page's own tick, which rides in the site block (see reportObject).
+    state.report[IDENTITY_SECTION] = { choice: null, note: "", reviewed: !!si.front_page_reviewed };
     // Seed jurisdiction-specific section defaults (e.g. the QLD GBO text) where the
     // imported file left the section blank, so they still appear in the report.
     REPORT_SECTIONS.forEach((sec) => {
@@ -1343,6 +1418,7 @@
     persistBatch();
     loadSite(firstSite);             // open the first site (restore + render); highlights its chip
     renderBatchBar();
+    offerBatchHandoff(keys.length);  // …and, in Focus, says where the other sites are
     toast(`Imported ${keys.length} site${keys.length > 1 ? "s" : ""} — pick one below to review`);
   }
 
@@ -1370,13 +1446,17 @@
     persistBatch();
     loadSite(firstSite);               // open the first site (restore + render); highlights its chip
     renderBatchBar();
+    offerBatchHandoff(keys.length);    // …and, in Focus, says where the other sites are
     toast(`Batch of ${keys.length} site${keys.length > 1 ? "s" : ""} ready — pick one below to start`);
   }
 
   // ---------------------------------------------------------------- summary
-  function renderSummary() {
-    const s = state.site;
-    const rows = [
+  // The station record as the operator reads it back — one list, one order, used by
+  // the workbench's metadata grid AND by Focus mode's site-details step, so the two
+  // can never describe the same station differently.
+  function stationRecordRows() {
+    const s = state.site || {};
+    return [
       ["Station Name", s.name],
       ["Station Number", s.station_num || "—"],
       ["WMO Number", s.wmo || "—"],
@@ -1386,6 +1466,11 @@
       ["Latitude", s.lat],
       ["Longitude", s.lon],
     ];
+  }
+
+  function renderSummary() {
+    const s = state.site;
+    const rows = stationRecordRows();
     const grid = $("#summary-grid");
     grid.innerHTML = "";
     rows.forEach(([k, v]) => {
@@ -1399,7 +1484,63 @@
     });
     if (s.manual) grid.append(el("div", { class: "summary-item", style: "grid-column:1/-1" },
       el("span", { class: "k" }, "Source"), el("span", { class: "v" }, "Manual coordinate entry")));
+    syncSiteCorrectFields();
     renderSiteHeader();
+  }
+
+  // ------------------------------------------------- correcting the station record
+  // Which #sd-correct field writes which property. Deliberately none of the three
+  // that identify the site: station_num keys its saved work (siteKey), and lat/lon
+  // are what every deep link, map and API query is built from — a wrong one of
+  // those is a different site, not a typo, and Change site is the route to it.
+  const SITE_CORRECT_FIELDS = [
+    { sel: "#fld-site-name", get: (s) => s.name || "", set: (s, v) => { s.name = v.trim() || s.name; } },
+    { sel: "#fld-site-wmo", get: (s) => s.wmo || "", set: (s, v) => { s.wmo = v.trim(); } },
+    { sel: "#fld-site-group", get: (s) => s.delivery_group || "", set: (s, v) => { s.delivery_group = v.trim(); } },
+    { sel: "#fld-site-facility",
+      get: (s) => (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "",
+      set: (s, v) => {
+        const list = v.split(";").map((x) => x.trim()).filter(Boolean);
+        s.facility_types = list;
+        s.primary_facility = list[0] || "";
+      } },
+  ];
+
+  // Push `state.site` into the correction inputs — on load, and after anything else
+  // changes the record — so an open disclosure never shows a stale value.
+  function syncSiteCorrectFields() {
+    const s = state.site;
+    if (!s) return;
+    SITE_CORRECT_FIELDS.forEach(({ sel, get }) => {
+      const inp = $(sel);
+      if (inp && document.activeElement !== inp) inp.value = get(s);
+    });
+    const st = $("#fld-site-state");
+    if (st && document.activeElement !== st) st.value = s.state || "";
+  }
+
+  // A corrected descriptive field is a re-render of everything that quotes it (the
+  // header, the summary, the report's front page) and nothing more.
+  function correctSiteField(field, value) {
+    if (!state.site) return;
+    field.set(state.site, value);
+    save();
+    renderSummary(); renderSiteHeader(); renderReportHeader(); renderReport();
+    if (focusLive()) renderFocus({ focus: false });
+  }
+
+  // …with one exception. The state decides which sources apply at all, so changing
+  // it is a different assessment list — a full workspace render, which in Focus mode
+  // recomputes the step graph off the new list.
+  function correctSiteState(code) {
+    const s = state.site;
+    if (!s || code === s.state) return;
+    s.state = code || stateFromCoords(s.lat, s.lon);
+    s.region = s.state;
+    s.refs = refsForState(s.state);
+    save();
+    renderWorkspace({ focus: false });
+    toast(s.state ? `Sources now shown for ${s.state}` : "State cleared");
   }
 
   // The resting state of step 2 — who the site is, where it is, what the locator
@@ -1649,12 +1790,21 @@
       const map = await buildMapDataUrl(s.lat, s.lon, km, labels);
       if (token !== mapGenTokens[slot] || state.site !== site) return; // superseded (site/size changed)
       ms.image = map; ms.status = "ready"; ms.error = "";
-      saveImages(); renderSiteMap(slot); renderReport();
+      saveImages(); renderSiteMap(slot); renderReport(); refreshFocusForMaps();
     } catch (err) {
       if (token !== mapGenTokens[slot] || state.site !== site) return;
       ms.status = "error"; ms.error = err.message || "could not load the map";
-      renderSiteMap(slot);
+      renderSiteMap(slot); refreshFocusForMaps();
     }
+  }
+
+  // A map ARRIVING (or failing) moves the maps step's own state and puts a picture
+  // on the report's front page, so Focus mode's chrome is refreshed when the
+  // stitching settles — not while it is in flight, which would only redraw a
+  // spinner. renderSiteMap has already painted the figure itself by this point;
+  // this is the step list and the "done" tick catching up with it.
+  function refreshFocusForMaps() {
+    if (focusLive()) renderFocus({ focus: false });
   }
 
   function setMapKm(slot, km) {
@@ -2090,6 +2240,12 @@
 
   // ---------------------------------------------------------------- dashboard
   function renderDashboard() {
+    // The single biggest DOM build in the app — twenty-three cards and several
+    // hundred controls. Focus mode doesn't have a dashboard to build it into, and
+    // building it into a detached holder would be the "display:none is not the same
+    // as not there" mistake in a different costume. Everything it renders is
+    // derived, so it is rebuilt from state the moment the workbench comes back.
+    if (!workbenchLive()) return;
     const wrap = $("#dashboard-groups");
     wrap.innerHTML = "";
     // A full dashboard render is the "next render" that ends every transient card
@@ -2304,8 +2460,10 @@
     if (!rail) return;
     if (railObserver) { railObserver.disconnect(); railObserver = null; }
     rail.innerHTML = "";
-    // Matches #workspace — there's nothing to jump to until a site is loaded.
-    const live = !!state.site && !$("#workspace").hidden;
+    // Matches #workspace — there's nothing to jump to until a site is loaded, and
+    // nothing to navigate at all while Focus mode has the screen (its own step list
+    // is what does this job there).
+    const live = workbenchLive() && !!state.site && !$("#workspace").hidden;
     rail.hidden = !live;
     if (!live) return;
 
@@ -2531,10 +2689,13 @@
     // Three passes rather than one: writing and reading a height per textarea in
     // the same loop forces a reflow per card. Reset every one, measure every one,
     // then write — two reflows for the whole dashboard.
-    const notes = $$("#dashboard-groups .note-field");
+    // Both modes' notes: exactly one of the two selectors can match at a time, and
+    // a Focus step's single note wants sizing for the same reason 23 cards' do.
+    const notes = $$("#dashboard-groups .note-field, #focus .note-field");
     notes.forEach((ta) => { ta.style.height = "auto"; });
     const heights = notes.map((ta) => Math.max(ta.scrollHeight, 28));
     notes.forEach((ta, i) => { ta.style.height = `${heights[i]}px`; });
+    // Clamping is the dashboard's alone — a Focus step shows the finding in full.
     $$("#dashboard-groups .src-result.show").forEach(syncResultClamp);
   }
 
@@ -2895,7 +3056,14 @@
   // all saying "found" at once — and clicking it brings the four-way picker back.
   // An unanswered card keeps the picker open: recording the result is the whole
   // job of that card, and it stays one click.
-  function renderStatusControl(src, f) {
+  //
+  // `opts.open` holds the picker open at every status. Focus mode passes it: there
+  // the step IS the card, recording the result is the step's whole question, and a
+  // Manual or Failed source that collapsed to a chip would ask for a click before
+  // it could be changed. The workbench keeps the collapse — it is what stops the
+  // border, the tinted panel and the chip all shouting "found" at once.
+  function renderStatusControl(src, f, opts) {
+    const o = opts || {};
     const slot = el("div", { class: "result-slot" });
     // A radiogroup, not four buttons: the four are mutually exclusive and exactly
     // one of them is the card's answer, which `aria-pressed` on four independent
@@ -2949,7 +3117,7 @@
       sel.append(...radios);
       return sel;
     };
-    if (f.status === STATUS.UNSET) { slot.append(picker()); return slot; }
+    if (o.open || f.status === STATUS.UNSET) { slot.append(picker()); return slot; }
     slot.append(el("button", {
       type: "button", class: `chip result-chip ${f.status}`, "aria-expanded": "false",
       "aria-label": `Result: ${STATUS_LABEL[f.status]} — change it`,
@@ -2971,8 +3139,10 @@
   // return focus to the radio they just landed on, so ←/→ walk all four.
   function refocusStatus(id, status) {
     CARD_OPEN.expanded.add(id);
-    refreshCard(id);
-    const card = $(`#src-${id}`);
+    refreshCard(id); // in Focus this re-renders the step instead — see refreshCard
+    // Focus has no #src- card: the step is the card, and its picker never collapses,
+    // so the radio is found without the chip round trip below.
+    const card = focusLive() ? $("#focus") : $(`#src-${id}`);
     if (!card) return;
     const chip = card.querySelector(".result-slot .result-chip");
     if (chip) chip.click(); // swaps the chip back for the picker (see renderStatusControl)
@@ -2985,7 +3155,13 @@
   // old action row: rare, recoverable, or duplicating something the card already
   // does. Items are built on first open, so a resting card carries one button
   // rather than five, and they are plain text — the ⋯ has already said "more".
-  function renderCardMenu(src, note) {
+  //
+  // `opts.handoff` is the Focus step this menu is standing in. Focus's escape hatch
+  // to the full card belongs here rather than as a visible button: it is exactly
+  // the kind of occasional utility this tier is for, and the step has no row to
+  // spare for one.
+  function renderCardMenu(src, note, opts) {
+    const o = opts || {};
     const list = el("div", { class: "menu-list", role: "menu", hidden: true });
     const toggle = el("button", {
       type: "button", class: "btn tiny tertiary menu-toggle", "aria-haspopup": "true", "aria-expanded": "false",
@@ -3001,6 +3177,8 @@
           }
           list.append(el("button", { class: "menu-item", role: "menuitem",
             onclick: () => showReportSection(targetSectionOf(src)) }, "Show in the report"));
+          if (o.handoff) list.append(el("button", { class: "menu-item", role: "menuitem",
+            onclick: () => focusHandoffTo(o.handoff) }, "Open the full card in the workbench ↗"));
           // Destructive, and no undo — ruled off and coloured as such (.danger).
           list.append(el("button", { class: "menu-item danger", role: "menuitem",
             onclick: () => clearNote(src.id, note) }, "Clear my note"));
@@ -3028,9 +3206,12 @@
     const first = list.querySelector(".menu-item");
     if (first) first.focus();
   }
-  function wireMenuKeys(toggle, list, setOpen) {
+  // `sel` names the item class, so the same keys serve both overflow menus and
+  // Focus mode's step list (.fx-list-item) — one implementation of ↑/↓/Home/End/Esc
+  // rather than a second one that drifts from it.
+  function wireMenuKeys(toggle, list, setOpen, sel) {
     list.addEventListener("keydown", (e) => {
-      const items = [...list.querySelectorAll(".menu-item")];
+      const items = [...list.querySelectorAll(sel || ".menu-item")];
       if (!items.length) return;
       const i = items.indexOf(document.activeElement);
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -3042,9 +3223,21 @@
       else if (e.key === "Escape" || e.key === "Tab") {
         // Esc closes deliberately; Tab closes because focus is leaving anyway —
         // only Esc hands focus back, so tabbing on still moves forward.
+        const wasOn = document.activeElement;
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); }
         setOpen(false);
-        if (e.key === "Escape") toggle.focus();
+        // Closing can REBUILD the surface this menu lives on — Focus mode's step
+        // list closes by re-rendering the whole step shell — which detaches both
+        // the item that had focus and the trigger remembered in this closure.
+        // Focusing a detached node drops focus on <body>: Esc would land nowhere,
+        // and Tab would resume from the top of the page instead of from here. Ids
+        // survive a rebuild where nodes do not, so the trigger is looked up again.
+        const live = document.contains(toggle) ? toggle
+          : (toggle.id ? document.getElementById(toggle.id) : null);
+        // Esc always goes back to the trigger. Tab only needs it when the close
+        // pulled the ground out from under focus — the overflow menus do not
+        // rebuild, so Tab there behaves exactly as it always has.
+        if (live && (e.key === "Escape" || !document.contains(wasOn))) live.focus();
       }
     });
     toggle.addEventListener("keydown", (e) => {
@@ -3087,9 +3280,19 @@
   function setPhotoTools(src, btn, tools, open, focus) {
     if (open && !tools.childElementCount) {
       const input = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
-      const pickBtn = el("button", { type: "button", class: "pick-btn" }, "choose a file");
-      const zone = el("div", { class: "dropzone small", tabindex: "0", "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
-        "📷 Drag & drop, paste, or ", pickBtn);
+      // Two labels, one button. Drag, drop and Ctrl+V do not exist on a phone, so
+      // below 620px the stylesheet drops the paste prose and promotes this to a
+      // full-width thumb target — the pick control is the only one that works on
+      // every device, and it is never the small print. (Same reasoning, and the
+      // same classes, as the station-photo zone in index.html.)
+      const pickBtn = el("button", { type: "button", class: "pick-btn" },
+        el("span", { class: "dz-paste" }, "choose a file"),
+        el("span", { class: "dz-pick" }, "📷 Take or choose a photo"));
+      // id: a photo landing re-renders the card (or, in Focus, the whole step), and
+      // the zone is where the keyboard was — an id is what lets it be handed back.
+      const zone = el("div", { class: "dropzone small", id: `drop-${src.id}`, tabindex: "0",
+        "aria-label": "Add evidence photo — paste, drag and drop, or choose a file" },
+        el("span", { class: "dz-paste" }, "📷 Drag & drop, paste, or "), pickBtn);
       wireDropzone(zone, input, (files) => addFindingImages(src.id, files));
       tools.append(zone, input);
       if (WIKI_IMAGE_CATEGORIES.has(src.category)) tools.append(renderWikiImageRow(src));
@@ -3183,6 +3386,12 @@
   // when that changes the density under a keyboard user, focus is handed to the
   // card's new primary control instead of being dropped on the floor.
   function refreshCard(id) {
+    // Focus mode has no card to refresh — the step IS the card. Every mutation in
+    // the app (a status tick, a photo, an API result, an import, an agent write)
+    // already calls through here, so this one branch is what makes both modes
+    // repaint from the same call sites. `focus: false` because none of those
+    // mutations is a navigation: it must not yank the caret out of the note.
+    if (focusLive()) { renderFocus({ focus: false }); return; }
     const src = DATA.sources.find((s) => s.id === id);
     const old = $(`#src-${id}`);
     if (!old || !src) return;
@@ -3570,9 +3779,15 @@
         ? "✓ Batch loaded — pick a site from the tray above."
         : `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}. Anything left over is in step 4 below.`, "ok");
       markFlowDone("applied", answered ? `${answered} source${answered > 1 ? "s" : ""} answered` : "Response applied");
-      // renderWorkspace() parks at the top of the workspace; the operator's next
-      // move is the list of what's left, so land them there instead.
-      if (kind === "site") requestAnimationFrame(() => jumpTo($("#dashboard")));
+      if (kind !== "site") return;
+      // Applying a reply answers a large part of the list in one action and
+      // reshapes everything downstream of it. Both modes therefore land on what is
+      // LEFT rather than on the top of the thing that just changed — the workbench
+      // on its dashboard, Focus on the first source step that still needs a human
+      // (not the first source step in the list, which the reply has usually already
+      // answered), carrying one sentence saying what the round trip did.
+      if (focusLive()) focusAfterApply(answered);
+      else requestAnimationFrame(() => jumpTo($("#dashboard")));
     } catch (err) {
       setFlowStatus("#paste-status", "Couldn't apply that: " + err.message, "err");
     }
@@ -3656,6 +3871,10 @@
     refreshMobileNav();  // …on the Collect tab and its chips, below 981px
     refreshGroupHeads(); // …and per category on each group's roll-up
     renderStarvedSections(); // …and which report sections are still empty, from over here
+    // …and Focus mode's step list, which counts the same things. Every path that
+    // changes a result already comes through here, so this is the one hook the
+    // derived step graph needs to stay live.
+    if (focusLive()) renderFocus({ focus: false });
     // The sentence just changed width/wrap, and this card is what the sticky group
     // headers pin under (covers browsers without ResizeObserver too).
     measureStatusBar();
@@ -3854,7 +4073,9 @@
       INCLUDE_FLASH.add(id);
       setTimeout(() => {
         if (!INCLUDE_FLASH.delete(id)) return;
-        if (document.getElementById(`src-${id}`)) refreshCard(id);
+        // Focus carries the same receipt on its source step, and has no #src- card
+        // to test for — refreshCard re-renders the step there instead.
+        if (focusLive() || document.getElementById(`src-${id}`)) refreshCard(id);
       }, INCLUDE_FLASH_MS);
     } else {
       INCLUDE_FLASH.delete(id);
@@ -3918,6 +4139,13 @@
   // Sending someone to a pane they have collapsed is a dead end, so the jump
   // opens it first.
   function showReportSection(sectionId) {
+    // In Focus there is no report pane to scroll to — but the section has a step of
+    // its own, carrying the same content and the same Reviewed tick, so "show me
+    // that section" means going there rather than doing nothing.
+    if (focusLive()) {
+      focusGoTo(sectionId === IDENTITY_SECTION ? "out:identity" : `sec:${sectionId}`);
+      return;
+    }
     const node = document.getElementById(`rsec-${sectionId}`);
     if (!node) return;
     revealRightPane();
@@ -3927,6 +4155,20 @@
   // card may be hidden by the active dashboard filter, so drop back to "All" and
   // re-render first if it isn't currently on screen.
   function showSourceCard(sourceId) {
+    // …and the same the other way: the source's own step is where it is shown.
+    // (focusHandoffTo switches modes BEFORE calling this, so the handoff still
+    // lands on the real card.)
+    //
+    // A jump made FROM a section step is an errand — the caveat strip saying three
+    // of this section's sources were never checked is a prompt to go and check one
+    // — so it arms the way back. Every route into a source from a section (an
+    // evidence name, the caveat strip, the waiting list) runs through here, which
+    // is why the arming lives here rather than at each of them.
+    if (focusLive()) {
+      focusGoTo(`src:${sourceId}`, null,
+        { returnTo: focusCursor && focusCursor.startsWith("sec:") ? focusCursor : null });
+      return;
+    }
     revealLeftPane();
     let node = document.getElementById(`src-${sourceId}`);
     if (!node) {
@@ -4018,7 +4260,11 @@
   // every card, permanently — heavy machinery for a choice the default gets right
   // nearly every time. It reads as text now, with the full picker one click
   // behind "change", and including the card says where it went.
-  function renderIncludeRow(src) {
+  // `opts.signoff: false` drops the sign-off pill from the row. Focus mode passes
+  // it: there the step's Continue records the sign-off, and a pill beside it would
+  // be a second control for one judgement.
+  function renderIncludeRow(src, opts) {
+    const o = opts || {};
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     const included = cardIncluded(f);
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
@@ -4026,7 +4272,8 @@
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
 
     const row = el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
-      el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn, renderSignOff(src, f));
+      el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn,
+      o.signoff === false ? null : renderSignOff(src, f));
 
     // The flight path: pressing Include used to land 3,000px down the other pane
     // with nothing on the card to say so. This names where it went, and the name
@@ -4288,57 +4535,125 @@
     return w;
   }
 
+  // Rendering the report has always been where a section's state is first created
+  // and its dropdown auto-suggested. Focus mode doesn't build the report pane, so
+  // that seeding is split out and run from both — otherwise an export taken from
+  // Focus would be missing every auto-suggested choice, and the two modes would
+  // disagree about the same site.
+  function ensureReportChoices() {
+    if (!state.site) return;
+    REPORT_SECTIONS.forEach((section) => {
+      const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
+      if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
+    });
+  }
+
+  /* ------------------------------------------- the report's front page (identity)
+     Which site this is, and the pictures that establish it: the two locator maps
+     and the station photographs. ONE section rather than the two headed blocks it
+     used to be, because it carries one review tick — the operator confirms "this is
+     the right place" once, not once per picture grid — and because that is exactly
+     what Focus mode presents the moment the site work is done (the out:identity
+     step). Both modes build it from these three functions, so the front page a
+     Focus user signs off is the front page the report shows. */
+  const IDENTITY_SECTION = "identity";
+
+  // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
+  function reportMapsBlock() {
+    const s = state.site;
+    const ready = s ? MAP_SLOTS.filter((slot) => { const ms = state.maps[slot.key]; return ms && ms.image && ms.image.dataUrl; }) : [];
+    if (!ready.length) return null;
+    // Grid columns follow the number of ready maps, so a single (still-loading or
+    // failed) slot fills the width instead of leaving an empty half.
+    const row = el("div", { class: "report-maps", style: `grid-template-columns:repeat(${ready.length},1fr)` });
+    ready.forEach((slot) => {
+      const m = state.maps[slot.key].image;
+      row.append(el("figure", { class: "report-map" },
+        el("img", { src: m.dataUrl, alt: `${slot.title} — satellite locator`, loading: "lazy", decoding: "async",
+          title: "Open the full-screen map — scroll to zoom, drag to pan",
+          onclick: () => openLightbox(m.dataUrl, `${slot.title} — ${(+m.km).toLocaleString()} km across · ${s.name}`) }),
+        el("figcaption", {}, `${slot.title} — ${(+m.km).toLocaleString()} km across · centred on ${s.lat}, ${s.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
+    });
+    return el("div", { class: "r-identity-block" },
+      el("h4", {}, ready.length > 1 ? "Location maps" : "Location map"), row);
+  }
+
+  function reportPhotosBlock() {
+    if (!(state.siteImages || []).length) return null;
+    const grid = el("div", { class: "photo-grid report-large" });
+    state.siteImages.forEach((im) => grid.append(photoFigure(im, "", () => removeSiteImage(im.id))));
+    return el("div", { class: "r-identity-block" }, el("h4", {}, "Site photographs"), grid);
+  }
+
+  function reportIdentitySection() {
+    const rstate = state.report[IDENTITY_SECTION] || (state.report[IDENTITY_SECTION] = newReportState(IDENTITY_SECTION));
+    const box = el("div", { class: "rsection rsec-identity" + (rstate.reviewed ? " is-reviewed" : ""),
+      id: `rsec-${IDENTITY_SECTION}` });
+    box.append(el("div", { class: "rsec-head" }, el("h3", {}, "Site and location"),
+      identityReviewToggle(box)));
+    const maps = reportMapsBlock(), photos = reportPhotosBlock();
+    if (maps) box.append(maps);
+    if (photos) box.append(photos);
+    // Said rather than left blank: an empty front page is either a map still being
+    // stitched or one that failed, and both are worth naming where the reader is.
+    if (!maps) box.append(el("p", { class: "r-sub" },
+      MAP_SLOTS.some((slot) => (state.maps[slot.key] || {}).status === "loading")
+        ? "The locator maps are still being generated."
+        : "No locator map has been generated for this site yet — the site details step can retry it."));
+    return box;
+  }
+
+  // The report's per-section review tick, wherever it is drawn: the report pane's
+  // section head, the front page, and a Focus section step all build it here and
+  // write the same flag through the same setter — so a tick in Focus and a tick in
+  // the workbench are one tick, and the three can never drift apart in wording.
+  //
+  // Deliberately NOT the collection card's "Sign off": different word, different
+  // control (a checkbox, not a pressed pill) and a different accent, because the
+  // two used to be pixel-identical and mean different things.
+  //
+  // `opts.box` is the container to carry the is-reviewed class; `opts.inputId` is
+  // passed by the Focus steps, whose re-render needs a stable id to hand the
+  // keyboard focus back to. Two copies are never in the document at once — the
+  // mode that isn't live has no report pane and no step body.
+  const REVIEW_TITLE = "The report's own tally — tick once you've reviewed this section (separate from signing off the source cards)";
+  function sectionReviewToggle(sectionId, opts) {
+    const o = opts || {};
+    const rstate = state.report[sectionId] || (state.report[sectionId] = newReportState(sectionId));
+    const input = el("input", { type: "checkbox", id: o.inputId || null });
+    input.checked = !!rstate.reviewed;
+    const toggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""), title: o.title || REVIEW_TITLE },
+      input, el("span", {}, rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed"));
+    input.addEventListener("change", (e) => setSectionReviewed(sectionId, e.target.checked, o.box, toggle));
+    return toggle;
+  }
+
+  function identityReviewToggle(box, inputId) {
+    return sectionReviewToggle(IDENTITY_SECTION, { box, inputId,
+      title: "The report's own tally — tick once you've checked the site, the maps and the photos are the right ones" });
+  }
+
   function renderReport() {
+    ensureReportChoices();
+    // …but the pane itself is the workbench's. See renderDashboard() above.
+    if (!workbenchLive()) return;
     const wrap = $("#report-sections");
     wrap.innerHTML = "";
     // Clamped finding notes, collected as they're built and measured once the
     // whole pane is in the document — see measureClamps().
     const clamps = [];
-    // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
-    const readyMaps = state.site ? MAP_SLOTS.filter((slot) => { const ms = state.maps[slot.key]; return ms && ms.image && ms.image.dataUrl; }) : [];
-    if (readyMaps.length) {
-      const box = el("div", { class: "rsection" }, el("h3", {}, readyMaps.length > 1 ? "Location maps" : "Location map"));
-      // Grid columns follow the number of ready maps, so a single (still-loading or
-      // failed) slot fills the width instead of leaving an empty half.
-      const row = el("div", { class: "report-maps", style: `grid-template-columns:repeat(${readyMaps.length},1fr)` });
-      readyMaps.forEach((slot) => {
-        const m = state.maps[slot.key].image;
-        row.append(el("figure", { class: "report-map" },
-          el("img", { src: m.dataUrl, alt: `${slot.title} — satellite locator`, loading: "lazy", decoding: "async",
-            title: "Open the full-screen map — scroll to zoom, drag to pan",
-            onclick: () => openLightbox(m.dataUrl, `${slot.title} — ${(+m.km).toLocaleString()} km across · ${state.site.name}`) }),
-          el("figcaption", {}, `${slot.title} — ${(+m.km).toLocaleString()} km across · centred on ${state.site.lat}, ${state.site.lon} · ${MAP_ATTRIB}${m.labels ? " · " + MAP_REF_ATTRIB : ""}`)));
-      });
-      box.append(row);
-      wrap.append(box);
-    }
-    if ((state.siteImages || []).length) {
-      const box = el("div", { class: "rsection" }, el("h3", {}, "Site photographs"));
-      const grid = el("div", { class: "photo-grid report-large" });
-      state.siteImages.forEach((im) => grid.append(photoFigure(im, "", () => removeSiteImage(im.id))));
-      box.append(grid);
-      wrap.append(box);
-    }
+    if (state.site) wrap.append(reportIdentitySection());
     REPORT_SECTIONS.forEach((section) => {
-      const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
-      if (rstate.choice == null && section.dropdown) rstate.choice = suggestChoice(section);
+      const rstate = state.report[section.id]; // seeded by ensureReportChoices() above
 
       // data-section is the join to the collection pane — see linkPartners() and
       // the scroll sync. Every card feeding this section carries the same value.
       const box = el("div", { class: "rsection" + (rstate.reviewed ? " is-reviewed" : ""),
         id: `rsec-${section.id}`, "data-section": section.id });
-      // Per-section "Reviewed" tickbox — the REPORT's own tally, deliberately not the
-      // collection card's "Sign off": different word, different control (a checkbox,
-      // not a pressed pill) and a different accent, because the two used to be
-      // pixel-identical and mean different things. Updated in place (no full report
-      // re-render) so ticking stays cheap on image-heavy sites.
-      const revInput = el("input", { type: "checkbox" });
-      revInput.checked = !!rstate.reviewed;
-      const revToggle = el("label", { class: "review-toggle" + (rstate.reviewed ? " on" : ""),
-        title: "The report's own tally — tick once you've reviewed this section (separate from signing off the source cards)" },
-        revInput, el("span", {}, rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed"));
-      revInput.addEventListener("change", (e) => setSectionReviewed(section.id, e.target.checked, box, revToggle));
-      box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title), revToggle));
+      // Per-section "Reviewed" tickbox — the REPORT's own tally. Updated in place
+      // (no full report re-render) so ticking stays cheap on image-heavy sites.
+      box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title),
+        sectionReviewToggle(section.id, { box })));
 
       if (section.dropdown) {
         const opts = DATA.dropdowns[section.dropdown] || [];
@@ -4427,6 +4742,14 @@
 
      Returns null when the section has nothing included. */
   const EV_FINDINGS_SHOWN = 3; // findings expanded before "+ n more"
+
+  // Where a source name in the evidence GOES, said in the words of the mode the
+  // operator is standing in. The workbench scrolls the collection pane onto its
+  // card; Focus makes that source's step the screen and — because the jump started
+  // on a section step — arms the way straight back (see showSourceCard).
+  const evGoTitle = (name) => focusLive()
+    ? `Go to ${name} — Continue there brings you straight back to this section`
+    : `Go to ${name} on the collection list`;
   function evidenceSplit(inc) {
     const out = { found: [], none: [], open: [] };
     inc.forEach((x) => {
@@ -4487,8 +4810,9 @@
           el("span", { class: "r-ev-label" }, `⚠ Not yet checked (${open.length})`),
           evSourceList(open, (f) => f.status === STATUS.FAILED ? " (search failed)" : ""),
           el("button", { type: "button", class: "r-ev-goto",
-            title: `These sources still owe this section an answer — go to ${open[0].src.name} on the collection list`,
-            onclick: () => showSourceCard(open[0].src.id) }, "go to these in collection →"))));
+            title: `These sources still owe this section an answer — ${evGoTitle(open[0].src.name)}`,
+            onclick: () => showSourceCard(open[0].src.id) },
+            focusLive() ? "go and check these →" : "go to these in collection →"))));
 
     // A collapsed entry's PICTURES are not collapsed with it. The Queensland Globe
     // capture rides on a source that is almost always still "manual", and it is the
@@ -4522,7 +4846,7 @@
       num ? el("span", { class: "src-num", title: "Collection card number (left pane)" }, `${num}`) : null,
       el("span", { class: "chip " + (st === STATUS.UNSET ? "manual" : st), style: st === STATUS.UNSET ? "opacity:.5" : "" }, STATUS_LABEL[st]),
       el("button", { type: "button", class: "r-inc-name",
-        "aria-label": `${src.name} — go to its card on the collection list`,
+        "aria-label": evGoTitle(src.name), title: evGoTitle(src.name),
         onclick: () => showSourceCard(src.id) }, src.name),
       el("div", { class: "r-inc-actions" },
         el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
@@ -4573,7 +4897,7 @@
       if (i) out.push(el("span", { class: "r-ev-sep", "aria-hidden": "true" }, "·"));
       const num = cardNumbers[src.id];
       out.push(el("button", { type: "button", class: "r-ev-src", "data-ev-src": src.id,
-        title: `Go to ${src.name} on the collection list`, onclick: () => showSourceCard(src.id) },
+        title: evGoTitle(src.name), onclick: () => showSourceCard(src.id) },
         num ? el("span", { class: "src-num" }, `${num}`) : null,
         src.name + (suffixOf ? suffixOf(f) : "")));
     });
@@ -4627,32 +4951,100 @@
     return out;
   }
 
+  /* ------------------------------------------------- findings at a glance (#65)
+     The "did I miss anything?" instrument: every source this site has, grouped by
+     what it came back with, in the order the answer matters — the findings first,
+     then everything a human still owns, then the empty searches that are good news.
+
+     ONE implementation, deliberately. Focus mode's finish step is where it earns
+     its keep (it is the only place in that mode that looks at the whole
+     assessment at once), and it is written as a free-standing node so the report
+     pane can mount the same card at its head without a second copy appearing.
+
+     Status is carried by the count, the word AND the glyph — `statusDot` renders
+     an empty span that the stylesheet's one status vocabulary fills, so this card
+     cannot drift from the chips, the dots or the result picker. */
+  const GLANCE_ROWS = [
+    { key: STATUS.FOUND, says: "a matter is present at or near the site" },
+    { key: STATUS.MANUAL, says: "the check needs a person — a portal, a login, a visit" },
+    { key: STATUS.FAILED, says: "the check was attempted and could not be completed" },
+    { key: STATUS.UNSET, says: "nobody has looked yet" },
+    { key: STATUS.NONE, says: "checked, and nothing relevant came back" },
+  ];
+
+  function renderFindingsGlance() {
+    const c = statusCounts();
+    const box = el("div", { class: "glance", role: "group", "aria-label": "Findings at a glance" });
+    box.append(el("p", { class: "glance-lead" + (c.n && !c.outstanding ? " is-clear" : "") },
+      outstandingSentence(c)));
+    if (!c.n) return box;
+    const rows = el("ul", { class: "glance-rows" });
+    GLANCE_ROWS.forEach((row) => {
+      const n = c.byStatus[row.key] || 0;
+      // The first source carrying this result, which is what the row jumps to. A
+      // row with none has nowhere to go, so it is rendered as a fact rather than
+      // as a control — a zero on "Not checked" is the reassurance this card
+      // exists to give, and it must still be shown.
+      const first = n ? sourcesForSite().find((s) => statusOf(state.findings[s.id] || {}) === row.key) : null;
+      const kids = [
+        statusDot(row.key),
+        el("span", { class: "glance-n" }, String(n)),
+        el("span", { class: "glance-label" }, STATUS_LABEL[row.key]),
+        el("span", { class: "glance-says" }, row.says),
+      ];
+      rows.append(el("li", { class: "glance-row" + (n ? "" : " is-zero"), "data-status": row.key },
+        first
+          ? el("button", { type: "button", class: "glance-hit",
+              title: `Go to the first: ${first.name}`,
+              "aria-label": `${n} ${STATUS_LABEL[row.key]} — ${row.says}. Go to the first, ${first.name}.`,
+              onclick: () => showSourceCard(first.id) }, kids)
+          : el("span", { class: "glance-hit" }, kids)));
+    });
+    box.append(rows);
+    return box;
+  }
+
   // The document header: who this report is for, how far through it is, and what
   // the consistency checker has to say. Text-only updates against markup that is
   // already in the page, so every path that changes a section can call it without
   // re-rendering the report itself.
+  // What the document header SAYS, apart from where it is drawn. Focus mode shows
+  // the report's real front page on its out:identity step rather than a paraphrase
+  // of it, and this is what keeps the two from drifting into different wordings of
+  // the same station.
+  function reportIdentityText() {
+    const s = state.site || {};
+    return {
+      name: s.name || "ESS report",
+      // The same identifiers the exported report's front table carries, in the
+      // order an operator reads them out: who, where, when.
+      ids: [
+        s.station_num && `#${s.station_num}`,
+        s.state, s.delivery_group,
+        `${s.lat}, ${s.lon}`,
+        state.date ? `assessed ${formatDate(state.date)}` : null,
+      ].filter(Boolean).join(" · "),
+      // The rest of the station record, one disclosure away — it belongs to the
+      // document, but it isn't what tells two open sites apart.
+      detail: [
+        ["WMO number", s.wmo || "—"],
+        ["Facility", (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "—"],
+        ["Site maintenance", (state.maintenance || "").trim() || "—"],
+      ],
+    };
+  }
+
   function renderReportHeader() {
     const s = state.site;
     if (!s || !$("#rdoc-name")) return;
-    $("#rdoc-name").textContent = s.name;
-    // The same identifiers the exported report's front table carries, in the
-    // order an operator reads them out: who, where, when.
-    $("#rdoc-ids").textContent = [
-      s.station_num && `#${s.station_num}`,
-      s.state, s.delivery_group,
-      `${s.lat}, ${s.lon}`,
-      state.date ? `assessed ${formatDate(state.date)}` : null,
-    ].filter(Boolean).join(" · ");
+    const idt = reportIdentityText();
+    $("#rdoc-name").textContent = idt.name;
+    $("#rdoc-ids").textContent = idt.ids;
 
-    // The rest of the station record, one disclosure away — it belongs to the
-    // document, but it isn't what tells two open sites apart.
     const detail = $("#rdoc-detail");
     if (detail) {
       detail.innerHTML = "";
-      [["WMO number", s.wmo || "—"],
-        ["Facility", (s.facility_types && s.facility_types.join(", ")) || s.primary_facility || "—"],
-        ["Site maintenance", (state.maintenance || "").trim() || "—"],
-      ].forEach(([k, v]) => detail.append(
+      idt.detail.forEach(([k, v]) => detail.append(
         el("div", { class: "rdoc-detail-row" }, el("dt", {}, k), el("dd", {}, v))));
     }
 
@@ -4677,18 +5069,26 @@
     renderReportCompleteness(r);
   }
 
+  // What is still empty, as a list of { list, text } — one definition of "a gap in
+  // this report", shared by the pane's completeness box and by Focus mode's finish
+  // step, so the two can never name different gaps for the same state. Only the
+  // gaps that exist come back; an empty array IS "nothing missing".
+  function completenessGaps(r) {
+    return [
+      { list: r.noChoice, text: (n) => `${n} with no statement chosen` },
+      { list: r.noNote, text: (n) => `${n} with an empty comment` },
+      { list: r.noEvidence, text: (n) => `${n} with no evidence included` },
+      { list: r.unreviewed, text: (n) => `${n} still to review` },
+    ].filter((g) => g.list.length);
+  }
+
   // Where the section list ends: what is still empty. The report used to simply
   // stop, without ever saying whether it was finished.
   function renderReportCompleteness(r) {
     const box = $("#report-complete");
     if (!box) return;
     box.innerHTML = "";
-    const gaps = [
-      { list: r.noChoice, text: (n) => `${n} with no statement chosen` },
-      { list: r.noNote, text: (n) => `${n} with an empty comment` },
-      { list: r.noEvidence, text: (n) => `${n} with no evidence included` },
-      { list: r.unreviewed, text: (n) => `${n} still to review` },
-    ].filter((g) => g.list.length);
+    const gaps = completenessGaps(r);
     if (!gaps.length) {
       box.append(el("p", { class: "r-complete-lead is-done" },
         `All ${r.total} sections carry a statement, a comment and included evidence — and every one is reviewed.`));
@@ -4840,6 +5240,1575 @@
       if (span) span.textContent = rstate.reviewed ? "✓ Section reviewed" : "Mark section reviewed";
     }
     renderReportHeader(); // the "n of 11 reviewed" roll-up moves with every tick
+    if (focusLive()) renderFocus({ focus: false }); // a section step's "done" just moved
+  }
+
+  /* ============================================================== FOCUS MODE ===
+     The split view above is a cockpit: everything reachable, nothing hidden, the
+     operator in charge of what to look at next. That suits some people exactly.
+     For others it is still overwhelming — not because of how much is on screen,
+     but because they have to decide what to do next on every single screen.
+
+     Focus mode is the second way to fly the same aircraft. One column, one step
+     per screen, and the tool proposing the order. Two rules keep it from becoming
+     a second application:
+
+       ONE STATE, TWO PRESENTATIONS.  Every step reads and writes state.findings /
+       state.report — the same objects, the same localStorage schema, the same
+       ess-findings/1 export. Switching mode mid-assessment is a re-render and
+       nothing else, and it is lossless in both directions (see setUiMode, which
+       flushes any debounced keystroke before the DOM it was typed into goes away).
+
+       NOTHING IS TRAPPED.  Focus PROPOSES an order; it never enforces one. Every
+       step is reachable from the step list at any time, "Skip for now" is always
+       available, and no step is a dead end.
+
+     This section owns the shell, the step graph and every step body. Where a
+     surface is too large or too specialised to have a Focus equivalent, the step
+     hands off to the workbench with a labelled button (focusHandoffTo) — a route
+     to the same controls rather than a dead end. ============================ */
+
+  // ------------------------------------------------------------- the step graph
+  // A pure function of state, computed on every render and NEVER stored. That is
+  // what lets the flow reshape itself correctly the instant a card is re-routed to
+  // a different section, an import answers fifteen sources at once, or the internal
+  // -sources toggle changes which sources apply at all.
+  //
+  //   id     stable across recomputation ("src:qld-globe", "sec:invasive_plants").
+  //          The cursor stores this, never an index — the list re-orders as work
+  //          lands, and an index would silently point at a different step.
+  //   phase  site · checks · sources · report · finish, for the chrome.
+  //   kind   input (the operator supplies something) or output (the operator
+  //          reviews something the tool assembled).
+  //   ref    the source id or report-section id this step is about.
+  //   state  done · needs-you · skipped · blocked · not-reached.
+  const FOCUS_PHASE = { site: "Site", checks: "Checks", sources: "Sources", report: "Report", finish: "Finish" };
+
+  // Has this source been answered AT ALL? This is the gate on a report section, and
+  // deliberately not isOutstanding(): `manual` and `failed` are legitimate final
+  // answers from the operator's point of view — a portal that must be visited in
+  // person IS answered — and holding a report section hostage to a sign-off would
+  // strand the flow on exactly the sources that can never be closed from a desk.
+  //
+  // "Still needs you" keeps its one definition (isOutstanding, above) and is what a
+  // step's own state reports. The two saying different things about the same manual
+  // source is the point, not a bug: the section is ready to write, and the source is
+  // still on somebody's list.
+  const hasAnswer = (f) => statusOf(f) !== STATUS.UNSET;
+
+  // Steps waved past with "Skip for now". Session-only and per site: a skip is
+  // "not now", not a decision about the assessment, and the cursor is the only
+  // thing this mode persists.
+  let focusSkipped = new Set();
+  let focusCursor = null;   // the current step's stable id (persisted per site)
+  let focusStepIds = [];    // ids of the last computed list — see resolveFocusCursor
+  // The step to offer a way back to — see renderFocusReturn. An errand, not a
+  // history: one slot, armed by a jump that starts on a section step and cleared
+  // by the next navigation of any other kind.
+  let focusReturn = null;
+  // A different site is a different step list. Called wherever state.site is
+  // reassigned, so one site's place can never be read as another's.
+  function resetFocusCursor() {
+    focusCursor = null; focusSkipped = new Set(); focusStepIds = []; focusReturn = null;
+    // …and any offer that belonged to the site being left. The batch importer sets
+    // this AFTER it has opened the first site, so its own offer survives.
+    focusBatchOffer = 0;
+  }
+
+  function focusSteps() {
+    const site = state.site;
+    const steps = [];
+    // `state` is settled in one pass at the end: a step's own facts decide
+    // done/blocked/skipped, and only "have I got here yet" needs the cursor.
+    const add = (id, phase, kind, title, extra) => steps.push(Object.assign(
+      { id, phase, kind, title, ref: null, done: false, touched: false, state: "not-reached" }, extra || {}));
+
+    add("site:pick", "site", "input", site ? "Change the site" : "Choose the site",
+      { done: !!site, touched: !!site });
+    // Nothing downstream is knowable without a site — which sources apply, and
+    // therefore every other step, follows from where the site is.
+    if (!site) { steps[0].state = "needs-you"; return steps; }
+
+    // ackOnly: a step with no record of its own. The cursor is the only evidence
+    // that the operator has been past it, so that is what marks it done. Walking
+    // Back un-marks it, which is honest — there is nothing else to go on.
+    add("site:details", "site", "input", "Check the station record and the date", { ackOnly: true });
+    add("site:maps", "site", "input", "Check the locator maps", {
+      // What this step is FOR is two maps of the right place, so it is finished when
+      // both of them are actually there. A slot that failed stays "needs you", which
+      // is honest, and blocks nothing: Continue never waits on the network.
+      done: MAP_SLOTS.every((slot) => { const ms = state.maps[slot.key]; return !!(ms && ms.image); }),
+    });
+    add("site:photos", "site", "input", "Add any site photos", {
+      // Photos are optional, so walking past this step is a legitimate answer to it
+      // — but a site that already has some doesn't need walking past again.
+      ackOnly: true,
+      done: !!(state.siteImages || []).length,
+      touched: !!(state.siteImages || []).length,
+    });
+    // The first proof the interleave works: the site has just been entered, checked
+    // and photographed, and what the report now SAYS about it is shown immediately,
+    // while it is still fresh — rather than three thousand pixels down another pane
+    // an hour later.
+    add("out:identity", "site", "output", "Review the report's front page", {
+      ref: IDENTITY_SECTION,
+      done: !!(state.report[IDENTITY_SECTION] || {}).reviewed,
+    });
+    add("checks:auto", "checks", "input", "Run the checks this tool can run itself",
+      { done: !!state.flow.auto, touched: !!state.flow.auto });
+    add("checks:prompt", "checks", "input", "Copy the prompt into an AI assistant",
+      { done: !!state.flow.prompt, touched: !!state.flow.prompt });
+    add("checks:paste", "checks", "input", "Paste the assistant's reply back",
+      { done: !!state.flow.applied, touched: !!state.flow.applied });
+
+    // ---- the interleave. Every card resolves to exactly ONE report section via
+    // targetSectionOf(), so the order is a straightforward grouping: for each
+    // report section, in proforma order, its sources and then the section itself.
+    // The operator reviews each output while the evidence is still in their head,
+    // and reaches the end with a finished report rather than a finished checklist.
+    const bySection = new Map(REPORT_SECTIONS.map((sec) => [sec.id, []]));
+    const orphans = [];
+    sourcesForSite().forEach((src) => {
+      const bucket = bySection.get(targetSectionOf(src));
+      (bucket || orphans).push(src);
+    });
+
+    const addSourceStep = (src) => {
+      const f = state.findings[src.id] || {};
+      add(`src:${src.id}`, "sources", "input", src.name, {
+        ref: src.id,
+        // Settled: signed off, or answered and not outstanding. Either way there is
+        // nothing left to ask of this source, and re-walking twelve of those is
+        // exactly the volume complaint this mode exists to answer — forward
+        // movement steps over them (focusMove) and the step list reaches them.
+        done: isSignedOff(f) || !isOutstanding(f),
+        // Anything recorded here — a status, a note, a photo — means somebody (or
+        // an import) has already been at this source, wherever the cursor sits.
+        touched: hasAnswer(f) || !!(f.note && f.note.trim()) || !!(f.images && f.images.length),
+      });
+    };
+
+    REPORT_SECTIONS.forEach((sec) => {
+      // Within a section, the existing dashboard ordering: what still needs a human
+      // first, settled work last. sortCards sorts in place, so it gets a copy.
+      const inSec = sortCards((bySection.get(sec.id) || []).slice());
+      inSec.forEach(addSourceStep);
+      const rstate = state.report[sec.id] || {};
+      const gate = inSec.every((src) => hasAnswer(state.findings[src.id] || {}));
+      add(`sec:${sec.id}`, "report", "output", sec.title, {
+        ref: sec.id,
+        sources: inSec.length,
+        // A section with NO sources routed to it still gets a step, marked as such,
+        // so the operator is told it was considered rather than finding it silently
+        // absent. Its gate is vacuously open, so it never blocks progress.
+        noSources: !inSec.length,
+        gate,
+        // The tick is recorded state and the graph never takes it back — but a
+        // section whose gate has RE-OPENED (a source reset to Not checked after the
+        // section was signed off) is not finished any more, so it stops counting as
+        // done and says it needs another look. Nothing it holds is lost: statement,
+        // note and tick are all still on the step when the operator returns to it.
+        reviewed: !!rstate.reviewed,
+        done: !!rstate.reviewed && gate,
+      });
+    });
+    // A source whose category maps to no report section at all still has to be
+    // worked — it just has no output to interleave with. Kept at the end of the
+    // source work rather than dropped on the floor.
+    orphans.forEach(addSourceStep);
+
+    const counts = statusCounts();
+    add("finish:export", "finish", "output", "Check what's left, and export", {
+      gate: true,
+      done: !counts.outstanding && REPORT_SECTIONS.every((sec) => (state.report[sec.id] || {}).reviewed),
+    });
+
+    // ---- settle the states.
+    const at = steps.findIndex((s) => s.id === focusCursor);
+    steps.forEach((s, i) => {
+      if (focusSkipped.has(s.id) && !s.done) { s.state = "skipped"; return; }
+      if (s.done) { s.state = "done"; return; }
+      // An output is ready when its inputs are in, full stop — the gate opening is
+      // the signal, and it does not wait for the cursor to arrive.
+      if (s.kind === "output") { s.state = s.gate === false ? "blocked" : "needs-you"; return; }
+      if (s.ackOnly) { s.state = i < at ? "done" : (i === at ? "needs-you" : "not-reached"); return; }
+      // …and an input is "not reached" only while nothing has happened at it AND
+      // the operator has not got there yet.
+      s.state = (s.touched || at < 0 || i <= at) ? "needs-you" : "not-reached";
+    });
+    return steps;
+  }
+
+  // The cursor resolves by ID. When the step it names has gone — a card re-routed
+  // to another section, internal sources hidden — land on the nearest EARLIER
+  // survivor rather than throwing the operator back to the start, which is what the
+  // previous list of ids is kept for. Not part of focusSteps(): that stays pure.
+  function resolveFocusCursor(steps) {
+    if (!steps.length) { focusStepIds = []; return -1; }
+    let i = steps.findIndex((s) => s.id === focusCursor);
+    if (i < 0) {
+      for (let k = focusStepIds.indexOf(focusCursor) - 1; k >= 0 && i < 0; k--)
+        i = steps.findIndex((s) => s.id === focusStepIds[k]);
+      if (i < 0) i = 0;
+      focusCursor = steps[i].id;
+    }
+    focusStepIds = steps.map((s) => s.id);
+    return i;
+  }
+
+  // ------------------------------------------------------------ mode switching
+  function readUiMode() {
+    try { return localStorage.getItem(LS_MODE) === "workbench" ? "workbench" : "focus"; } catch (_) { return "focus"; }
+  }
+
+  // The label names where the button GOES, never where you are, so it always reads
+  // as a way out. Making Focus the default only works if that is true on first sight.
+  function syncModeButton() {
+    const btn = $("#btn-mode");
+    if (!btn) return;
+    const out = focusLive();
+    btn.textContent = out ? "Workbench ▸" : "Focus ▸";
+    const label = out
+      ? "Switch to the workbench — both panes, everything reachable at once"
+      : "Switch to Focus mode — one step at a time, with the report interleaved";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
+
+  function detachWorkbench() {
+    if (wbStash) return;
+    wbStash = {};
+    for (const id of WB_COLS) {
+      const col = document.getElementById(id);
+      if (!col) continue;
+      const holder = document.createElement("div");
+      holder.append(...Array.from(col.childNodes));
+      wbStash[id] = holder;
+    }
+    // The two purely-derived regions are dropped rather than carried: a stashed
+    // dashboard is still several hundred controls held in memory, and both are
+    // rebuilt from state the moment the workbench comes back.
+    ["#dashboard-groups", "#report-sections"].forEach((sel) => {
+      const node = stashQuery(sel);
+      if (node) node.replaceChildren();
+    });
+  }
+
+  function attachWorkbench() {
+    if (!wbStash) return;
+    releaseAdoptedNodes();
+    for (const id of WB_COLS) {
+      const col = document.getElementById(id), holder = wbStash[id];
+      if (col && holder) col.append(...Array.from(holder.childNodes));
+    }
+    wbStash = null;
+  }
+
+  // Workbench nodes borrowed INTO a Focus step body. The site picker is one: it is
+  // already exactly the control that step needs, and re-parenting it keeps every
+  // listener, so there is no second copy to keep in sync. Where each node came from
+  // is recorded so the workbench is rebuilt intact.
+  const adoptedNodes = [];
+  function adoptNode(node, into) {
+    if (!node || !into) return null;
+    adoptedNodes.push({ node, parent: node.parentNode, next: node.nextSibling, hidden: node.hidden });
+    node.hidden = false;
+    into.append(node);
+    return node;
+  }
+  function releaseAdoptedNodes() {
+    while (adoptedNodes.length) {
+      const a = adoptedNodes.pop();
+      a.node.hidden = a.hidden;
+      if (!a.parent) { a.node.remove(); continue; }
+      if (a.next && a.next.parentNode === a.parent) a.parent.insertBefore(a.node, a.next);
+      else a.parent.append(a.node);
+    }
+  }
+
+  function setUiMode(mode, opts) {
+    mode = mode === "workbench" ? "workbench" : "focus";
+    const o = opts || {};
+    // An in-flight debounced keystroke belongs to the state BOTH modes render, so
+    // it is written before the DOM it was typed into goes away. This is the whole
+    // of "switching loses nothing": there is no per-mode data to migrate.
+    if (mode !== uiMode) flushSave();
+    uiMode = mode;
+    if (o.persist !== false) { try { localStorage.setItem(LS_MODE, uiMode); } catch (_) {} }
+    syncModeButton();
+    if (o.render === false) return;
+    applyUiMode(o);
+  }
+
+  function applyUiMode(opts) {
+    const split = $(".split"), region = $("#focus");
+    if (focusLive()) {
+      detachWorkbench();
+      if (split) split.hidden = true;
+      const shell = $("#mshell"); if (shell) shell.hidden = true;
+      if (region) region.hidden = false;
+      renderFocus(opts);
+      // The pinned-box offsets the stylesheet reads belong to boxes that are no
+      // longer on screen; re-measure so a stale --status-h / --mshell-h can't
+      // offset a scroll in here.
+      measureTopbar(); measureStatusBar(); measureReportHeader(); measureMobileShell();
+      return;
+    }
+    releaseAdoptedNodes();
+    if (region) { region.replaceChildren(); region.hidden = true; }
+    attachWorkbench();
+    if (split) split.hidden = false;
+    if (state.site) renderWorkspace({ focus: false });
+    else { renderRailNav(); renderMobileNav(); }
+    measureTopbar(); measureStatusBar(); measureReportHeader(); measureMobileShell();
+  }
+
+  // ------------------------------------------------------------------ the shell
+  // Identical on every step: where you are, the step's own one-line heading, the
+  // body (which the step owns), and one primary action forward.
+  let focusListOpen = false;
+
+  function renderFocus(opts) {
+    const root = $("#focus");
+    if (!root || !focusLive()) return;
+    const o = opts || {};
+    const active = document.activeElement;
+    const inStep = !!active && root.contains(active);
+    // A BACKGROUND re-render — a result landing, a screenshot pasted in, an agent
+    // writing a note — must not yank the caret out of a control the operator is
+    // TYPING in. (The site picker's search box, the paste box, the correction
+    // fields and a source step's own note are all reachable this way.)
+    //
+    // It must not cost them the render either. Skipping it is how a step whose own
+    // state just moved ends up still saying "Needs you" under a box that was just
+    // ticked — or, worse, how a pasted screenshot lands in state and nowhere on
+    // screen, which reads as a paste that did nothing. So the caret is carried
+    // across instead of being defended by standing still: ids are stable across
+    // renders, and selection and scroll go with them.
+    const typing = o.focus === false && inStep && isTypingControl(active);
+    const caret = (typing && active.id) ? readCaret(active) : null;
+    // Only when there is no id to find the control by again is the render skipped
+    // — there would be nothing to put the caret back into. The next navigation
+    // renders fresh anyway.
+    if (typing && !caret) return;
+    // The same handing-back for controls that are not typed in: a radio, a tick, a
+    // dropzone that has just swallowed a photo.
+    const refocusId = (o.focus === false && inStep && active.id) ? active.id : "";
+    releaseAdoptedNodes(); // whatever the last render borrowed goes home first
+    const steps = focusSteps();
+    const at = resolveFocusCursor(steps);
+    const step = steps[at];
+    root.replaceChildren();
+    if (!step) return;
+
+    const done = steps.filter((s) => s.state === "done").length;
+    // Every arrival lands focus on this heading, so its ACCESSIBLE NAME is the
+    // whole of what a screen reader says about the new screen — and where you are
+    // belongs in it. Hence the hidden prefix: the announcement reads "Step 14 of
+    // 41 — Queensland Globe", one utterance, on the one event that means the
+    // screen changed.
+    //
+    // Deliberately NOT an aria-live region. Live and focus together announce the
+    // same step twice, and a live region on a node this mode re-renders on every
+    // keystroke would read the step's name over the top of the operator's own
+    // typing. Moving focus is already the announcement; nothing else has to fire.
+    const heading = el("h2", { class: "fx-title", id: "fx-title", tabindex: "-1" },
+      el("span", { class: "sr-only" }, `Step ${at + 1} of ${steps.length} — `),
+      step.title);
+
+    fxSpokenNow = new Set(); // …filled by whichever notices this render shows
+    const chrome = renderFocusChrome(step, steps, at, done);
+    root.append(
+      el("div", { class: "fx-shell" },
+        renderFocusIntro(),
+        renderFocusBatchOffer(),
+        renderFocusFlash(),
+        chrome,
+        renderFocusList(steps, at, chrome.querySelector("#fx-list-btn")),
+        // `is-entering` is what the step transition hangs off, and it is set only
+        // on a navigation. This shell is rebuilt on every background re-render —
+        // every keystroke in a note — and a transition on those would flicker the
+        // whole step under the operator's own typing. (Suppressed entirely under
+        // prefers-reduced-motion; see the stylesheet.)
+        el("div", { class: "fx-step" + (o.focus === false ? "" : " is-entering"),
+          "data-kind": step.kind, "data-state": step.state },
+          renderFocusReturn(step),
+          el("p", { class: "fx-kicker" },
+            el("span", { class: "fx-kind" }, step.kind === "output" ? "Review" : "Do"),
+            el("span", { class: "fx-step-state", "data-state": step.state }, FOCUS_STATE_LABEL[step.state] || "")),
+          heading,
+          el("div", { class: "fx-body" }, focusStepBody(step))),
+        renderFocusNav(step, steps, at)));
+    fxSpokenPrev = fxSpokenNow;
+
+    // ONE primary action per step. Continue is it on most of them — but a step
+    // whose body carries its own filled button (the picker's Load site, the step-3
+    // pass this step IS) has already got one, and two filled buttons side by side
+    // is the action-hierarchy problem the panes were fixed for. The step's own
+    // action wins; Continue steps back to "or move on". The borrowed button's own
+    // classes are never touched — syncFlowSteps owns those, and the workbench wants
+    // them back exactly as they were.
+    // Only a primary the operator can actually SEE counts: the site picker carries
+    // one on its coordinates tab, which is folded away while the name tab is open,
+    // and demoting Continue for a button nobody can reach would leave the step with
+    // no filled action at all.
+    const next = root.querySelector("#fx-next");
+    const ownPrimary = Array.from(root.querySelectorAll(".fx-body .btn.primary"))
+      .some((n) => n.getClientRects().length);
+    if (next && ownPrimary) {
+      next.classList.remove("primary");
+      next.classList.add("secondary");
+    }
+
+    afterFocusStep(step);
+
+    // Moving to a step is a jump, and the heading is what it lands on — otherwise
+    // the operator advances and their next Tab restarts from the top bar. `focus:
+    // false` is for the renders that are a side effect of something else (a result
+    // landing, a batch restoring on page load), which nobody asked to be moved by.
+    if (o.focus !== false) { heading.focus({ preventScroll: true }); return; }
+    const backId = caret ? caret.id : refocusId;
+    if (!backId) return;
+    const back = root.querySelector(`#${window.CSS && CSS.escape ? CSS.escape(backId) : backId}`);
+    if (!back) return;
+    back.focus({ preventScroll: true });
+    if (caret) writeCaret(back, caret);
+  }
+
+  // Where the caret is, so it can be put back after the node it was in has been
+  // rebuilt (or, for a borrowed node, re-parented — which blurs it either way).
+  // selectionStart is not readable on every input type, so both directions are
+  // guarded: losing the selection is a nuisance, throwing here would lose the render.
+  function readCaret(n) {
+    const c = { id: n.id, start: null, end: null, top: n.scrollTop };
+    try { c.start = n.selectionStart; c.end = n.selectionEnd; } catch (_) {}
+    return c;
+  }
+  function writeCaret(n, c) {
+    if (c.start != null && n.setSelectionRange) {
+      try { n.setSelectionRange(c.start, c.end); } catch (_) {}
+    }
+    n.scrollTop = c.top;
+  }
+
+  // Is this control one a person can be mid-keystroke in? Text inputs, textareas
+  // and open selects are; buttons, ticks and radios are not.
+  const NON_TYPING_INPUT = /^(checkbox|radio|button|submit|reset|file|image|range|color)$/i;
+  function isTypingControl(n) {
+    if (!n) return false;
+    if (n.tagName === "TEXTAREA" || n.tagName === "SELECT") return true;
+    return n.tagName === "INPUT" && !NON_TYPING_INPUT.test(n.type || "text");
+  }
+
+  // Work a step can only do once its body is actually IN the document. The map
+  // sections are the case that needs it: renderSiteMap()/renderMapPresets() find
+  // their figure with a document-rooted query, so they can only paint after the
+  // borrowed #site-maps has been appended to the live tree.
+  function afterFocusStep(step) {
+    if (step.id !== "site:maps" || !state.site) return;
+    renderMapsSections(); // rebuilds both sections, then paints each slot's current state
+    // …and starts the ones that have never been tried. Deliberately not
+    // ensureAllMaps(): a slot that FAILED must not be retried by the render that
+    // the failure itself triggered, or the step would sit in a retry loop with a
+    // spinner. A failed slot renders its own Retry button.
+    MAP_SLOTS.forEach((slot) => { if (mapState(slot.key).status === "idle") ensureSiteMap(slot.key); });
+  }
+
+  // One sentence, shown once, at the top of the step the operator was just moved
+  // to: what the thing they pressed on the LAST step actually did. Applying an
+  // assistant's reply is the case it exists for — it answers a large part of the
+  // list in one action, and landing silently on some unrelated step three phases
+  // later would leave that unsaid.
+  let focusFlash = null;
+  function renderFocusFlash() {
+    if (!focusFlash) return null;
+    return el("p", { class: "fx-flash", role: fxLive(`flash:${focusFlash}`) }, focusFlash);
+  }
+
+  /* A live region announces itself whenever it APPEARS — and this shell is rebuilt
+     from scratch on every background re-render, which in Focus means every
+     keystroke in a note, every map that lands and every result an agent writes.
+     A notice that merely persists across those renders is a brand new node in a
+     brand new live region each time, so a screen reader reads it again on each
+     one: "The assistant answered 19 of the 23 sources" over and over, under the
+     operator's own typing.
+
+     So a notice is live on the render that first shows it and inert on every
+     render after, keyed by its content — a DIFFERENT flash is a different message
+     and does get announced. Anything that stopped showing is dropped from the set,
+     so a notice that comes back later is announced again, correctly. */
+  let fxSpokenPrev = new Set(), fxSpokenNow = new Set();
+  function fxLive(key) {
+    fxSpokenNow.add(key);
+    return fxSpokenPrev.has(key) ? null : "status";
+  }
+
+  const FOCUS_STATE_LABEL = {
+    done: "Done", "needs-you": "Needs you", skipped: "Skipped",
+    blocked: "Waiting on its sources", "not-reached": "Not started",
+  };
+
+  /* ----------------------------------------------------- the batch handoff
+     The one surface that is genuinely NOT Focus-shaped. A batch is a way of
+     working ACROSS sites — a tray of them, their states side by side, one
+     consistency check over the lot — and Focus is a way of working THROUGH one.
+     Building a Focus equivalent would mean a second navigation model inside a
+     mode whose whole argument is that there is only one thing on screen.
+
+     So it hands over, by the rule every handoff in this mode follows: a labelled,
+     deliberate action that says what it opens and why. Never a silent mode flip
+     — the batch has just loaded and the first site is open in Focus already, so
+     declining is a real answer and costs nothing. Focus is still reachable per
+     site from the tray, by the same top-bar button that got them here. */
+  let focusBatchOffer = 0; // sites in the batch that just landed; 0 = no offer open
+  function offerBatchHandoff(n) {
+    if (!focusLive()) return;
+    focusBatchOffer = n;
+    // focus:false — the batch importer moved the operator to a new site already,
+    // and this is a notice about that move rather than a second one.
+    renderFocus({ focus: false });
+  }
+  function renderFocusBatchOffer() {
+    const n = focusBatchOffer;
+    if (!n) return null;
+    return el("div", { class: "fx-handoff", role: fxLive(`batch:${n}`) },
+      el("p", { class: "fx-handoff-lead" },
+        `A batch of ${n} site${n === 1 ? "" : "s"} is loaded, and the first one is open here.`),
+      el("p", { class: "fx-lede" },
+        "Working across several sites — the tray of all of them, each one's state, and one consistency check over the lot "
+        + "— is the workbench's job; Focus works through one site a step at a time. Both read the same saved work, and "
+        + "Focus is one click away again from the top bar."),
+      el("div", { class: "fx-actions" },
+        el("button", {
+          type: "button", class: "btn secondary",
+          title: "Switches to the workbench and lands on the batch tray. Your work on this site is untouched.",
+          onclick: () => { focusBatchOffer = 0; setUiMode("workbench"); jumpTo($("#batch-bar")); },
+        }, "Open the batch in the workbench ▸"),
+        el("button", {
+          type: "button", class: "btn tertiary",
+          title: "Stay on this step. The batch stays loaded, and the tray is in the workbench whenever you want it.",
+          onclick: () => { focusBatchOffer = 0; renderFocus({ focus: false }); },
+        }, "Stay in Focus")));
+  }
+
+  function renderFocusChrome(step, steps, at, done) {
+    const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
+    return el("div", { class: "fx-chrome" },
+      el("p", { class: "fx-where" },
+        el("span", { class: "fx-phase", "data-phase": step.phase }, FOCUS_PHASE[step.phase] || ""),
+        // No role="status" on either of these. The chrome is rebuilt by every
+        // background re-render — a keystroke in a note, a map landing, an agent
+        // writing a result — and as a live region it announced "Step 14 of 41"
+        // over the top of each one. Arrival is announced once, by focus moving to
+        // the heading, which is the only moment the step actually changed.
+        el("span", { class: "fx-of" }, `Step ${at + 1} of ${steps.length}`),
+        // Progress in words beside the bar. The bar is aria-hidden — it has no
+        // accessible name to give and reads as nothing in greyscale — so the
+        // number it draws is also said plainly, which is what a screen reader and
+        // a greyscale screen both get.
+        el("span", { class: "fx-done" }, `${done} done`)),
+      el("span", { class: "cs-track fx-track", "aria-hidden": "true" },
+        el("span", { class: "cs-fill", style: `width:${pct}%` })),
+      el("button", {
+        type: "button", class: "btn tertiary fx-list-btn", id: "fx-list-btn",
+        "aria-expanded": focusListOpen ? "true" : "false", "aria-controls": "fx-list",
+        title: "Every step, in order, with what each one still needs — and a jump to any of them",
+        onclick: () => toggleFocusList(),
+      }, `All steps ${focusListOpen ? "▴" : "▾"}`),
+      // The shortcuts, where the movement they drive is described. Hidden on
+      // narrow screens by the stylesheet — a phone has no Alt to press, and the
+      // chrome there collapses to phase + n of m.
+      el("p", { class: "fx-keys" },
+        el("kbd", {}, "Alt"), el("span", { "aria-hidden": "true" }, "+"), el("kbd", {}, "→"),
+        el("span", { class: "fx-keys-what" }, "continue"),
+        el("kbd", {}, "Alt"), el("span", { "aria-hidden": "true" }, "+"), el("kbd", {}, "←"),
+        el("span", { class: "fx-keys-what" }, "back")));
+  }
+
+  // Opening the step list puts the keyboard IN it, on the entry for where you are
+  // — a menu that opens with focus left on its trigger has nothing for ↑/↓ to
+  // walk, which makes it a mouse-only list with menu keys bolted on.
+  function toggleFocusList(open) {
+    focusListOpen = open === undefined ? !focusListOpen : !!open;
+    renderFocus({ focus: false }); // …which puts focus back on the trigger
+    if (!focusListOpen) return;
+    const list = $("#fx-list");
+    const here = list && (list.querySelector(".fx-list-item.is-here") || list.querySelector(".fx-list-item"));
+    if (here) here.focus();
+  }
+
+  // Focus mode's answer to the nav rail, and what keeps "the tool proposes an
+  // order, it does not impose one" true: every step, its state, and a jump.
+  // `toggle` is handed in rather than looked up: this runs while the shell is
+  // still being built, so the button it belongs to is not in the document yet.
+  function renderFocusList(steps, at, toggle) {
+    // A real menu, by the same contract the ⋯ menus keep: ↑/↓ walk it, Home/End
+    // jump the ends, Esc closes and hands focus back to the trigger, Tab closes
+    // because focus is leaving anyway. Forty-one entries is exactly the length at
+    // which arrowing beats tabbing.
+    const list = el("div", { class: "fx-list", id: "fx-list", role: "menu", "aria-label": "All steps" });
+    list.hidden = !focusListOpen;
+    if (!focusListOpen) return list;
+    let phase = null, group = null, n = 0;
+    steps.forEach((s, i) => {
+      if (s.phase !== phase) {
+        phase = s.phase;
+        // role="group" with the phase heading as its label: a menu whose children
+        // are anything other than menuitems is one a screen reader may flatten or
+        // skip, and the phase names are worth keeping.
+        const label = el("p", { class: "fx-list-phase", id: `fx-ph-${++n}` }, FOCUS_PHASE[phase] || phase);
+        group = el("div", { class: "fx-list-group", role: "group", "aria-labelledby": label.id }, label);
+        list.append(group);
+      }
+      const here = i === at;
+      group.append(el("button", {
+        // id: the list stays open across background re-renders — a map landing, an
+        // agent writing a result — and each one rebuilds this button. Without an id
+        // renderFocus has no way to hand focus back, so an operator arrowing down
+        // the list at the moment a map resolved was dropped onto <body>.
+        type: "button", role: "menuitem", id: `fxli-${s.id}`,
+        class: "fx-list-item" + (here ? " is-here" : ""),
+        "data-state": s.state, "aria-current": here ? "step" : null,
+        // Selecting closes, as a menu does — and so the jump ends with focus on
+        // the new step's heading rather than stranded in a list about a step the
+        // operator has already left.
+        onclick: () => { focusListOpen = false; focusGoTo(s.id); },
+      },
+        el("span", { class: "fx-list-mark", "aria-hidden": "true" }, FOCUS_STATE_MARK[s.state] || "·"),
+        el("span", { class: "fx-list-name" }, s.title),
+        el("span", { class: "fx-list-state" }, FOCUS_STATE_LABEL[s.state] || "")));
+    });
+    // Wired per render because the list is rebuilt per render — these are fresh
+    // nodes every time, so there is nothing to accumulate listeners on.
+    if (toggle) wireMenuKeys(toggle, list, (open) => toggleFocusList(open), ".fx-list-item");
+    return list;
+  }
+
+  // Status is never carried by colour alone — see the same rule on the source
+  // cards' status glyphs.
+  const FOCUS_STATE_MARK = {
+    done: "✓", "needs-you": "●", skipped: "↷", blocked: "⋯", "not-reached": "○",
+  };
+
+  // What Continue MEANS on this step, when it means more than "next".
+  //
+  // On a SOURCE it is the sign-off as well: the workbench's pill is one control
+  // among twelve, and here the step's conclusion IS the judgement, so the label
+  // says so — and says so only when there is an answer to sign off on.
+  //
+  // On a SECTION it is the review tick: same flag, same setter, same tally as the
+  // workbench's checkbox. That is what makes the empty-section step honest — one
+  // Continue, no controls to answer, and the section still ends up reviewed.
+  //
+  // `go` overrides where Continue lands, and only the return errand sets it.
+  // Continue is never blocked: leaving a source unanswered and coming back to it is
+  // legitimate, the step keeps saying it needs you, and Skip for now is the way
+  // past on purpose.
+  function focusContinue(step) {
+    if (step.id.startsWith("sec:")) {
+      if ((state.report[step.ref] || {}).reviewed) return null;
+      return {
+        label: "Mark reviewed and continue ▸",
+        hint: "Records this section as reviewed in the report's own tally, then moves on",
+        run: () => setSectionReviewed(step.ref, true),
+      };
+    }
+    if (!step.id.startsWith("src:")) return null;
+    const f = state.findings[step.ref] || {};
+    const back = focusReturnSection();
+    const sign = hasAnswer(f) && !isSignedOff(f);
+    if (!sign && !back) return null;
+    // On an errand, Continue is the way home — that is the whole of "go and check
+    // one, then come back": one button, and it says where it goes.
+    if (back) return {
+      label: sign ? `Sign off and back to ${back.title} ▸` : `Back to ${back.title} ▸`,
+      hint: sign
+        ? `Records your sign-off on this source, then returns to the ${back.title} section`
+        : `Returns to the ${back.title} section, where you came from`,
+      run: () => { if (sign) setReviewed(step.ref, true); },
+      go: () => focusGoTo(`sec:${back.id}`),
+    };
+    return {
+      label: "Sign off and continue ▸",
+      hint: "Records your sign-off on this source, then moves to the next step",
+      run: () => setReviewed(step.ref, true),
+    };
+  }
+
+  // The section a return errand leads back to, or null when none is armed.
+  function focusReturnSection() {
+    if (!focusReturn || !focusReturn.startsWith("sec:")) return null;
+    return REPORT_SECTIONS.find((s) => s.id === focusReturn.slice(4)) || null;
+  }
+
+  // Offered at the head of the step an errand landed on. The caveat strip on a
+  // section — "three of these sources were never checked" — is a prompt to go and
+  // check one, and the whole value of that prompt is that coming back is one click
+  // and lands where it left, with the section's state intact.
+  function renderFocusReturn(step) {
+    const back = focusReturnSection();
+    if (!back || `sec:${back.id}` === step.id) return null;
+    return el("p", { class: "fx-return" },
+      el("span", { class: "fx-return-lead" }, "On an errand from"),
+      el("button", { type: "button", class: "fx-return-btn",
+        title: `Back to the ${back.title} section, exactly where you left it`,
+        onclick: () => focusGoTo(`sec:${back.id}`) }, `◂ ${back.title}`));
+  }
+
+  function renderFocusNav(step, steps, at) {
+    // Before a site is picked there is exactly one step, and Back / Skip / Continue
+    // would each be a lie about somewhere to go. The step's own control is the way
+    // forward, and it is the only primary action on the surface.
+    if (steps.length < 2) return null;
+    const last = at >= steps.length - 1;
+    const cont = focusContinue(step);
+    return el("div", { class: "fx-nav" },
+      el("button", {
+        type: "button", class: "btn tertiary", id: "fx-back", disabled: at <= 0 ? "disabled" : null,
+        onclick: () => focusMove(-1),
+      }, "◂ Back"),
+      el("span", { class: "fx-nav-gap" }),
+      // "Skip" means "leave this one, show me the next"; on the last step there is
+      // no next for it to mean.
+      last ? null : el("button", {
+        type: "button", class: "btn tertiary", id: "fx-skip",
+        title: "Leave this one for later — it stays on the step list and nothing is lost",
+        onclick: () => { focusSkipped.add(step.id); focusMove(1); },
+      }, "Skip for now"),
+      el("button", {
+        type: "button", class: "btn primary", id: "fx-next",
+        title: cont && !last ? cont.hint : null,
+        onclick: () => {
+          if (last) return focusGoTo(steps[0].id);
+          cont && cont.run();
+          // …and only then the movement, so the step's own record is written
+          // before the list it is about to be recomputed from.
+          return cont && cont.go ? cont.go() : focusMove(1);
+        },
+      }, last ? "Back to the start" : (cont ? cont.label : "Continue ▸")));
+  }
+
+  // Making Focus the default changes the tool for people who were happy with it, so
+  // the first Focus session says once — and only once — that the old view is one
+  // click away. A browser flag, like the collection guide's: this is onboarding,
+  // not chrome, and nobody should meet it twice.
+  const LS_FOCUS_SEEN = LS_PREFIX + "focus-seen";
+  function focusIntroSeen() { try { return localStorage.getItem(LS_FOCUS_SEEN) === "1"; } catch (_) { return true; } }
+  function renderFocusIntro() {
+    if (focusIntroSeen()) return null;
+    return el("p", { class: "fx-intro", role: fxLive("intro") },
+      el("span", {},
+        "This is ", el("b", {}, "Focus"), " — one step at a time, with the report built into the flow. ",
+        "The full workbench is one click away, top right, whenever you want it."),
+      el("button", {
+        type: "button", class: "btn tertiary tiny",
+        onclick: () => {
+          try { localStorage.setItem(LS_FOCUS_SEEN, "1"); } catch (_) {}
+          renderFocus({ focus: false });
+        },
+      }, "Got it"));
+  }
+
+  // `flash` is the one-sentence receipt to carry ONTO the step being moved to.
+  // Every ordinary navigation passes nothing, which is what clears a stale one:
+  // the message belongs to the move that produced it and to no other.
+  //
+  // `opts.returnTo` is the same idea for the way BACK: an errand out of a section
+  // step arms it, every other navigation clears it, so the offer to return can
+  // never outlive the errand that made it.
+  function focusGoTo(id, flash, opts) {
+    focusCursor = id;
+    focusFlash = flash || null;
+    focusReturn = (opts && opts.returnTo) || null;
+    // A discrete choice, and often the last thing done before a reload — persist it
+    // now rather than 400 ms later.
+    save(); flushSave();
+    renderFocus();
+  }
+  // A source with nothing left to ask of it. The last step is never one (it is the
+  // finish step), so the walk below always terminates on something worth arriving at.
+  const isSettledSource = (s) => s.id.startsWith("src:") && s.state === "done";
+
+  // Forward movement steps OVER settled sources; Back never does.
+  //
+  // Twelve of a typical site's sources come back settled from the automated round
+  // trip, and presenting each of them as a screen that asks nothing is the volume
+  // this mode exists to answer. Back is the retracing motion, though — and by the
+  // time it is pressed, Continue has usually just SETTLED the source it would be
+  // retracing to — so it moves one step at a time and can always reach the step
+  // just left. Anything either of them passes is one click away in the step list.
+  function focusMove(delta) {
+    const steps = focusSteps();
+    const at = resolveFocusCursor(steps);
+    let next = Math.max(0, Math.min(steps.length - 1, at + delta));
+    if (delta > 0) while (next < steps.length - 1 && isSettledSource(steps[next])) next++;
+    focusGoTo(steps[next].id);
+  }
+
+  /* --------------------------------------------------------------- the shortcuts
+     Documented on the step chrome, because a shortcut nobody is told about is not
+     an accessibility feature.
+
+     Alt is the modifier, and the choice is forced: this surface is full of
+     textareas, selects and a four-way radiogroup, so a bare arrow belongs to the
+     caret and to the roving tabindex, and Enter belongs to whatever control has
+     focus. Neither can be taken from them.
+
+     The keys press the buttons rather than reimplementing them, so Alt+→ cannot
+     drift from what Continue does — the sign-off it records, the errand it
+     returns from, the wrap-around on the last step all come along for free, and a
+     disabled Back is simply never pressed. */
+  const DIALOGS = ".qm-overlay, .bb-overlay, .rp-overlay, .lb-overlay";
+  // Is one of the app's four modals up? Each conceals itself differently — a
+  // `hidden` attribute, a .show class, or both — so the question is asked of the
+  // layout instead of any one of those flags. Same test trapFocus uses.
+  const dialogOpen = () => $$(DIALOGS).some((n) => n.getClientRects().length);
+
+  function wireFocusKeys() {
+    document.addEventListener("keydown", (e) => {
+      if (!focusLive() || e.defaultPrevented) return;
+      // A modal is its own world, with its own Escape and its own Tab trap.
+      // Moving the step underneath one would strand the operator in a dialog
+      // belonging to a step they are no longer on.
+      if (dialogOpen()) return;
+      if (e.key === "Escape") {
+        if (!focusListOpen) return;
+        e.preventDefault();
+        // Focus is left exactly where it is. Escape from INSIDE the list is
+        // wireMenuKeys' — it stops propagation before this runs, and hands focus
+        // back to the trigger. This branch is the other case, where the list is
+        // merely open and the operator is typing somewhere else entirely.
+        toggleFocusList(false);
+        return;
+      }
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const btn = $(e.key === "ArrowRight" ? "#fx-next" : "#fx-back");
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      btn.click(); // …which navigates, which moves focus to the new step's heading
+    });
+  }
+
+  // ------------------------------------------------------------- the step bodies
+  // Every step id in the graph resolves to a body now. The lede-plus-handoff
+  // fallback at the foot of focusStepBody stays as the safety net for a step id
+  // that ever gets added without one: a labelled route to the same controls in the
+  // workbench, rather than a screen that says nothing.
+  const FOCUS_LEDE = {
+    "site:details": "Filled in from the Bureau station list. Read it back — it is usually right — then set the date this assessment was made.",
+    "site:maps": "Two satellite locators are stitched for every site: the close surrounds, and the region around them. Check they show the place you mean.",
+    // Leads with the gesture every device has. Ctrl+V and drag-and-drop are named
+    // second and qualified, because on the phone this step is read on they do not
+    // exist — and an instruction that opens with one of them reads as "you cannot
+    // do this here".
+    "site:photos": "Optional. Take a photo or choose one from this device — or, at a desktop, paste a screenshot with Ctrl+V or drag an image in. They carry through to the report. Continue past this if you have none.",
+    "out:identity": "The front page of the deliverable, as it now reads. Nothing further is asked of you here — check it says the right site, and tick it off.",
+    "checks:auto": "Queries every source with a public data API (Atlas of Living Australia, WildNet…) straight from your browser.",
+    "checks:prompt": "One self-contained prompt for this site — paste it into ChatGPT, Gemini, Claude or Copilot and let it research the rest.",
+    "checks:paste": "The assistant answers with one JSON object. Anything it leaves blank keeps the result you already have.",
+    "finish:export": "What is still outstanding, and every way this report leaves the app.",
+  };
+
+  function focusStepBody(step) {
+    if (step.id === "site:pick") {
+      // The picker IS this step. Borrowed rather than rebuilt, so the autocomplete,
+      // the coordinate tab and every listener on them are the same ones.
+      const box = el("div", { class: "fx-adopt" });
+      adoptNode($("#site-picker"), box);
+      return box;
+    }
+    const body = el("div", {});
+    if (step.id.startsWith("src:")) return focusSourceBody(step, body);
+    if (step.id.startsWith("sec:")) return focusSectionBody(step, body);
+    const own = FOCUS_BODY[step.id];
+    if (own) return own(step, body);
+    const lede = FOCUS_LEDE[step.id];
+    if (lede) body.append(el("p", { class: "fx-lede" }, lede));
+    body.append(focusHandoffBtn(step, "Open this in the workbench"));
+    return body;
+  }
+
+  /* --------------------------------------------------- site · details · identity
+     The opening run of steps, and the first interleaved output. Every one of them
+     borrows the workbench control that already does the job rather than growing a
+     second copy of it: the correction disclosure, the two map sections, the photo
+     dropzone and the three step-3 actions are all the SAME nodes, re-parented for
+     as long as the step is on screen and put back by releaseAdoptedNodes(). That
+     is what makes "a run in Focus shows as done in the workbench" true by
+     construction rather than by a synchronisation routine. */
+
+  // The station record, read back rather than typed. Auto-filled from the Bureau
+  // station list and right nearly every time, so this is a confirmation with one
+  // correction affordance behind it — not six input boxes asking to be re-entered.
+  function focusDetailsBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["site:details"]));
+    const dl = el("dl", { class: "fx-record" });
+    stationRecordRows().forEach(([k, v]) => dl.append(
+      el("div", { class: "fx-record-row" }, el("dt", {}, k), el("dd", {}, String(v == null ? "—" : v)))));
+    if (state.site && state.site.manual)
+      dl.append(el("div", { class: "fx-record-row" }, el("dt", {}, "Source"), el("dd", {}, "Manual coordinate entry")));
+    body.append(dl);
+    // One affordance, shut by default — the whole point of the read-back above is
+    // that correcting it is the exception.
+    const correct = el("div", { class: "fx-adopt" });
+    adoptNode($("#sd-correct"), correct);
+    body.append(correct);
+    // …and the two fields that ARE routinely typed here.
+    const fields = el("div", { class: "fx-adopt" });
+    adoptNode($(".summary-editable"), fields);
+    body.append(fields);
+    return body;
+  }
+
+  // Both locator maps, arriving. The map sections are borrowed whole, so the size
+  // presets, the roads/labels toggle and Refresh are the controls the workbench
+  // has — but they start folded away: at rest this step asks one question ("is
+  // this the right place?") and two pictures answer it. Ten preset buttons on
+  // screen to ask that would be the wrong step.
+  function focusMapsBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["site:maps"]));
+    const maps = el("div", { class: "fx-adopt fx-maps" });
+    adoptNode($("#site-maps"), maps);
+    const tune = el("button", {
+      type: "button", class: "btn tertiary", "aria-expanded": "false", "aria-controls": "site-maps",
+      title: "Change how far across each map is, and whether roads and place names are drawn on it",
+      onclick: (e) => {
+        const on = maps.classList.toggle("is-tuning");
+        e.currentTarget.setAttribute("aria-expanded", on ? "true" : "false");
+        e.currentTarget.textContent = on ? "Hide the map controls ▴" : "Size, labels and refresh ▾";
+      },
+    }, "Size, labels and refresh ▾");
+    body.append(maps, el("div", { class: "fx-actions" }, tune));
+    return body;
+  }
+
+  // Paste, drag, or choose a file — the same zone the workbench uses, so a
+  // Ctrl+V anywhere on this step lands here exactly as it does over there (the
+  // document-level listener in wireSiteDetails is what catches the ones the zone
+  // itself doesn't).
+  function focusPhotosBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["site:photos"]));
+    const zone = el("div", { class: "fx-adopt" });
+    adoptNode($(".photo-section"), zone);
+    body.append(zone);
+    return body;
+  }
+
+  // The first output. Not a summary of the front page — the front page: the
+  // document header's own words, the real locator maps, the real photographs, and
+  // the same Reviewed tick the report pane carries, writing the same state.
+  function focusIdentityBody(step, body) {
+    const idt = reportIdentityText();
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["out:identity"]));
+    const head = el("div", { class: "fx-rdoc" },
+      el("p", { class: "fx-rdoc-kicker" }, "Environmental Site Summary"),
+      el("h3", { class: "fx-rdoc-name" }, idt.name),
+      el("p", { class: "fx-rdoc-ids" }, idt.ids));
+    // Folded, because the document header folds it: what tells two open sites
+    // apart is the line above, and the rest of the record is a disclosure over
+    // there too (#rdoc-detail is `hidden` until Details ▾ is pressed).
+    const dl = el("dl", { class: "fx-record fx-rdoc-detail" });
+    idt.detail.forEach(([k, v]) => dl.append(
+      el("div", { class: "fx-record-row" }, el("dt", {}, k), el("dd", {}, v))));
+    head.append(el("details", { class: "fx-rdoc-more" },
+      el("summary", {}, "The rest of the record"), dl));
+    body.append(head);
+
+    const maps = reportMapsBlock(), photos = reportPhotosBlock();
+    if (maps) body.append(maps);
+    if (photos) body.append(photos);
+    if (!maps) body.append(el("p", { class: "fx-lede" },
+      MAP_SLOTS.some((slot) => (state.maps[slot.key] || {}).status === "loading")
+        ? "The locator maps are still being stitched — they will appear here as they arrive."
+        : "No locator map has been generated yet. Go back a step to retry it."));
+
+    // The tick and the way in to change any of it, on one row — they are the two
+    // answers to the same question ("does this front page read right?"), and a
+    // second row for the second answer is a row this step cannot spare.
+    body.append(el("div", { class: "fx-actions fx-review" },
+      identityReviewToggle(null, "fx-identity-reviewed"),
+      el("button", { type: "button", class: "btn secondary", onclick: () => focusHandoffTo(step) },
+        "Open this in the report pane ▸")));
+    return body;
+  }
+
+  /* ---------------------------------------------------- the automated round trip
+     Three steps, one sequence — and it already knows it is one. state.flow /
+     syncFlowSteps / markFlowDone record each pass and its one-line receipt, per
+     site, which is exactly what a Focus step needs, so nothing here invents a
+     second done-tracker: the workbench's receipts ARE these steps' done summaries,
+     and a run in either mode shows as run in the other. */
+  const FLOW_OF_STEP = { "checks:auto": "auto", "checks:prompt": "prompt", "checks:paste": "applied" };
+  const CHECKS_STEPS = Object.keys(FLOW_OF_STEP);
+
+  function focusChecksBody(step, body) {
+    const key = FLOW_OF_STEP[step.id];
+    const flow = state.flow || (state.flow = freshFlow());
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE[step.id]));
+    // What this pass did, last time it ran — the workbench's receipt, verbatim.
+    if (flow[key]) body.append(el("p", { class: "fx-receipt" },
+      el("b", {}, "✓ "), flow.notes[key] || FLOW_STEPS.find((f) => f.key === key).done));
+    // The action itself, borrowed: the button, its status line and (on the paste
+    // step) the textarea are the workbench's own, wiring included.
+    const doBox = el("div", { class: "fx-adopt fx-flow-do" });
+    adoptNode($(`.flow-step[data-flow="${key}"] .flow-do`), doBox);
+    body.append(doBox);
+    // A user working entirely by hand should be able to pass the whole assistant
+    // round trip in one action rather than three.
+    body.append(el("div", { class: "fx-actions" },
+      el("button", {
+        type: "button", class: "btn tertiary",
+        title: "Leave all three of the automated passes — you can come back to any of them from the step list",
+        onclick: () => {
+          CHECKS_STEPS.forEach((id) => focusSkipped.add(id));
+          const steps = focusSteps();
+          const after = steps.findIndex((s) => s.id === "checks:paste");
+          focusGoTo((steps[after + 1] || steps[steps.length - 1]).id);
+        },
+      }, "Skip all three ▸")));
+    // …and the other way past all three: the BYOK agent, offered on the first of
+    // them because it is an alternative to the whole sequence, not an extra pass.
+    if (step.id === "checks:auto") body.append(focusAgentHatch());
+    return body;
+  }
+
+  /* ------------------------------------------------ the BYOK agent, from Focus
+     `assets/agent.js` writes through the same narrow `window.ESS` seam every
+     other route into state uses, so a live run needs no Focus-specific plumbing
+     at all: `setResult` calls `refreshCard`, which in Focus re-renders the step,
+     and the step graph is recomputed from state on every one of those — so the
+     flow reshapes itself under the operator as the answers land.
+
+     What this adds is the offer and the landing. The panel is the workbench's
+     own node, borrowed (key field, model picker, Run and its status line), so
+     there is no second copy of a control that holds an API key. Shut by default:
+     an assessment that is going to be worked by hand should not be met by a
+     request for a credential. */
+  let focusAgentOpen = false;
+  // How many sources the agent run in flight has recorded. Reset by ESS.beginRun,
+  // counted by ESS.setResult, read by ESS.endRun — which is the only way to tell a
+  // run that did the work from one that failed on its first turn, since endRun
+  // fires from agent.js's `finally` either way.
+  let agentRunWrote = 0;
+  function focusAgentHatch() {
+    // agent.js is optional — index.html ships the empty panel and the button that
+    // opens it, and the module unhides that button when it activates. No module,
+    // no offer, rather than a control that does nothing.
+    const settings = $("#btn-agent-settings"), panel = $("#agent-panel");
+    if (!settings || settings.hidden || !panel) return null;
+    const box = el("div", { class: "fx-hatch" });
+    box.append(el("div", { class: "fx-actions" }, el("button", {
+      type: "button", class: "btn tertiary",
+      "aria-expanded": focusAgentOpen ? "true" : "false", "aria-controls": "agent-panel",
+      title: "Claude works through every source itself using your own Anthropic API key, instead of the copy-prompt round trip. The key stays in this browser.",
+      onclick: () => { focusAgentOpen = !focusAgentOpen; renderFocus({ focus: false }); },
+    }, focusAgentOpen ? "Hide the Claude runner ▴" : "Or have Claude run every source ▾")));
+    if (focusAgentOpen) {
+      const holder = el("div", { class: "fx-adopt fx-agent" });
+      adoptNode(panel, holder);
+      // The panel carries its own Close, which hides it. In the workbench that is
+      // the whole gesture; here it would leave an open disclosure over nothing, so
+      // the disclosure follows it shut. A bubbling listener, so it runs after
+      // agent.js's own handler has done the hiding — and no change to agent.js,
+      // which is the point of the seam.
+      holder.addEventListener("click", () => {
+        if (!panel.hidden) return;
+        focusAgentOpen = false;
+        renderFocus({ focus: false });
+      });
+      box.append(holder);
+    }
+    return box;
+  }
+
+  // Where a finished agent run leaves the operator. The run answers a large part
+  // of the list in one action and reshapes the flow doing it, so landing silently
+  // on whatever step was open when it started would leave that unsaid — this is
+  // the same contract as focusAfterApply, for the other route to the same result.
+  function focusAfterRun(wrote) {
+    const c = statusCounts();
+    const said = [
+      wrote ? `${wrote} source${wrote === 1 ? "" : "s"} answered` : "Run finished",
+      c.outstanding ? `${c.outstanding} still need${c.outstanding === 1 ? "s" : ""} you` : "nothing left outstanding",
+    ].join(" · ");
+    const steps = focusSteps();
+    // The first step that still wants a human: a source if there is one, else the
+    // first output waiting to be reviewed, else the finish step. Never a dead end.
+    const target = steps.find((s) => s.id.startsWith("src:") && s.state === "needs-you")
+      || steps.find((s) => s.kind === "output" && s.state === "needs-you")
+      || steps[steps.length - 1];
+    focusGoTo(target.id, `✓ Claude's run finished — ${said}.`);
+  }
+
+  // Where an applied reply leaves the operator, and what it tells them on arrival.
+  // The count comes from the same statusCounts() the collection bar reads, so the
+  // sentence here and the number over there can never disagree.
+  function focusAfterApply(answered) {
+    const left = statusCounts().outstanding;
+    const said = [
+      answered ? `${answered} source${answered === 1 ? "" : "s"} answered` : "Reply applied",
+      left ? `${left} still need${left === 1 ? "s" : ""} you` : "nothing left outstanding",
+    ].join(" · ");
+    const steps = focusSteps();
+    // The first source step that still needs a human. Falling back to the step
+    // after the paste step keeps this from ever being a dead end on a site the
+    // reply answered outright.
+    const target = steps.find((s) => s.id.startsWith("src:") && s.state === "needs-you")
+      || steps[steps.findIndex((s) => s.id === "checks:paste") + 1]
+      || steps[steps.length - 1];
+    focusGoTo(target.id, `✓ ${said}.`);
+  }
+
+  const FOCUS_BODY = {
+    "site:details": focusDetailsBody,
+    "site:maps": focusMapsBody,
+    "site:photos": focusPhotosBody,
+    "out:identity": focusIdentityBody,
+    "checks:auto": focusChecksBody,
+    "checks:prompt": focusChecksBody,
+    "checks:paste": focusChecksBody,
+    "finish:export": focusFinishBody,
+  };
+
+  /* -------------------------------------------------------------- a source step
+     The headline step, and where most of an assessment is spent: one source,
+     alone on the screen, asking the one question that source exists to answer.
+
+     The workbench card already sequences this correctly — identity → what came
+     back → your answer → evidence → into the report → done — so that order stays,
+     and every control on it is the workbench's own renderer writing the same
+     state. There is no second implementation of anything here, which is what
+     makes "a source answered in Focus is answered in the workbench, and the other
+     way round" true by construction.
+
+     What changes is that the card IS the screen, so the things that had to be
+     folded away to fit 23 cards in a column are open by default: the instruction
+     (the ⓘ disclosure), the whole of the result text (the four-line clamp), and
+     the evidence zone once the result is Found. The ⋯ stays a ⋯ — those really
+     are occasional — and the sign-off pill becomes the step's Continue. */
+  function focusSourceBody(step, body) {
+    const src = DATA.sources.find((s) => s.id === step.ref);
+    if (!src) {
+      body.append(el("p", { class: "fx-lede" },
+        "This source is no longer in the registry — nothing is asked of you here."));
+      return body;
+    }
+    const f = state.findings[src.id] || (state.findings[src.id] =
+      { status: STATUS.UNSET, note: "", result: null, images: [], reviewed: false });
+    if (!f.images) f.images = [];
+    body.classList.add("fx-source");
+
+    // The note is built first because the ⋯ menu's "Clear my note" needs it; it is
+    // appended in its own zone further down.
+    const note = el("textarea", {
+      class: "note-field", id: `fx-note-${src.id}`, rows: "1",
+      "aria-label": `Your note on ${src.name}`,
+      placeholder: "Your own words for the report…",
+      oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
+      onchange: () => { renderReport(); },
+    });
+    note.value = f.note || "";
+
+    // ---- 1. which source, and why -----------------------------------------
+    // Open, not behind ⓘ. On the card this is reference prose repeated 23 times
+    // down a column and it earns a disclosure; here it is the instruction for the
+    // step, and the operator who most needs it is the one who would never think
+    // to open a disclosure to find it.
+    body.append(el("p", { class: "fx-facts" },
+      el("span", { class: "tag jur" }, src.jurisdiction === "national" ? "National" : (state.site.state || "State")),
+      src.method === "api"
+        ? el("span", { class: "tag api" }, "Queried by API")
+        : el("span", { class: "tag method" }, "Checked by hand"),
+      src.internal ? el("span", { class: "tag internal" }, "Internal — BOM staff only") : null,
+      // Sign-off is normally recorded BY Continue, so the only time it needs
+      // stating is when it has already happened and the step is being revisited.
+      isSignedOff(f) ? el("span", { class: "fx-fact" }, "✓ Signed off") : null));
+    if (src.what_to_find)
+      body.append(el("p", { class: "fx-lede" }, el("b", {}, "What to look for: "), src.what_to_find));
+    if (src.instructions)
+      body.append(el("p", { class: "fx-lede" }, el("b", {}, "How to run it: "), src.instructions));
+
+    // ---- 2. open the source -----------------------------------------------
+    // The whole point of the step, and its one filled button. Same handler the
+    // card's primary carries: the click copies the coordinates on the way out, so
+    // the source's own search box can be filled by paste.
+    const tools = el("div", { class: "fx-actions" });
+    const url = buildUrl(src);
+    if (url) tools.append(el("a", {
+      class: "btn primary", href: url, target: "_blank", rel: "noopener",
+      onclick: () => copy(`${state.site.lat}, ${state.site.lon}`, "Coordinates copied"),
+    }, "Open the source ↗"));
+    // The specialist tools stay on their own source, where they belong — each
+    // opens the workbench's own handler, from here, with no trip through the
+    // other mode. They are alternatives to "go and look", never a second filled
+    // button competing with it.
+    // id: capturing a map writes a finding, which repaints this step while the
+    // map is still open — so the button that opened it has to be findable again
+    // by the time the map closes and hands focus back. See restoreFocusAfterDialog.
+    if (src.id === "qld-globe" && state.site.state === "QLD")
+      tools.append(el("button", { type: "button", class: "btn secondary", id: "fx-open-qldmap",
+        onclick: () => openQldGlobeMap(src) }, "Open site map"));
+    const runner = apiRunnerFor(src);
+    // id: the runner paints its progress into #run-… / #res-… by document lookup.
+    // Only one mode's copy of those ids is ever in the document — the workbench's
+    // dashboard is dropped while Focus is live — so they cannot collide.
+    if (runner) tools.append(el("button", { type: "button", class: "btn secondary",
+      id: `run-${src.id}`, onclick: () => runner(src) }, "Check live"));
+    if (src.xlsx_import === "pmst_mnes") {
+      const fileInput = el("input", {
+        type: "file", accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", hidden: true,
+        onchange: (e) => { const file = e.target.files && e.target.files[0]; if (file) importPmstXlsx(src.id, file, importBtn); e.target.value = ""; },
+      });
+      const importBtn = el("button", { type: "button", class: "btn secondary",
+        onclick: () => fileInput.click() }, "Import PMST Excel");
+      tools.append(importBtn, fileInput);
+    }
+    tools.append(renderCardMenu(src, note, { handoff: step }));
+    body.append(tools);
+
+    // ---- 3. what came back -------------------------------------------------
+    // In full. The four-line clamp exists because 23 cards share one column; here
+    // there is one, and a truncated finding is the operator reading half of what
+    // the machine actually found. A source nobody has run has none of this, and
+    // the step then reads as "go and look" — which is exactly what it is.
+    const resultPanel = el("div", { class: "src-result", id: `res-${src.id}` });
+    if (f.result) paintResult(resultPanel, f.result.html, { status: f.status, err: f.result.err });
+    body.append(resultPanel);
+
+    // ---- 4. your answer ----------------------------------------------------
+    // Stated once, and always open: on a screen of its own the answer IS the
+    // question, and a Manual or Failed source collapsing to a chip would ask for a
+    // click before it could be changed.
+    const hint = el("p", { class: "do-hint", id: `fx-hint-${src.id}`, hidden: true },
+      "Found ≠ good news — a protected species means caution on site. Signing off is your judgement about this source, tracked separately from the result.");
+    const lead = el("button", {
+      type: "button", class: "do-lead do-lead-info", "aria-expanded": "false", "aria-controls": hint.id,
+      title: "What Result means, and how it relates to signing off",
+      onclick: () => {
+        const open = hint.hidden;
+        hint.hidden = !open;
+        lead.setAttribute("aria-expanded", open ? "true" : "false");
+        lead.classList.toggle("on", open);
+      },
+    }, "Result", el("span", { class: "do-lead-mark", "aria-hidden": "true" }, "ⓘ"));
+    body.append(el("div", { class: "fx-answer" },
+      el("div", { class: "do-row" }, lead, renderStatusControl(src, f, { open: true })),
+      hint));
+
+    // ---- 5. your note ------------------------------------------------------
+    body.append(el("div", { class: "src-note" },
+      el("div", { class: "note-head" }, el("span", { class: "zone-label" }, "Your note")),
+      note));
+
+    // ---- 6. evidence -------------------------------------------------------
+    // Revealed when the result is Found, which is when evidence is wanted — the
+    // same set the card opens, so a zone opened in either mode is open in both.
+    // Everything in it is renderPhotoBlock's: the drop/paste/pick zone and, on
+    // species cards, both Wikipedia reference-image controls.
+    if (PHOTO_CATEGORIES.has(src.category)) {
+      if (f.status === STATUS.FOUND) CARD_OPEN.photos.add(src.id);
+      const photos = renderPhotoBlock(src, f);
+      body.append(el("div", { class: "fx-evidence" },
+        el("div", { class: "note-head" },
+          el("span", { class: "zone-label" }, "Evidence"), photos.addBtn),
+        photos.body));
+    }
+
+    // ---- 7. where it goes --------------------------------------------------
+    // Quieter here than on the card, and without the sign-off pill: the default
+    // routing is right nearly always, and this section is a few steps away, where
+    // a mistake in it is obvious and correctable.
+    body.append(renderIncludeRow(src, { signoff: false }));
+    // The note can only be sized once it is laid out; the batched frame this
+    // queues runs after the step has been appended to the document.
+    queueCardMetrics();
+    return body;
+  }
+
+  // The source a stray Ctrl+V belongs to. In Focus a source step IS the screen, so
+  // a screenshot pasted anywhere on it is that source's evidence rather than a
+  // station photo. The evidence zone's own listener still claims the pastes made
+  // into it (and calls preventDefault); this only names where the rest should go.
+  function focusPasteSourceId() {
+    if (!focusLive() || !focusCursor || !focusCursor.startsWith("src:")) return null;
+    const id = focusCursor.slice(4);
+    const src = DATA.sources.find((s) => s.id === id);
+    return src && PHOTO_CATEGORIES.has(src.category) ? id : null;
+  }
+
+  /* ------------------------------------------------------- a report section step
+     The half of this mode that makes it more than a wizard. The operator has just
+     worked through every source routed to this section; the evidence is still in
+     their head. This step asks the one question that is worth asking at exactly
+     that moment: HERE IS WHAT THE REPORT NOW SAYS ABOUT INVASIVE PLANTS — IS THAT
+     RIGHT?
+
+     Five things, in the order a person answers them:
+
+       1  what this section concludes   the standardized statement
+       2  ⚠ anything inconsistent       sectionWarnings, at the moment it can be acted on
+       3  the detail                    the free-text note, with a draft on offer
+       4  what it rests on              the evidence, split three ways (#49)
+       5  reviewed ✓                    the section's own tick, which is Continue
+
+     Item 2 is why the step exists. In the workbench those warnings sit in the
+     right pane, where an operator concentrating on collection may never look; here
+     they are on the screen at the moment the operator is deciding, which is the
+     only moment they can act on. (They still never reach the exported artefact.)
+
+     Every control is the report pane's own renderer writing the same state through
+     the same helpers — suggestChoice, sectionNarrative, sectionWarnings,
+     syncBioDetail, renderSectionEvidence, setSectionReviewed — so a section written
+     in Focus IS the section the report shows, by construction. `body` doubles as
+     the `box` those helpers take: it holds this section's .r-warns and #bio-detail,
+     and only one mode's copy of either is ever in the document. */
+  function focusSectionBody(step, body) {
+    const section = REPORT_SECTIONS.find((s) => s.id === step.ref);
+    if (!section) {
+      body.append(el("p", { class: "fx-lede" },
+        "This section is no longer in the proforma — nothing is asked of you here."));
+      return body;
+    }
+    ensureReportChoices(); // the auto-suggested statement, on the mode that has no report pane
+    const rstate = state.report[section.id] || (state.report[section.id] = newReportState(section.id));
+    body.classList.add("fx-section");
+
+    // A section nothing feeds: one screen, one sentence, and Continue records the
+    // review. Being told a section was considered and found irrelevant is worth a
+    // screen; a blank form asking nothing is not.
+    if (step.noSources) {
+      body.append(el("p", { class: "fx-lede" },
+        `No source that applies to this site feeds ${section.title}. It was considered — nothing is needed from you here, and Continue marks it reviewed.`));
+      body.append(el("div", { class: "fx-actions fx-review" },
+        sectionReviewToggle(section.id, { box: body, inputId: `fx-sec-rev-${section.id}` })));
+      return body;
+    }
+
+    // ---- 0. the gate, when it is not shut behind us -------------------------
+    // Reachable early (the step list never traps anything) and reachable AGAIN
+    // after a source is reset to Not checked. Both cases say what is outstanding
+    // and offer the errand; neither hides the work already recorded below.
+    if (!step.gate) {
+      const waiting = sourcesForSite().filter((s) =>
+        targetSectionOf(s) === step.ref && !hasAnswer(state.findings[s.id] || {}));
+      const n = waiting.length;
+      body.append(el("div", { class: "fx-reopen" },
+        el("p", { class: "fx-reopen-lead" }, step.reviewed
+          ? `You reviewed this section, and ${n} of its sources ${n === 1 ? "has" : "have"} gone back to Not checked since. Your statement, note and tick are all still here — it needs another look, not re-writing.`
+          : `${n} of this section's ${step.sources} sources ${n === 1 ? "is" : "are"} still unanswered. You can write the section now, but check what it rests on first.`),
+        el("div", { class: "fx-waiting" }, waiting.slice(0, 8).map((s) =>
+          el("button", { type: "button", class: "fx-waiting-src",
+            title: `Go to ${s.name}, then come straight back here`,
+            onclick: () => showSourceCard(s.id) }, s.name)))));
+    } else {
+      body.append(el("p", { class: "fx-lede" },
+        `Every one of this section's ${step.sources} source${step.sources === 1 ? "" : "s"} has an answer. `
+        + "Here is what the report now says — read it back, then sign it off."));
+    }
+
+    // ---- 1. what this section concludes -------------------------------------
+    // The standardized statement, pre-suggested from the evidence. Set at reading
+    // size and given a label: on the card-lined report pane it is one field among
+    // eleven, and here it is the section's conclusion.
+    if (section.dropdown) {
+      const opts = DATA.dropdowns[section.dropdown] || [];
+      const sel = el("select", { class: "fx-sec-choice", id: `fx-sec-choice-${section.id}`,
+        "aria-label": `The standardized statement for ${section.title}`,
+        onchange: (e) => {
+          rstate.choice = e.target.value;
+          save();
+          refreshSection(section, body, rstate);
+          if (section.bioDetail) syncBioDetail(section, body);
+        } });
+      opts.forEach((o) => sel.append(el("option", { value: o, selected: rstate.choice === o ? "selected" : null }, o)));
+      const zone = el("div", { class: "fx-zone" },
+        el("span", { class: "zone-label" }, "What this section concludes"), sel);
+      // Biosecurity's declaration text is derived FROM the statement, so it is
+      // painted by the same helper the report pane uses, into the same id — only
+      // one mode's copy is ever in the document.
+      if (section.bioDetail) zone.append(el("p", { class: "fx-sec-detail", id: "bio-detail" }));
+      body.append(zone);
+      if (section.bioDetail) syncBioDetail(section, body);
+    }
+
+    // ---- 2. anything inconsistent -------------------------------------------
+    // Filled by refreshSection at the foot of this function, and re-filled live on
+    // every keystroke in the note and every change of the statement above.
+    body.append(el("div", { class: "r-warns fx-warns" }));
+
+    // ---- 3. the detail -------------------------------------------------------
+    const ta = el("textarea", { class: "note-field fx-sec-note", id: `fx-sec-note-${section.id}`, rows: "1",
+      "aria-label": `The detail recorded under ${section.title}`,
+      placeholder: "Free-text comments for this section…",
+      oninput: (e) => { rstate.note = e.target.value; refreshSection(section, body, rstate); save(); autoGrow(e.target); } });
+    ta.value = rstate.note || "";
+    const detail = el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "The detail"), ta);
+    // Drafts from THIS section's evidence plus the standard wording. Appends below
+    // whatever is already written; it has never overwritten and must not start.
+    const suggestion = sectionNarrative(section);
+    if (suggestion) detail.append(el("div", { class: "fx-actions" },
+      el("button", { type: "button", class: "btn-mini",
+        title: "Draft this section from the collected evidence and standard wording (appends; never overwrites)",
+        onclick: () => {
+          const cur = (ta.value || "").trim();
+          ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
+          rstate.note = ta.value;
+          refreshSection(section, body, rstate); save(); autoGrow(ta);
+        } }, "Insert suggested detail")));
+    // The proforma's own hyperlink for the invasive / disease sections.
+    const ref = section.ref && state.site && state.site.refs && state.site.refs[section.ref];
+    if (ref) detail.append(el("p", { class: "fx-sec-ref" }, "Reference: ",
+      el("a", { href: ref, target: "_blank", rel: "noopener" }, ref)));
+    body.append(detail);
+
+    // ---- 4. what it rests on -------------------------------------------------
+    // The three-way split, unchanged: Findings at full weight, "Checked, nothing
+    // found" on one line, "⚠ Not yet checked" as a caveat strip. Every source name
+    // in it is a button to that source's step — and, because the jump starts here,
+    // one that arms the way back (showSourceCard).
+    const clamps = [];
+    const evidence = renderSectionEvidence(includedCardsForSection(section.id), clamps);
+    const rests = el("div", { class: "fx-zone fx-rests" },
+      el("span", { class: "zone-label" }, "What it rests on"));
+    rests.append(evidence || el("p", { class: "fx-lede" },
+      "No source has been included into this section yet. A source is included as soon as it carries a note or a photo, "
+      + "and its own step can point it here."));
+    body.append(rests);
+    measureClamps(clamps); // measured on the next frame, by which time this is in the document
+
+    // ---- 5. reviewed ---------------------------------------------------------
+    // The section's own tick — the same flag, setter and tally as the workbench's
+    // checkbox, and the same thing this step's Continue records.
+    body.append(el("div", { class: "fx-actions fx-review" },
+      sectionReviewToggle(section.id, { box: body, inputId: `fx-sec-rev-${section.id}` }),
+      el("button", { type: "button", class: "btn secondary", onclick: () => focusHandoffTo(step) },
+        "Open this in the report pane ▸")));
+
+    refreshSection(section, body, rstate); // the warnings, for the state as it stands
+    queueCardMetrics();                    // …and the note's height, once it is laid out
+    return body;
+  }
+
+  /* --------------------------------------------------------- the finish step
+     Where the flow ends, and the only place in Focus mode that shows the whole
+     report at once. By this point every section has been reviewed on a step of
+     its own, so this is a last look and a handover — not a second review, and
+     emphatically not a form.
+
+     Six things, in the order a person leaving the building uses them:
+
+       1  at a glance        what this site's sources came back with (#65)
+       2  what's still missing   the report's own gaps, each one a jump
+       3  unresolved warnings    the last moment they can be acted on (#64)
+       4  read the whole thing   the assembled artefact, on screen
+       5  Export ▾               the workbench's own menu, borrowed
+       6  Check report           the workbench's own button, borrowed
+
+     Items 5 and 6 are `adoptNode`s rather than copies, which is what makes "an
+     export from Focus is byte-identical to an export from the workbench" true by
+     construction: they are the same two controls, with the same handlers, and
+     the artefact is built from state that has no per-mode half.
+
+     Finishing is never gated on completeness. A person who has to hand something
+     over now gets to — with every gap named. */
+  function focusFinishBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["finish:export"]));
+    const r = reportRollup();
+
+    // ---- 1. at a glance ------------------------------------------------------
+    // The traffic-light card, whole. Every row jumps to the first source that
+    // came back that way, so "23 answered, 2 still not checked" is also the route
+    // to the two.
+    body.append(el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "At a glance"),
+      renderFindingsGlance()));
+
+    // ---- 2. what's still missing --------------------------------------------
+    // The report pane's own roll-up, with its own wording (completenessGaps is
+    // shared), but pointed at steps instead of at a scroll position:
+    // showReportSection resolves to `sec:…` while Focus is live.
+    const gaps = completenessGaps(r);
+    const missing = el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "What's still missing"));
+    if (!gaps.length) {
+      missing.append(el("p", { class: "fx-finish-clear" },
+        `✓ All ${r.total} sections carry a statement, a comment and included evidence — and every one is reviewed.`));
+    } else {
+      missing.append(el("p", { class: "fx-lede" }, `Of ${r.total} report sections:`));
+      missing.append(el("ul", { class: "fx-gaps" }, gaps.map((g) => el("li", {},
+        el("button", {
+          type: "button", class: "fx-gap",
+          title: `Go to the step that fixes the first of these: ${g.list[0].title}`,
+          onclick: () => showReportSection(g.list[0].id),
+        }, g.text(g.list.length))))));
+    }
+    body.append(missing);
+
+    // ---- 3. unresolved warnings ---------------------------------------------
+    // Only when there are some. An export is the last moment anybody can act on
+    // them — which is why the export handler says so too (guardExport), and why
+    // this row is a jump rather than a notice. (Whether they should also be
+    // stripped OUT of the artefact is #64's question, not this step's.)
+    if (r.warnCount) {
+      const first = r.warnings[0].section;
+      body.append(el("div", { class: "fx-zone" },
+        el("span", { class: "zone-label" }, "Unresolved warnings"),
+        el("button", {
+          type: "button", class: "fx-finish-warn",
+          title: `Go to the first: ${first.title}`,
+          onclick: () => showReportSection(first.id),
+        },
+          el("span", { "aria-hidden": "true" }, "⚠ "),
+          `${r.warnCount} consistency warning${r.warnCount === 1 ? "" : "s"} — first on ${first.title}`),
+        el("p", { class: "fx-lede" },
+          "These are the report contradicting itself — a statement that does not match the evidence under it. "
+          + "Once the report leaves the app nobody can act on them, so this is the moment to.")));
+    }
+
+    // ---- 4, 5 and 6 — everything that takes the report out of the app --------
+    const tools = el("div", { class: "fx-actions fx-finish-out" });
+    // Export first, because it is what this step is for. The menu is the report
+    // header's own node — same four formats, same order, same handlers.
+    adoptNode($("#report-export-menu"), tools);
+    tools.append(el("button", {
+      type: "button", class: "btn secondary",
+      title: "The whole assembled report, exactly as it will be handed over — on screen, without exporting a file first",
+      onclick: () => openReportPreview(),
+    }, "Read the whole report"));
+    adoptNode($("#btn-check-report"), tools);
+    body.append(tools);
+    return body;
+  }
+
+  function focusHandoffBtn(step, label) {
+    return el("div", { class: "fx-actions" },
+      el("button", { type: "button", class: "btn secondary", onclick: () => focusHandoffTo(step) }, label + " ▸"));
+  }
+
+  // Switch modes and land on the thing the step was about. Ordering matters: the
+  // workbench DOM does not exist until setUiMode has rebuilt it.
+  function focusHandoffTo(step) {
+    setUiMode("workbench");
+    if (step.id.startsWith("src:")) { showSourceCard(step.ref); return; }
+    if (step.id.startsWith("sec:")) { showReportSection(step.ref); return; }
+    if (step.id.startsWith("checks:")) {
+      revealLeftPane();
+      // The step ids and the flow keys are not the same words ("checks:paste" is
+      // the "applied" pass), so the mapping is the one FLOW_OF_STEP already owns.
+      openFlowStep(FLOW_OF_STEP[step.id]);
+      jumpTo($("#run-checks"));
+      return;
+    }
+    if (step.id === "site:details") { revealLeftPane(); setSiteDetailsOpen(true); jumpTo($("#site-summary")); return; }
+    // Both of these live inside step 2's panel, so the panel has to be open before
+    // the jump — landing on a shut disclosure is landing nowhere.
+    if (step.id === "site:maps") { revealLeftPane(); setSiteDetailsOpen(true); jumpTo($("#site-maps") || $("#site-summary")); return; }
+    if (step.id === "site:photos") { revealLeftPane(); setSiteDetailsOpen(true, "#site-dropzone"); return; }
+    if (step.id === "out:identity") { revealRightPane(); showReportSection(IDENTITY_SECTION); return; }
+    if (step.id === "finish:export") { revealRightPane(); jumpTo($("#report-complete") || $("#report")); return; }
+    jumpTo($("#workspace") || $("#site-picker"));
   }
 
   // ---------------------------------------------------------------- persistence
@@ -4899,7 +6868,11 @@
       // Presentation state that belongs to this site rather than the browser: which
       // categories the operator has explicitly folded away or kept open, and which
       // slice of the list they were working — so reopening a site keeps their place.
-      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow },
+      // …and Focus mode's cursor: the step's stable ID, never its index, because the
+      // step list is derived and re-orders as work lands (an index would silently
+      // point at a different step after any change). Nothing else about Focus mode
+      // is stored — the steps themselves are recomputed from this payload.
+      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow, focus: { step: focusCursor } },
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -4999,6 +6972,10 @@
       state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
       state.filter = (d.ui && FILTERS[d.ui.filter]) ? d.ui.filter : "all";
       state.flow = normalizeFlow(d.ui && d.ui.flow);
+      // Close the tab on step 19 and come back tomorrow to step 19. resolveFocusCursor
+      // handles an id that no longer exists (a re-routed card, hidden internal sources).
+      const fx = d.ui && d.ui.focus;
+      focusCursor = (fx && typeof fx.step === "string") ? fx.step : null;
       // Images live in a separate key (v2). Fall back to the legacy embedded layout
       // (v1) for sites saved before the split, then mark dirty so the next save
       // migrates them out of the text key.
@@ -5088,6 +7065,11 @@
         name: s.name, station_num: s.station_num, wmo: s.wmo, state: s.state,
         delivery_group: s.delivery_group, facility_types: s.facility_types,
         lat: s.lat, lon: s.lon, assessment_date: state.date, site_maintenance: state.maintenance,
+        // The report's front page carries its own review tick, like every section
+        // below it. It travels in the site block rather than in `sections`, because
+        // that array is the eleven proforma sections and a consumer counting them
+        // should keep counting eleven.
+        front_page_reviewed: !!(state.report[IDENTITY_SECTION] || {}).reviewed,
         images: (state.siteImages || []).map(exportImage),
         // Both locator maps, keyed by slot, so a re-import restores them. `map`
         // stays populated (local slot) for backward-compatible consumers.
@@ -5199,9 +7181,9 @@
     // person, "reconsider the statement", "add the specifics" — and this file is
     // the deliverable, read by someone who cannot act on that instruction. The
     // warnings keep working everywhere they face the operator (the on-screen
-    // .r-warns strip, the header count, the Check report prompt, and
-    // `sections[].warnings` in the JSON interop object), and
-    // confirmExportWithWarnings() stops unresolved ones leaving unnoticed.
+    // .r-warns strip, the header count, the Focus section step, the Check report
+    // prompt, and `sections[].warnings` in the JSON interop object), and
+    // guardExport() stops unresolved ones leaving unnoticed.
     // The "⚠ Not yet checked" caveat in evNotesHtml is the opposite case — a fact
     // about the assessment, addressed to the reader — and stays.
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
@@ -5253,37 +7235,59 @@
       </div>`).join("")}</div></div>`;
   }
 
-  /* The consistency warnings no longer travel in the artefact, which makes it
-     possible to hand over a report carrying three unresolved contradictions and
-     never notice. So the artefact paths ask first: the count, the fact that it
-     will not appear in the export, and a way back to the first one.
-
-     Returns true if the export should go ahead. At zero warnings it never
-     interrupts, so the common path is untouched. Cancel is "review them first"
-     and lands the operator on the offending section, exactly where the header's
-     warning count sends them.
-
-     Only the two handover artefacts (Print/PDF, HTML file) are gated. The JSON
-     export still carries `sections[].warnings` — nothing is hidden there — and
-     Copy summary is a working-state paste, not a document; interrupting either
-     would put a dialog in the middle of the round trip to an assistant. */
-  function confirmExportWithWarnings() {
-    const r = reportRollup();
-    if (!r.warnCount) return true;
-    const n = r.warnCount;
-    const first = r.warnings[0].section;
-    const ok = confirm(
-      `${n} consistency warning${n === 1 ? " is" : "s are"} unresolved.\n\n`
-      + `${n === 1 ? "It" : "They"} will not appear in the exported report.\n\n`
-      + `OK = export anyway.\nCancel = review ${n === 1 ? "it" : "them"} first (takes you to ${first.title}).`);
-    if (!ok) showReportSection(first.id);
-    return ok;
-  }
-
   function doPrint() {
-    if (!confirmExportWithWarnings()) return;
     $("#print-root").innerHTML = buildReportHtml(true);
     window.print();
+  }
+
+  /* --------------------------------------- the whole report, before it leaves
+     Focus mode shows one section at a time, on purpose — but the operator about
+     to hand a report over is entitled to read the thing they are handing over,
+     and "export it and open the file" is a poor answer to that. So the finish
+     step carries one action that puts the assembled artefact on screen.
+
+     It is the SAME string the printed report is built from (`buildReportHtml`),
+     wearing the same stylesheet (`.pr-paper`, shared with `#print-root`), so
+     this is a preview of the deliverable rather than a third rendering of the
+     report. Read-only by construction: there is nothing to edit in a built
+     string, and every route to changing something is a step away. */
+  let RP = null, rpRelease = null;
+  function ensureReportPreview() {
+    if (RP) return RP;
+    const paper = el("div", { class: "rp-paper pr-paper" });
+    const close = el("button", { type: "button", class: "btn tertiary", onclick: () => closeReportPreview() }, "✕ Close");
+    const frame = el("div", { class: "rp-frame" },
+      el("div", { class: "rp-head" },
+        el("div", {},
+          el("h2", { class: "rp-title", id: "rp-title" }, "The whole report, as it will leave the app"),
+          el("p", { class: "rp-sub" }, "Read-only. Anything that needs changing is on the step it belongs to.")),
+        close),
+      paper);
+    const overlay = el("div", { class: "rp-overlay", id: "report-preview", role: "dialog",
+      "aria-modal": "true", "aria-labelledby": "rp-title" }, frame);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeReportPreview(); });
+    document.body.append(overlay);
+    RP = { overlay, paper, close };
+    return RP;
+  }
+  const rpKeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeReportPreview(); } };
+  function openReportPreview() {
+    if (!state.site) return;
+    const rp = ensureReportPreview();
+    // Built fresh every time: the point of this surface is that it shows the
+    // report as it stands right now, not as it stood the last time it was opened.
+    rp.paper.innerHTML = buildReportHtml(true);
+    rp.overlay.classList.add("show");
+    document.addEventListener("keydown", rpKeydown);
+    rpRelease = trapFocus(rp.overlay); // …and hands focus back to the button that opened it
+    rp.close.focus();
+  }
+  function closeReportPreview() {
+    if (!RP) return;
+    RP.overlay.classList.remove("show");
+    RP.paper.innerHTML = ""; // a report carries every photo inline; don't hold two copies
+    document.removeEventListener("keydown", rpKeydown);
+    if (rpRelease) { rpRelease(); rpRelease = null; }
   }
   // Every export runs through here, so this is where "the operator has finished a
   // site" is recorded once — after which the how-to guide is on demand only.
@@ -5295,7 +7299,6 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
   function downloadHtml() {
-    if (!confirmExportWithWarnings()) return;
     const css = document.getElementById("print-styles-inline");
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ESS — ${esc(state.site.name)}</title>
       <style>body{font:13px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#111}
@@ -5374,6 +7377,38 @@
     lines.push("", "Collection log:");
     r.collection_log.filter((c) => !c.internal).forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
     copy(lines.join("\n"));
+  }
+
+  /* ------------------------------------------- exporting over an open warning
+     A consistency warning is the report contradicting itself — a section that
+     says "nothing found" over evidence that found something. They are the
+     report's own doubts about the working copy, and an export is the last moment
+     anybody can act on them: whatever leaves the app is what the recipient reads.
+     Saying so at that moment is worth one dialog.
+
+     Worth ONE. It is not a gate: a person who has to hand something over now
+     gets to, with the gaps named. So it warns once per site per session, and
+     only when the operator went ahead — a warning that fires on all four export
+     formats in turn is a warning that gets clicked through. */
+  const exportWarned = new Set(); // siteKey of a site whose warnings were accepted
+  function guardExport(run) {
+    return (e) => {
+      const r = state.site ? reportRollup() : null;
+      const key = state.site ? siteKey(state.site) : "";
+      if (r && r.warnCount && !exportWarned.has(key)) {
+        const n = r.warnCount;
+        const first = r.warnings[0].section;
+        const ok = confirm(
+          `${n} consistency warning${n === 1 ? "" : "s"} ${n === 1 ? "is" : "are"} still open on this report`
+          + ` — the first is on ${first.title}.\n\n`
+          + "These are the report's own checks on itself. They do not appear in the exported"
+          + " report — it is the handover document, and its reader cannot act on them.\n\n"
+          + "OK to export anyway, or Cancel to go to the first one.");
+        if (!ok) { showReportSection(first.id); return; }
+        exportWarned.add(key);
+      }
+      run(e);
+    };
   }
   // Build a complete, self-contained, model-agnostic prompt for the current
   // site. It embeds every step, every applicable source aimed at the location,
@@ -5796,6 +7831,11 @@
   function trapFocus(dialog) {
     if (!dialog) return () => {};
     const opener = document.activeElement;
+    // Ids survive a re-render; nodes do not. A dialog can rebuild the surface that
+    // opened it while it is still up — capturing a Queensland Globe map writes a
+    // finding, which repaints the very step carrying "Open site map" — and by the
+    // time the dialog closes the opener is a detached node.
+    const openerId = opener && opener.id;
     const onKey = (e) => {
       if (e.key !== "Tab" || e.defaultPrevented) return;
       // Re-read every time: these dialogs grow and shrink as you use them (the
@@ -5818,10 +7858,23 @@
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
-      // Not if the opener has been re-rendered away underneath us — focusing a
-      // detached node silently drops focus on <body>, the exact bug this fixes.
-      if (opener && document.contains(opener) && opener.focus) opener.focus();
+      restoreFocusAfterDialog(opener, openerId);
     };
+  }
+
+  // Where focus goes when a dialog closes. In order: the opener, if it is still
+  // there; the node that replaced it, if it was re-rendered underneath; and
+  // failing both, the heading of the step the operator is standing on.
+  //
+  // Never nothing. Focusing a detached node silently drops focus on <body>, which
+  // is the same as losing it — the next Tab restarts from the top bar and a screen
+  // reader is left with no idea where it is. That was the whole point of the trap.
+  function restoreFocusAfterDialog(opener, openerId) {
+    if (opener && document.contains(opener) && opener.focus) { opener.focus(); return; }
+    const again = openerId && document.getElementById(openerId);
+    if (again && again.focus) { again.focus(); return; }
+    const heading = focusLive() && $("#fx-title");
+    if (heading) heading.focus();
   }
   window.ESSFocusTrap = trapFocus;
 
@@ -6103,6 +8156,18 @@
     const photos = $("#sd-photo-count");
     if (photos) photos.addEventListener("click", () => setSiteDetailsOpen(true, "#site-dropzone"));
 
+    // The station-record correction. Wired here, on the nodes themselves, so Focus
+    // mode's site-details step gets the same behaviour by borrowing the block —
+    // there is no second copy of these fields to keep in step.
+    SITE_CORRECT_FIELDS.forEach((field) => {
+      const inp = $(field.sel);
+      // change (not input): a half-typed station name should not repaint the header
+      // and the report's front page on every keystroke.
+      if (inp) inp.addEventListener("change", (e) => correctSiteField(field, e.target.value));
+    });
+    const stateSel = $("#fld-site-state");
+    if (stateSel) stateSel.addEventListener("change", (e) => correctSiteState(e.target.value));
+
     // A screenshot pasted anywhere on the page — with the details panel shut, or
     // with nothing focused at all — is a station photo. The zone-level listeners
     // (the site dropzone, each card's evidence zone) run first and call
@@ -6117,6 +8182,14 @@
       const files = filesFromClipboard(e);
       if (!files.length) return;
       e.preventDefault();
+      // …unless Focus is showing a source step, in which case the screen the paste
+      // was aimed at is that source, and its evidence is where it belongs.
+      const onSource = focusPasteSourceId();
+      if (onSource) {
+        addFindingImages(onSource, files);
+        toast(files.length > 1 ? `${files.length} photos added to this source` : "Photo added to this source");
+        return;
+      }
       addSiteImages(files);
       toast(files.length > 1 ? `${files.length} photos added to the site` : "Photo added to the site");
     });
@@ -6377,7 +8450,8 @@
   function renderMobileNav() {
     const shell = $("#mshell");
     if (!shell) return;
-    const live = !!state.site && !$("#workspace").hidden;
+    // The tabs exist to switch between the two panes; Focus mode has neither.
+    const live = workbenchLive() && !!state.site && !$("#workspace").hidden;
     shell.hidden = !live;
     if (!live) {
       // No site: no tabs, and the two panes go back to stacking (picker above,
@@ -6723,10 +8797,13 @@
       rdocDetail.setAttribute("aria-expanded", open ? "true" : "false");
       rdocDetail.textContent = open ? "Details ▴" : "Details ▾";
     });
-    $("#btn-print").addEventListener("click", doPrint);
-    $("#btn-download-html").addEventListener("click", downloadHtml);
-    $("#btn-download-json").addEventListener("click", downloadJson);
-    $("#btn-copy-summary").addEventListener("click", copySummary);
+    // Wrapped, not replaced: these are the buttons BOTH modes press (Focus's
+    // finish step borrows this very menu), so the open-warning check belongs on
+    // the handler rather than on either mode's copy of the control.
+    $("#btn-print").addEventListener("click", guardExport(doPrint));
+    $("#btn-download-html").addEventListener("click", guardExport(downloadHtml));
+    $("#btn-download-json").addEventListener("click", guardExport(downloadJson));
+    $("#btn-copy-summary").addEventListener("click", guardExport(copySummary));
     $("#btn-check-report").addEventListener("click", copyReviewPrompt);
     wireOverflowMenu();
     const batchReviewBtn = $("#btn-batch-review");
@@ -6806,6 +8883,17 @@
     const agentBtn = $("#btn-agent-settings");
     if (agentBtn) agentBtn.addEventListener("click", revealLeftPane);
 
+    // The Focus ⇄ Workbench switch. Read the stored preference now so the button
+    // is labelled correctly from the first paint, but leave applying it to init():
+    // Focus mode's step list needs the source registry, and if the data load fails
+    // the workbench is the right thing to be looking at (it is where the error
+    // banner lives).
+    uiMode = readUiMode();
+    syncModeButton();
+    const modeBtn = $("#btn-mode");
+    if (modeBtn) modeBtn.addEventListener("click", () => setUiMode(focusLive() ? "workbench" : "focus"));
+    wireFocusKeys();
+
     // theme switch + split-column sizing
     const themeBtn = $("#btn-theme");
     if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
@@ -6863,11 +8951,17 @@
         (local
           ? `You've opened this file directly. Browsers block <code>fetch()</code> from <code>file://</code>. Serve the folder instead:<br><code>cd ess &amp;&amp; python3 -m http.server 8000</code> then open <code>http://localhost:8000/</code> — or publish via GitHub Pages.`
           : `Check that <code>data/stations.json</code>, <code>sources.json</code>, <code>dropdowns.json</code> and <code>meta.json</code> are present.`));
+      // The banner lives in the left column, and there is no step list to build
+      // without the source registry — so a failed load stays in the workbench.
+      setUiMode("workbench", { persist: false });
       return;
     }
     $("#station-count-hint").textContent =
       `${DATA.stations.length.toLocaleString()} Bureau sites · ${DATA.sources.length} sources · data ${DATA.meta.generated_utc ? DATA.meta.generated_utc.slice(0, 10) : ""}`;
     $("#foot-meta").textContent = `${DATA.stations.length.toLocaleString()} sites · ${DATA.sources.length} sources.`;
+    // Put the chosen view on screen BEFORE any site is restored, so a resumed
+    // assessment renders once, into the mode it is going to be worked in.
+    applyUiMode({ focus: false });
     restoreBatch(); // if a batch was loaded in a previous visit, show the tray + resume the active site
     $("#station-search").focus();
     document.dispatchEvent(new CustomEvent("ess:ready")); // signals the optional agent module
@@ -6904,6 +8998,7 @@
       if (resultText) f.result = { html: esc(String(resultText)).replace(/\n/g, "<br>"), ts: Date.now() };
       save(); refreshCard(id); renderCollectionStatus(); renderReport();
       maybeAutoFetchForSource(id, imageSubjects); // reference photos for species cards (Task 3)
+      agentRunWrote++; // what endRun reports, and what tells a real run from one that fell over
       return true;
     },
     queryAla: (radius) => alaQuery(state.site.lat, state.site.lon, radius || 10),
@@ -6911,10 +9006,31 @@
       const src = DATA.sources.find((x) => x.api && x.api.kind === "wildnet");
       return wildnetQuery(state.site.lat, state.site.lon, radius || (src && src.api && src.api.radius_km) || 10, src && src.api);
     },
-    beginRun: () => { renderCollectionStatus(); },
+    // Focus mode's derived step list, read-only. Exposed because it is a pure
+    // function of state and the cheapest way to check the interleave is to log it
+    // for a real site — re-route a card, re-log, and watch the step move.
+    focusSteps: () => focusSteps().map((s) => ({ ...s })),
+    beginRun: () => { agentRunWrote = 0; renderCollectionStatus(); },
     // An agent run fills the list itself and leaves the rest to a human, so when it
     // finishes the collection bar lands on that subset — see focusOnOutstanding.
-    endRun: () => { focusOnOutstanding(); save(); renderDashboard(); },
+    endRun: () => {
+      focusOnOutstanding();
+      // The run IS the automated round trip, done in one action rather than three,
+      // so it records the same per-site receipts the three passes do — otherwise
+      // the flow would go on asking for a prompt to be copied that nobody needs.
+      // Only for a run that actually wrote something: endRun fires from agent.js's
+      // `finally`, so a run that fell over on its first turn arrives here too.
+      if (agentRunWrote) {
+        markFlowDone("auto", "Claude ran the checks");
+        markFlowDone("prompt", "Claude researched the sources itself");
+        markFlowDone("applied", `${agentRunWrote} source${agentRunWrote === 1 ? "" : "s"} answered by Claude`);
+      }
+      save();
+      // Focus resumes at the first step that still needs a human; the workbench
+      // has no cursor to move, so it just repaints the list the run has changed.
+      if (focusLive()) { focusAfterRun(agentRunWrote); return; }
+      renderDashboard();
+    },
   };
 
   document.addEventListener("DOMContentLoaded", init);

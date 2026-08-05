@@ -195,6 +195,10 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
    single column (normal page scroll) on narrow screens. --topbar-h is measured +
    set by app.js. */
 .split { display: flex; gap: var(--sp-5); align-items: flex-start; }
+/* A `display` declaration outranks the UA's [hidden] rule, so the two top-level
+   views have to opt back in explicitly — otherwise Focus mode's stashed (and now
+   empty) columns would still occupy the page, pane handles and all. */
+.split[hidden], .focus[hidden] { display: none; }
 .col { min-width: 0; }                 /* min-width:0 lets flex children shrink instead of overflowing */
 .col-left { flex: 1 1 50%; }
 .col-right { flex: 1 1 50%; }
@@ -207,8 +211,9 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
      up by it so they pin flush under the topbar instead of leaving a strip of
      card scrolling past above them. */
   .col { --col-pad-top: var(--sp-4); height: 100%; overflow-y: auto; overflow-x: hidden; padding: var(--col-pad-top) var(--sp-2) var(--sp-7); scrollbar-gutter: stable; }
-  /* Focus mode — one pane collapsed, the other taking the whole width. The nav
-     rail goes with the left column, since that's all it navigates. */
+  /* Pane collapse — one pane folded away, the other taking the whole width. The
+     nav rail goes with the left column, since that's all it navigates. (Not to be
+     confused with Focus mode below, which replaces the split entirely.) */
   .split.pane-hide-left > .col-left,
   .split.pane-hide-left > .railnav { display: none; }
   .split.pane-hide-right > .col-right { display: none; }
@@ -232,6 +237,406 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
      and published by app.js, the same way --topbar-h is. */
   html { scroll-padding-top: calc(var(--topbar-h, 64px) + var(--mshell-h, 0px) + var(--sp-2)); }
 }
+
+/* ---------- Focus mode ----------
+   The other way through the same tool, and the default view: one column, one step
+   per screen. It REPLACES .split rather than covering it — app.js empties the two
+   columns while this is live — so there is no cockpit underneath to leak in at the
+   edges, and the browser's own focus management, scrolling and Back all still work.
+
+   The whole mode is deliberately narrow. A step that needs a scrollbar to answer
+   its own question is the wrong step, so the column is capped at a comfortable
+   reading measure and the chrome around the body is three thin rows: where you
+   are, what is being asked, and one way forward.
+
+   Everything here resolves to the same tokens as the panes — this is a different
+   route through the app, not a second design system. */
+.focus { display: block; max-width: 720px; margin: 0 auto; padding: var(--sp-5) var(--sp-2) var(--sp-8); }
+.fx-shell { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* ---- said once, on a first Focus session, and never again. */
+.fx-intro { display: flex; align-items: center; gap: var(--sp-3); margin: 0;
+  font-size: var(--fs-meta); line-height: 1.5; color: var(--ink);
+  background: var(--link-bg); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3); }
+.fx-intro > span { flex: 1 1 auto; }
+.fx-intro > .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ---- where you are. Two lines at most, and never more prominent than the step
+   itself: this is a position report, not the content. */
+.fx-chrome { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.fx-where { grid-area: 1 / 1; margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.fx-phase { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--brand); }
+.fx-of { font-size: var(--fs-meta); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+/* Progress in words, beside the bar that draws it. The bar is aria-hidden and
+   says nothing in greyscale; this is the same number, readable by both. */
+.fx-done { font-size: var(--fs-micro); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.fx-done::before { content: "· "; }
+.fx-list-btn { grid-area: 1 / 2; justify-self: end; }
+.fx-track { grid-area: 2 / 1 / 3 / 3; flex: none; width: 100%; }
+
+/* ---- the shortcuts, documented where the movement they drive is described. A
+   shortcut nobody is told about is not an accessibility feature. */
+.fx-keys { grid-area: 3 / 1 / 4 / 3; margin: 0; display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--sp-hair) var(--sp-1); font-size: var(--fs-micro); color: var(--ink-soft); }
+.fx-keys kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-micro);
+  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 4px; }
+/* Trailing space before the next pair, so the two read as two. */
+.fx-keys-what { margin-right: var(--sp-3); }
+
+/* ---- the step list: Focus mode's answer to the nav rail, and what keeps "the
+   tool proposes an order, it does not impose one" true. Every step, its state,
+   and a jump to it. */
+/* display:flex beats the UA [hidden] rule, so a closed list would sit there as an
+   empty bordered box — the same re-assertion every other disclosure here makes. */
+.fx-list[hidden] { display: none; }
+.fx-list { display: flex; flex-direction: column; gap: var(--sp-hair); max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  padding: var(--sp-2); box-shadow: var(--shadow); }
+/* One role="group" per phase, labelled by its heading — a menu whose children are
+   anything other than menuitems is one a screen reader may flatten. The group is
+   the flex column the list used to be, so nothing about the layout moved. */
+.fx-list-group { display: flex; flex-direction: column; gap: var(--sp-hair); }
+.fx-list-phase { margin: var(--sp-2) 0 var(--sp-0); font-size: var(--fs-micro); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink-soft); }
+.fx-list-group:first-child .fx-list-phase { margin-top: 0; }
+.fx-list-item { display: grid; grid-template-columns: 1.2em 1fr auto; align-items: baseline; gap: var(--sp-2);
+  width: 100%; text-align: left; font: inherit; font-size: var(--fs-body); color: var(--ink);
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: var(--sp-1) var(--sp-2); cursor: pointer; }
+.fx-list-item:hover { background: var(--surface-2); }
+/* Inside a scrolling box, so the ring is drawn within the item's own bounds — a
+   positive offset is clipped by the overflow at the ends of the list. */
+.fx-list-item:focus-visible { --focus-offset: -2px; background: var(--surface-2); }
+.fx-list-item.is-here { border-color: var(--brand); background: var(--link-bg); font-weight: 650; }
+.fx-list-name { min-width: 0; overflow-wrap: anywhere; }
+.fx-list-state { font-size: var(--fs-micro); color: var(--ink-soft); white-space: nowrap; }
+/* State is carried by the mark AND the word, never by colour alone — the same rule
+   the source cards' status glyphs follow. */
+.fx-list-mark { font-size: var(--fs-micro); text-align: center; }
+.fx-list-item[data-state="done"] .fx-list-mark { color: var(--reviewed); }
+.fx-list-item[data-state="needs-you"] .fx-list-mark { color: var(--caution); }
+.fx-list-item[data-state="blocked"] .fx-list-mark,
+.fx-list-item[data-state="not-reached"] .fx-list-mark { color: var(--ink-soft); }
+.fx-list-item[data-state="done"] .fx-list-name,
+.fx-list-item[data-state="not-reached"] .fx-list-name { color: var(--ink-soft); }
+
+/* ---- the step itself. One card, one question. */
+.fx-step { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: var(--sp-5); }
+.fx-kicker { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-1); }
+/* Do vs Review — a data-entry step and a sign-off step are different work, and
+   saying which one this is costs a word. */
+.fx-kind { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--fill-ink); background: var(--ink-soft); border-radius: 999px; padding: var(--sp-hair) var(--sp-2); }
+.fx-step[data-kind="output"] .fx-kind { background: var(--brand); }
+.fx-step-state { font-size: var(--fs-micro); font-weight: 650; color: var(--ink-soft); }
+.fx-step-state[data-state="done"] { color: var(--reviewed); }
+.fx-step-state[data-state="needs-you"] { color: var(--caution); }
+.fx-title { margin: 0 0 var(--sp-3); font-size: var(--fs-display); line-height: 1.25; }
+.fx-title:focus-visible { border-radius: 6px; }
+/* The step's body is one div the step itself builds and fills, so the stack
+   rhythm has to reach through it — otherwise the gap lands between .fx-body and
+   its single child and everything the step appended sits flush. */
+.fx-body, .fx-body > div { display: flex; flex-direction: column; gap: var(--sp-3); }
+.fx-lede { margin: 0; font-size: var(--fs-body); color: var(--ink-soft); line-height: 1.5; }
+.fx-facts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; }
+.fx-fact { font-size: var(--fs-meta); color: var(--ink-soft); }
+.fx-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* A blocked section names what is holding it, and each name is the way to it. */
+.fx-waiting { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); }
+.fx-waiting-src { font: inherit; font-size: var(--fs-meta); color: var(--brand); background: transparent;
+  border: 1px dashed var(--line); border-radius: 999px; padding: var(--sp-hair) var(--sp-2); cursor: pointer; }
+.fx-waiting-src:hover { border-color: var(--brand); background: var(--link-bg); }
+/* A borrowed workbench node (the site picker) sits in the body as itself — the
+   card chrome around it would be a second frame inside the step's own. */
+.fx-adopt > .card { border: 0; box-shadow: none; padding: 0; margin: 0; background: transparent; }
+.fx-adopt > .card > .card-head { display: none; }
+
+/* ---- said once, on arrival: what the thing pressed on the LAST step did. Same
+   shape as the intro banner, in the "something happened" tint. */
+.fx-flash { margin: 0; font-size: var(--fs-meta); font-weight: 600; line-height: 1.5;
+  color: var(--reviewed); background: var(--reviewed-bg);
+  border: 1px solid var(--reviewed); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3); }
+
+/* ---- the station record, read back rather than typed. A confirmation is a list
+   of facts, so it is set as one — the correction disclosure underneath is the
+   only control the step carries at rest. */
+.fx-record { margin: 0; background: var(--surface-2); border-radius: 10px; padding: var(--sp-2) var(--sp-3); }
+.fx-record-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3);
+  padding: var(--sp-1) 0; border-bottom: 1px dashed var(--line); }
+.fx-record-row:last-child { border-bottom: none; }
+.fx-record-row dt { color: var(--ink-soft); font-size: var(--fs-meta); }
+.fx-record-row dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+
+/* ---- the locator maps. At rest the step is two pictures and one question; the
+   ten preset buttons, the two size fields and the two label toggles that tune
+   them are real controls, borrowed whole from the workbench, but they are one
+   click away — on screen they would be the step asking eleven things instead
+   of one. */
+.fx-maps .map-controls { display: none; }
+.fx-maps.is-tuning .map-controls { display: flex; }
+.fx-maps .map-head { margin-bottom: var(--sp-1); }
+/* Side by side, and square — the pane crops them to a 3:1 strip because they sit
+   in a column beside everything else, but this step exists to LOOK at them, and
+   this is the shape the report's front page shows them in anyway. Two of them
+   stacked at full width is the one step in this phase that needed a scrollbar. */
+.fx-maps .site-maps { margin-top: 0; display: grid; grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3); align-items: start; }
+/* Loading, failed and ready are all the same box, so the step doesn't jump under
+   the operator as each map lands. */
+.fx-maps .map-frame, .fx-maps .map-frame.is-loading, .fx-maps .map-frame.is-error { aspect-ratio: 1 / 1; }
+
+/* ---- the report's front page, shown as the report says it. */
+.fx-rdoc { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: var(--radius);
+  padding: var(--sp-3); background: var(--surface-2); }
+.fx-rdoc-kicker { margin: 0; font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--brand); }
+.fx-rdoc-name { margin: var(--sp-hair) 0 0; font-size: var(--fs-title); line-height: 1.25; }
+.fx-rdoc-ids { margin: var(--sp-hair) 0 0; font-size: var(--fs-meta); color: var(--ink-soft); }
+.fx-rdoc-more > summary { font-size: var(--fs-meta); color: var(--ink-soft); cursor: pointer;
+  margin-top: var(--sp-2); list-style-position: inside; }
+.fx-rdoc-more > summary:hover { color: var(--brand); }
+.fx-rdoc-detail { margin-top: var(--sp-1); background: transparent; padding: 0; }
+.fx-review { align-items: center; }
+/* This step REVIEWS the front page; it does not tune it. The pictures are the
+   report's own, at a size that lets the whole page be taken in at once — a click
+   opens any of them full screen, which is where a doubt about a map gets settled.
+   Shown at report width they are a scrollbar, and a step that has to be scrolled
+   to answer its own question is the wrong step. */
+.fx-body .report-maps { max-width: 380px; }
+/* Two lines: which map it is and how far across. The tile attribution that
+   follows has to be in the DELIVERABLE, not in the glance that confirms the
+   picture — it is in full in the report pane and in every export. */
+.fx-body .report-maps figcaption { display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.fx-body .photo-grid.report-large .photo-thumb { width: 150px; }
+.fx-body .photo-grid.report-large .photo-thumb img { max-height: 110px; }
+
+/* ---- a source step. The workbench card's own zones — .src-result, .src-note,
+   .src-photos, .do-row, .include-row — standing on their own instead of stacked
+   23 deep in a column, so almost everything here is a matter of taking the
+   card's compaction back off rather than restyling anything.
+
+   The one structural change is the FINDING: no four-line clamp. The clamp exists
+   because 23 cards share one column; a step that hid half of what the machine
+   found behind a "Show all" would be hiding the thing the step is about. */
+.fx-source .src-result-body { display: block; -webkit-line-clamp: none; line-clamp: none; overflow: visible; }
+.fx-source .src-result { font-size: var(--fs-body); line-height: 1.55; }
+/* The result is the answer to the step's question, so it is given the room to
+   read as one — the card's tighter padding is a column-density compromise. */
+.fx-source .src-result { padding: var(--sp-3); }
+/* Identity prose. "What to look for" and "How to run it" are the instruction for
+   this step, not captions under a heading, so they are set at reading size — the
+   bold lead-in is what keeps the two apart. */
+.fx-source > .fx-lede > b { color: var(--ink); }
+/* The answer, given the weight of the thing being asked. The picker is one Tab
+   stop and four targets; at card size those targets are 24 px high, which is the
+   compromise a column of 23 forces and this step does not have to make. */
+.fx-source .status-select button { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-body); }
+.fx-source .do-row { gap: var(--sp-3); }
+.fx-answer { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* A note on a screen of its own starts at a size that invites a sentence, and
+   still grows to whatever is typed (autoGrow / syncCardMetrics). */
+.fx-source .note-field { min-height: 66px; font-size: var(--fs-body); }
+.fx-source .src-note, .fx-source .fx-evidence { display: flex; flex-direction: column; }
+.fx-source .fx-evidence .note-head { margin-bottom: var(--sp-1); }
+/* Evidence: open when the result is Found, which is when there is something to
+   attach. The zone is the card's, at a size that reads as an invitation rather
+   than the compact strip a column of cards can afford. */
+.fx-source .dropzone.small { padding: var(--sp-3); }
+/* Where it goes — deliberately the quietest row on the step. The default routing
+   is right nearly always, and the section itself is a few steps ahead, where a
+   mistake in it is obvious and correctable. */
+.fx-source .include-row { padding-top: var(--sp-2); border-top: 1px dashed var(--line); }
+
+/* ---- a report section step. The report pane's own controls, unstacked: the
+   statement, the warnings, the note and the evidence split, in the order a person
+   answers them. Nearly all of it is the report's existing CSS (.r-warns, .r-warn,
+   .r-evidence, .r-ev-caveat…) reaching in unchanged — a section reviewed here has
+   to LOOK like the section it is, or the two modes teach two different documents.
+   What is added is the labelling and the room a screen of its own can afford. */
+.fx-zone { display: flex; flex-direction: column; gap: var(--sp-1); }
+/* The conclusion, at reading size. On the report pane this is one field among
+   eleven; here it is the sentence the section exists to state, and the operator is
+   being asked to agree with it. */
+.fx-sec-choice { font-size: var(--fs-body); padding: var(--sp-2) var(--sp-3); line-height: 1.45; }
+/* Biosecurity's derived declaration — consequence of the statement above, so it is
+   set as a footnote to it rather than as a second field. */
+.fx-sec-detail { margin: var(--sp-hair) 0 0; font-size: var(--fs-meta); color: var(--ink-soft); line-height: 1.5; }
+.fx-sec-detail:empty { display: none; }
+/* THE step's reason for existing: in the workbench these sit in the right pane,
+   where an operator concentrating on collection may never look. Here they are on
+   the screen at the moment the decision is being made, so they carry the weight of
+   an alert rather than a footnote — and they are still screen-only, never exported. */
+.fx-warns { display: flex; flex-direction: column; gap: var(--sp-1); }
+.fx-warns:empty { display: none; }
+.fx-warns .r-warn { margin: 0; font-size: var(--fs-body); line-height: 1.5;
+  border-left: 4px solid var(--failed); padding: var(--sp-2) var(--sp-3); border-radius: 8px; }
+/* A note the section's whole detail goes into starts at a size that invites a
+   paragraph, and still grows to whatever is typed (autoGrow / syncCardMetrics). */
+.fx-sec-note { min-height: 96px; font-size: var(--fs-body); line-height: 1.55; }
+.fx-sec-ref { margin: 0; font-size: var(--fs-meta); color: var(--ink-soft); overflow-wrap: anywhere; }
+/* The evidence, at the width of the step rather than of a column shared with the
+   collection pane — the findings are what the statement above rests on. */
+.fx-rests .r-evidence { margin-top: 0; }
+.fx-rests .r-inc-note { font-size: var(--fs-meta); line-height: 1.55; }
+/* The gate, when it is not shut behind us: either sources still unanswered, or a
+   section already reviewed whose gate has re-opened. Amber, and it keeps its
+   words — nothing recorded below it is hidden or reset. */
+.fx-reopen { border: 1px solid var(--caution); border-left: 4px solid var(--caution);
+  border-radius: var(--radius); background: var(--caution-bg); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2); }
+.fx-reopen-lead { margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--caution); line-height: 1.5; }
+.fx-reopen .fx-waiting-src { border-color: var(--caution); color: var(--caution); background: var(--surface); }
+.fx-reopen .fx-waiting-src:hover { border-color: var(--brand); color: var(--brand); background: var(--link-bg); }
+
+/* ---- an errand, and the way back from it. A jump out of a section step to fix
+   one of its sources is a round trip, not a change of place, so the step it lands
+   on says where it came from and Continue there is labelled with the way home. */
+.fx-return { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2);
+  margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
+.fx-return-lead { color: var(--ink-soft); }
+.fx-return-btn { font: inherit; font-weight: 650; color: var(--brand); background: var(--link-bg);
+  border: 1px solid var(--line); border-radius: 999px; padding: var(--sp-0) var(--sp-2); cursor: pointer; }
+.fx-return-btn:hover { border-color: var(--brand); }
+
+/* ---- a step-3 pass, borrowed. Its padding belongs to the row it normally sits
+   in beside the description; here the step's heading and lede have already said
+   what it is, so the action stands on its own. */
+.fx-flow-do .flow-do { padding-top: 0; }
+.fx-flow-do .flow-do-block { padding-top: 0; }
+.fx-receipt { margin: 0; font-size: var(--fs-meta); color: var(--reviewed); font-weight: 600; }
+
+/* ---- an escape hatch to a specialist tool. Offered, never imposed: shut at rest,
+   one labelled disclosure, and the tool itself borrowed whole when it is opened.
+   Ruled off above so it reads as an alternative to the step rather than as one
+   more thing the step is asking for. */
+.fx-hatch { display: flex; flex-direction: column; gap: var(--sp-2);
+  border-top: 1px dashed var(--line); padding-top: var(--sp-3); }
+
+/* ---- a handoff to the other mode. The one case where Focus says, in words, that
+   the workbench is the right place for this — so it has to look like a considered
+   offer with a way out, not an error. */
+.fx-handoff { display: flex; flex-direction: column; gap: var(--sp-2);
+  border: 1px solid var(--brand); border-left: 4px solid var(--brand); border-radius: var(--radius);
+  background: var(--link-bg); padding: var(--sp-3); }
+.fx-handoff-lead { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.5; color: var(--brand); }
+
+/* ---- the finish step. A last look, not a second review: the roll-ups are set to
+   be read at a glance and every count in them is a way back to the work. */
+.fx-gaps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* Bigger than the report pane's chips (.r-complete-gap): over there they sit in a
+   footer strip, and here they are the step's own content. */
+.fx-gap { font: inherit; font-size: var(--fs-meta); font-weight: 650; cursor: pointer;
+  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: var(--sp-1) var(--sp-3); }
+.fx-gap:hover { border-color: var(--brand); color: var(--brand); background: var(--link-bg); }
+.fx-finish-clear { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.5; color: var(--reviewed); }
+/* The last moment these can be acted on, so they carry an alert's weight — the
+   same tint the section steps give them, in a shape that is a jump. */
+.fx-finish-warn { font: inherit; font-size: var(--fs-body); font-weight: 650; text-align: left; cursor: pointer;
+  color: var(--failed); background: var(--failed-bg); border: 1px solid var(--failed);
+  border-left: 4px solid var(--failed); border-radius: 8px; padding: var(--sp-2) var(--sp-3); }
+.fx-finish-warn:hover { background: var(--surface); }
+/* Everything that takes the report out of the app, on one row, Export first. The
+   borrowed menu keeps its own primary — on this step it IS the primary, and
+   Continue steps back to "or start again" (see renderFocus). */
+.fx-finish-out { align-items: center; border-top: 1px dashed var(--line); padding-top: var(--sp-3); }
+.fx-finish-out .menu-list { right: auto; left: 0; }
+
+/* ---- "Read the whole report": the assembled artefact, on screen, before it
+   leaves. `.pr-paper` is the report's own stylesheet — the same one #print-root
+   wears — so this is a preview of the deliverable rather than a third rendering
+   of it. White page on a scrim, because that is what it is going to be. */
+.rp-overlay { position: fixed; inset: 0; z-index: 80; display: none;
+  align-items: flex-start; justify-content: center; padding: var(--sp-4) var(--sp-3);
+  background: rgba(8, 14, 18, .72); }
+.rp-overlay.show { display: flex; }
+.rp-frame { display: flex; flex-direction: column; width: min(860px, 100%); max-height: 100%;
+  background: #fff; color: #111; border-radius: var(--radius); box-shadow: 0 18px 48px rgba(0, 0, 0, .4); }
+.rp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid #ddd; }
+.rp-title { margin: 0; font-size: var(--fs-title); line-height: 1.25; color: #111; }
+.rp-sub { margin: var(--sp-hair) 0 0; font-size: var(--fs-meta); color: #555; }
+/* The close button is on a white panel, not on the app's surface tokens. */
+.rp-head .btn { color: #333; border-color: #ccc; background: #fff; flex: 0 0 auto; }
+.rp-head .btn:hover { border-color: #888; color: #111; }
+.rp-paper { overflow: auto; padding: var(--sp-4); background: #fff; }
+/* On paper the appendix starts its own page; on screen a forced break is nothing
+   but a scroll the reader did not ask for. */
+.rp-paper .pr .pr-appendix { break-before: auto; page-break-before: auto; }
+@media (max-width: 620px) {
+  .rp-overlay { padding: 0; }
+  .rp-frame { border-radius: 0; }
+  .rp-paper .pr .pr-appendix-cols { column-count: 1; }
+}
+
+/* ---- one way forward. Back and Skip are demoted; Continue is the only primary
+   action on the surface. */
+.fx-nav { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.fx-nav-gap { flex: 1 1 auto; }
+
+/* The step transition — the one animation this mode wants, and exactly the kind
+   that causes trouble, so it is opt-in on motion and opt-in on navigation both.
+   `is-entering` is set by renderFocus() only when the step actually changed;
+   without it a keystroke in a note would re-run this on every character. */
+@media (prefers-reduced-motion: no-preference) {
+  .fx-step.is-entering { animation: fx-step-in .16s ease-out; }
+}
+@keyframes fx-step-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- narrow screens. Focus mode should be BETTER on a phone than the workbench
+   is: one column, one question, and no tab bar to switch panes is the natural
+   mobile shape — it is the layout the split could never fit into. */
+@media (max-width: 620px) {
+  /* Barely any tail padding: the sticky footer below is now what the end of the
+     step looks like, and sp-7 of empty page under it just pushed the one control
+     that matters up off the thumb's reach at the bottom of the scroll. */
+  .focus { padding: var(--sp-3) 0 var(--sp-2); }
+  .fx-step { padding: var(--sp-4) var(--sp-3); }
+  /* The chrome collapses to phase + n of m. The bar stays (it costs one line and
+     no text), the shortcuts go — there is no Alt key to press on a phone. */
+  .fx-keys { display: none; }
+  /* Thumb-reachable, and sticky rather than fixed so it can never overlap the
+     last control: sticky keeps its space in the flow, fixed would sit on top of
+     whatever the step ends with. */
+  .fx-nav { position: sticky; bottom: 0; z-index: 3; gap: var(--sp-2);
+    margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3);
+    padding-bottom: calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+    background: var(--bg); border-top: 1px solid var(--line); }
+  .fx-nav .btn { min-height: 44px; }
+  /* Continue takes a line of its own, below Back and Skip — which is both the
+     easiest reach for a thumb and, unlike the `order: -1` this replaces, an
+     arrangement whose visual order still matches the tab order. Reordering in CSS
+     moved Continue above the two controls that come before it in the DOM, so a
+     keyboard user tabbed backwards through the footer to reach it. */
+  .fx-nav #fx-next { flex: 1 1 100%; }
+  /* Two squares side by side stop being maps at this width. */
+  .fx-maps .site-maps { grid-template-columns: 1fr; }
+  .fx-record-row { flex-direction: column; gap: 0; }
+  .fx-record-row dd { text-align: left; }
+  /* The step list is a menu the thumb has to hit, not a dense rail. */
+  .fx-list { max-height: 60vh; }
+  .fx-list-item { padding: var(--sp-2); }
+}
+
+/* ---- 360px. The narrowest screen this is tested at, and the width at which the
+   step list's three columns and the chrome's third fact stop fitting on a line. */
+@media (max-width: 420px) {
+  /* Phase + n of m, and nothing else — the bar still carries the same number. */
+  .fx-done { display: none; }
+  /* The state word goes under the step name rather than squeezing it to nothing. */
+  .fx-list-item { grid-template-columns: 1.2em 1fr; }
+  .fx-list-state { grid-column: 2; }
+}
+
+/* The mode switch is navigation, not a preference, so it is the one control in the
+   top bar's meta row that reads as a button. */
+.topbar-mode { font-weight: 650; border-color: rgba(255,255,255,.6); }
+.topbar-mode:hover { background: rgba(255,255,255,.18); }
 
 /* ---------- pane collapse handles ---------- */
 /* Hidden on the stacked layout: with the columns above/below each other there are
@@ -857,6 +1262,21 @@ body.qm-open { overflow: hidden; }
 .summary-item .v { font-weight: 600; text-align: right; }
 .summary-item .v.copyable { cursor: pointer; border-bottom: 1px dotted var(--ink-soft); }
 
+/* ---------- correcting the station record ----------
+   The record above is auto-filled and right nearly every time, so this is a
+   disclosure and not a form: shut, it is one quiet line under the grid. Focus
+   mode's site-details step borrows this exact block, which is why the styling
+   hangs off .sd-correct rather than off the panel it normally sits in. */
+.sd-correct { margin-top: var(--sp-2); }
+.sd-correct > summary { font-size: var(--fs-meta); color: var(--ink-soft); cursor: pointer;
+  padding: var(--sp-1) 0; list-style-position: inside; }
+.sd-correct > summary:hover { color: var(--brand); }
+.sd-correct[open] > summary { color: var(--ink); font-weight: 600; }
+.sd-correct .dash-note { margin: var(--sp-1) 0 var(--sp-2); }
+.sd-correct-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.sd-correct-grid > div { min-width: 140px; }
+.sd-correct-grid > .grow { flex: 1 1 220px; }
+
 /* ---------- collection status ---------- */
 /* ONE control answering "what still needs me" — it replaced a six-pill progress
    card, an attention banner and a six-button filter row that each answered it in
@@ -1382,7 +1802,8 @@ body.qm-open { overflow: hidden; }
 .s-dot.manual::before,  .chip.manual::before,
 .src-result.status-manual .src-result-label::before,
 .status-select button.on[data-s=manual]::before  { content: var(--glyph-manual) / ""; }
-.s-dot.unset::before { content: var(--glyph-unset) / ""; }
+.s-dot.unset::before, .chip.unset::before { content: var(--glyph-unset) / ""; }
+.chip.unset::before { margin-right: var(--sp-1); font-weight: 700; font-style: normal; }
 /* The dot IS the glyph, so it carries no spacing of its own. */
 .s-dot::before { margin: 0; }
 
@@ -1391,6 +1812,7 @@ body.qm-open { overflow: hidden; }
 .chip.none { background: var(--none-bg); color: var(--none); }
 .chip.failed { background: var(--failed-bg); color: var(--failed); }
 .chip.manual { background: var(--manual-bg); color: var(--manual); }
+.chip.unset { background: var(--surface-2); color: var(--ink-soft); }
 
 /* ---------- disposition zone ----------
    What the operator does about the finding, in the order they do it: record the
@@ -1464,6 +1886,20 @@ body.qm-open { overflow: hidden; }
 .dropzone.small { padding: var(--sp-2); font-size: var(--fs-meta); }
 .dropzone .pick-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; font-weight: 600;
   color: var(--brand); text-decoration: underline; cursor: pointer; }
+/* Ctrl+V has no mobile equivalent and neither does drag-and-drop, so below 620px
+   the paste prose goes and the pick button becomes the zone's real control — a
+   full-width thumb target rather than an underlined word inside a sentence about
+   gestures the device cannot make. The file input is accept="image/*" with no
+   capture attribute, so the OS picker offers the camera AND the camera roll. */
+.dz-pick { display: none; }
+@media (max-width: 620px) {
+  .dz-paste { display: none; }
+  .dz-pick { display: inline; }
+  .dropzone { padding: var(--sp-2); }
+  .dropzone .pick-btn { display: block; width: 100%; min-height: 44px; text-decoration: none;
+    border: 1.5px solid var(--brand); border-radius: 8px; background: var(--link-bg); }
+  .dropzone.small .pick-btn { min-height: 40px; }
+}
 .photo-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
 .photo-grid:empty { margin-top: 0; }
 .photo-grid.small { gap: var(--sp-2); margin-top: var(--sp-2); }
@@ -1640,6 +2076,50 @@ a.photo-credit:hover { text-decoration: underline; }
   color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
   padding: var(--sp-0) var(--sp-2); }
 .r-complete-gap:hover { border-color: var(--brand); color: var(--brand); }
+
+/* ---------- findings at a glance ----------
+   The "did I miss anything?" card: every source this site has, grouped by what it
+   came back with. One implementation, mounted wherever the whole assessment is
+   being looked at at once — today Focus mode's finish step.
+
+   A traffic light in the honest sense: the rank is the ROW ORDER (findings, then
+   what a human still owns, then the empty searches that are good news), and each
+   row carries a count, a word AND the status glyph, so the reading survives
+   greyscale and colour-vision deficiency. Colour is the confirmation, never the
+   message — the same rule the status chips and dots follow, using the same
+   `--glyph-*` vocabulary via .s-dot. */
+.glance { display: flex; flex-direction: column; gap: var(--sp-2); }
+.glance-lead { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.5; }
+.glance-lead.is-clear { color: var(--reviewed); }
+.glance-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: var(--sp-hair); border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-2); padding: var(--sp-1); }
+.glance-hit { display: grid; grid-template-columns: 1.2em 2.2em auto 1fr; align-items: baseline;
+  gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--fs-meta);
+  color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: var(--sp-1) var(--sp-2); }
+button.glance-hit { cursor: pointer; }
+button.glance-hit:hover { background: var(--surface); border-color: var(--line); }
+.glance-n { font-size: var(--fs-body); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.glance-label { font-weight: 650; }
+.glance-says { color: var(--ink-soft); min-width: 0; overflow-wrap: anywhere; }
+/* A row at zero is still shown — a zero against "Not checked" is exactly the
+   reassurance this card exists to give — but it is not a control, and it does not
+   compete with the rows that have something in them. */
+.glance-row.is-zero .glance-hit { color: var(--ink-soft); }
+.glance-row[data-status="found"] .glance-n { color: var(--found); }
+.glance-row[data-status="manual"] .glance-n { color: var(--manual); }
+.glance-row[data-status="failed"] .glance-n { color: var(--failed); }
+.glance-row[data-status="none"] .glance-n { color: var(--none); }
+/* Last, and deliberately: same specificity as the four above, so a zero row is
+   quiet whatever status it is for. */
+.glance-row.is-zero .glance-n { color: var(--ink-soft); font-weight: 600; }
+/* Four columns stop fitting long before the words do. The count and its label
+   keep the row; what the status MEANS drops to a second line under them. */
+@media (max-width: 620px) {
+  .glance-hit { grid-template-columns: 1.2em 2.2em 1fr; row-gap: var(--sp-hair); }
+  .glance-says { grid-column: 3; }
+}
 .rsection .r-warns:empty { display: none; }
 .rsection .r-warn { font-size: var(--fs-meta); font-weight: 600; color: var(--failed); background: var(--failed-bg); border-radius: 7px; padding: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); }
 .report-map { margin: 0; }
@@ -1647,6 +2127,13 @@ a.photo-credit:hover { text-decoration: underline; }
 .report-map figcaption { font-size: var(--fs-micro); color: var(--ink-soft); margin-top: var(--sp-1); }
 /* The two locator maps in the report: side by side, square, equally sized, each
    filling its half of the available width. */
+/* The report's front page. The locator maps and the station photographs used to
+   be two headed sections; they are one now, because the operator confirms "this
+   is the right place" once rather than once per picture grid — and because that
+   single section is what Focus mode presents as its first output. */
+.r-identity-block + .r-identity-block { margin-top: var(--sp-3); }
+.r-identity-block > h4 { font-size: var(--fs-meta); font-weight: 650; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: .05em; margin: 0 0 var(--sp-1); }
 .report-maps { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
 .report-maps .report-map { margin: 0; min-width: 0; }
 .report-maps .report-map img { width: 100%; max-width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
@@ -1912,8 +2399,13 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 /* ---------- print ---------- */
 #print-root { display: none; }
 @media print {
+  /* #focus is the whole of the app while Focus mode is live, and Print / PDF is
+     one of the four exports its finish step carries — a printout that carried the
+     step chrome as well as the report would not be the same artefact the
+     workbench produces. .rp-overlay is the on-screen preview of that artefact,
+     and printing a preview of the thing being printed is one copy too many. */
   .topbar, .railnav, .pane-divider, .mshell, #site-picker, #run-checks, #advanced, #dashboard, #collection-status,
-  .head-actions, .r-review, .foot, #app > .banner { display: none !important; }
+  .head-actions, .r-review, .foot, #app > .banner, #focus, .rp-overlay { display: none !important; }
   /* A pane collapsed on screen — by a pane handle on the wide layout, or by the
      tab switcher on the narrow one — must not go missing from the printout. */
   .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right,
@@ -1925,69 +2417,72 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
   main { max-width: none; padding: 0; }
   #print-root { display: block; }
 }
-/* Print styling for the generated report (kept in one place, applied via #print-root) */
-#print-root .pr { font-size: 12px; color: #000; }
-#print-root .pr h1 { font-size: 20px; margin-bottom: var(--sp-0); }
-#print-root .pr .pr-sec { border: 1px solid #bbb; border-radius: 6px; padding: var(--sp-2); margin: var(--sp-2) 0; break-inside: avoid; }
-#print-root .pr .pr-sec h2 { font-size: 13px; background: #12507b; color: #fff; margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) var(--sp-2); padding: var(--sp-1) var(--sp-2); border-radius: 6px 6px 0 0; }
-#print-root .pr table { width: 100%; border-collapse: collapse; font-size: 11px; }
-#print-root .pr th, #print-root .pr td { border: 1px solid #ccc; padding: var(--sp-1); text-align: left; vertical-align: top; }
-#print-root .pr .k { color: #444; width: 32%; }
-#print-root .pr .st { font-weight: 700; }
-#print-root .pr .st-found { color: #c1123c; }
-#print-root .pr .st-none { color: #8a6d1a; }
-#print-root .pr .st-failed { color: #b3261e; }
-#print-root .pr .st-manual { color: #3a5a99; }
-#print-root .pr .pr-photos { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
-#print-root .pr .pr-photos figure { margin: 0; width: 150px; break-inside: avoid; }
-#print-root .pr .pr-photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #bbb; border-radius: 4px; }
-#print-root .pr .pr-photos figcaption { font-size: 10px; color: #444; margin-top: var(--sp-0); }
+/* The generated report's own styling, in one place. Keyed on `.pr-paper` rather
+   than on `#print-root` because there are now two places the built artefact is
+   shown: the hidden print root, and Focus mode's "Read the whole report" preview
+   (.rp-paper). Both wear the class, so the preview cannot drift from the paper. */
+.pr-paper .pr { font-size: 12px; color: #000; }
+.pr-paper .pr h1 { font-size: 20px; margin-bottom: var(--sp-0); }
+.pr-paper .pr .pr-sec { border: 1px solid #bbb; border-radius: 6px; padding: var(--sp-2); margin: var(--sp-2) 0; break-inside: avoid; }
+.pr-paper .pr .pr-sec h2 { font-size: 13px; background: #12507b; color: #fff; margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) var(--sp-2); padding: var(--sp-1) var(--sp-2); border-radius: 6px 6px 0 0; }
+.pr-paper .pr table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.pr-paper .pr th, .pr-paper .pr td { border: 1px solid #ccc; padding: var(--sp-1); text-align: left; vertical-align: top; }
+.pr-paper .pr .k { color: #444; width: 32%; }
+.pr-paper .pr .st { font-weight: 700; }
+.pr-paper .pr .st-found { color: #c1123c; }
+.pr-paper .pr .st-none { color: #8a6d1a; }
+.pr-paper .pr .st-failed { color: #b3261e; }
+.pr-paper .pr .st-manual { color: #3a5a99; }
+.pr-paper .pr .pr-photos { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.pr-paper .pr .pr-photos figure { margin: 0; width: 150px; break-inside: avoid; }
+.pr-paper .pr .pr-photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #bbb; border-radius: 4px; }
+.pr-paper .pr .pr-photos figcaption { font-size: 10px; color: #444; margin-top: var(--sp-0); }
 /* Site photographs print larger and uncropped (whole frame, ~3× the evidence thumbs) */
-#print-root .pr .pr-photos.pr-photos-large { gap: var(--sp-3); }
-#print-root .pr .pr-photos.pr-photos-large figure { width: 300px; }
-#print-root .pr .pr-photos.pr-photos-large img { height: auto; max-height: 340px; object-fit: contain; }
-#print-root .pr .pr-ev { margin: var(--sp-1) 0 0; }
-#print-root .pr .pr-ev-item { font-size: 11px; color: #333; margin: var(--sp-0) 0; }
+.pr-paper .pr .pr-photos.pr-photos-large { gap: var(--sp-3); }
+.pr-paper .pr .pr-photos.pr-photos-large figure { width: 300px; }
+.pr-paper .pr .pr-photos.pr-photos-large img { height: auto; max-height: 340px; object-fit: contain; }
+.pr-paper .pr .pr-ev { margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-ev-item { font-size: 11px; color: #333; margin: var(--sp-0) 0; }
 /* The evidence split, on paper: findings under a heading, empty searches on one
    line, and outstanding sources as a caveat the reader cannot mistake for a
    result. Mirrors .r-evidence on screen. */
-#print-root .pr .pr-ev-h { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+.pr-paper .pr .pr-ev-h { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: #444; margin: var(--sp-1) 0 var(--sp-0); }
-#print-root .pr .pr-ev-line { font-size: 10.5px; color: #333; margin: var(--sp-1) 0 0; }
-#print-root .pr .pr-ev-none { color: #444; }
-#print-root .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
+.pr-paper .pr .pr-ev-line { font-size: 10.5px; color: #333; margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-ev-none { color: #444; }
+.pr-paper .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
   border-radius: 4px; padding: var(--sp-1) var(--sp-2); }
-#print-root .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
+.pr-paper .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
 /* Both locator maps in the printed report: side by side, square, equal, full width. */
-#print-root .pr .pr-maps { display: flex; gap: var(--sp-3); align-items: flex-start; break-inside: avoid; }
-#print-root .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
-#print-root .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
-#print-root .pr .pr-map-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-maps { display: flex; gap: var(--sp-3); align-items: flex-start; break-inside: avoid; }
+.pr-paper .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
+.pr-paper .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
+.pr-paper .pr .pr-map-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
 /* Appendix A — the Queensland Globe layer list. Starts its own page (it is an
    annexure, not part of the findings) and runs in two columns so forty layers
    take one page instead of four. Groups never split across a column break. */
-#print-root .pr .pr-appendix { break-before: page; page-break-before: always; break-inside: auto; }
-#print-root .pr .pr-appendix-blurb { font-size: 10.5px; color: #444; margin: 0 0 var(--sp-2); }
-#print-root .pr .pr-appendix-cols { column-count: 2; column-gap: var(--sp-4); }
-#print-root .pr .pr-appendix-group { break-inside: avoid; page-break-inside: avoid; margin: 0 0 var(--sp-2); }
-#print-root .pr .pr-appendix-group h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #12507b; margin: 0 0 var(--sp-0); }
-#print-root .pr .pr-appendix-group ul { margin: 0; padding-left: var(--sp-4); }
-#print-root .pr .pr-appendix-group li { font-size: 10px; line-height: 1.4; margin: 0 0 var(--sp-0); }
-#print-root .pr .pr-appendix-src { display: block; font-size: 8.5px; color: #777; }
-#print-root .pr .pr-appendix-gsrc { margin: 0 0 var(--sp-0); font-style: italic; }
+.pr-paper .pr .pr-appendix { break-before: page; page-break-before: always; break-inside: auto; }
+.pr-paper .pr .pr-appendix-blurb { font-size: 10.5px; color: #444; margin: 0 0 var(--sp-2); }
+.pr-paper .pr .pr-appendix-cols { column-count: 2; column-gap: var(--sp-4); }
+.pr-paper .pr .pr-appendix-group { break-inside: avoid; page-break-inside: avoid; margin: 0 0 var(--sp-2); }
+.pr-paper .pr .pr-appendix-group h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #12507b; margin: 0 0 var(--sp-0); }
+.pr-paper .pr .pr-appendix-group ul { margin: 0; padding-left: var(--sp-4); }
+.pr-paper .pr .pr-appendix-group li { font-size: 10px; line-height: 1.4; margin: 0 0 var(--sp-0); }
+.pr-paper .pr .pr-appendix-src { display: block; font-size: 8.5px; color: #777; }
+.pr-paper .pr .pr-appendix-gsrc { margin: 0 0 var(--sp-0); font-style: italic; }
 /* Legend boxes in the printed appendix — the swatch is the service's own PNG,
    so the reader can match a colour on the map to the layer that drew it. */
-#print-root .pr .pr-legend { display: block; margin: var(--sp-0) 0 0; }
-#print-root .pr .pr-legend-key { display: flex; align-items: center; gap: var(--sp-1); font-size: 9px; color: #333; }
-#print-root .pr .pr-legend-swatch { width: 13px; height: 13px; object-fit: contain; border: 1px solid #bbb;
+.pr-paper .pr .pr-legend { display: block; margin: var(--sp-0) 0 0; }
+.pr-paper .pr .pr-legend-key { display: flex; align-items: center; gap: var(--sp-1); font-size: 9px; color: #333; }
+.pr-paper .pr .pr-legend-swatch { width: 13px; height: 13px; object-fit: contain; border: 1px solid #bbb;
   border-radius: 2px; background: #fff; vertical-align: -2px; margin-right: var(--sp-1); flex: 0 0 auto; }
-#print-root .pr .pr-legend-more { display: block; font-size: 8.5px; color: #888; font-style: italic; }
+.pr-paper .pr .pr-legend-more { display: block; font-size: 8.5px; color: #888; font-style: italic; }
 /* The click-to-enlarge overlay is an on-screen device; on paper it would print
    a second copy of the same map. */
-#print-root .pr .pr-lightbox { display: none !important; }
-#print-root .pr .pr-globe { margin: var(--sp-2) 0 0; break-inside: avoid; }
-#print-root .pr .pr-globe-img { display: block; width: 100%; height: auto; border: 1px solid #bbb; border-radius: 6px; }
-#print-root .pr .pr-globe-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-lightbox { display: none !important; }
+.pr-paper .pr .pr-globe { margin: var(--sp-2) 0 0; break-inside: avoid; }
+.pr-paper .pr .pr-globe-img { display: block; width: 100%; height: auto; border: 1px solid #bbb; border-radius: 6px; }
+.pr-paper .pr .pr-globe-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
 
 /* ---------- report appendix (on-screen preview) ---------- */
 .rsection.rsec-appendix { border-style: dashed; }

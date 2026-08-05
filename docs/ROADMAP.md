@@ -60,10 +60,10 @@ slice. Each backlog item names the files to touch and how to verify.
   written *to the operator about their own draft* ("reconsider the statement"),
   so they no longer travel into the Print/PDF or HTML export, which is the
   document the delivery group receives. They keep working everywhere they face
-  the operator — the on-screen strip, the header count, the **Check report**
-  prompt, `sections[].warnings` in the JSON — and `confirmExportWithWarnings()`
-  makes the removal safe rather than merely quiet: exporting either artefact with
-  warnings still open names the count and offers to go and review them first.
+  the operator — the on-screen strip, the header count, the Focus section step,
+  the **Check report** prompt, `sections[].warnings` in the JSON — and
+  `guardExport` makes the removal safe rather than merely quiet: exporting with
+  warnings still open names the count and offers to go to the first one.
   The **⚠ Not yet checked** caveat is the opposite case (a fact addressed to the
   reader) and stays in every export.
 - **Report self-check prompt** — a **Check report** button (report toolbar)
@@ -88,6 +88,43 @@ slice. Each backlog item names the files to touch and how to verify.
   search/fetch bypass CORS), filling the dashboard live. No backend.
 - **Docs** — architecture, this roadmap, how to add a source, proforma mapping,
   agent mode.
+
+## In progress
+
+- **Focus mode** (epic #68) — a second way through the same tool: one column, one
+  step per screen, with each report section presented for review the moment every
+  source feeding it has been answered. Focus is the default view; the workbench is
+  one labelled click away in the top bar. **Landed so far:** the mode shell (#69)
+  and the derived step graph (#70) — the switch, the step chrome, the per-site
+  cursor, the step list, and `focusSteps()`; and the site, front-page and
+  automated-round-trip steps (#71) — the station record read back with one
+  correction affordance, the two locator maps, the photo dropzone, the report's
+  real front page with its own review tick, and the three step-3 passes one per
+  step; and **one source per step** (#72) — the headline step, where most of an
+  assessment is spent: the source's instruction and the whole of its finding open
+  rather than folded, the four-way result picker, the note, the evidence zone once
+  the result is Found, the report routing, and a Continue that records the
+  sign-off. Settled sources are stepped over rather than presented; and
+  **report-section review interleaved into the flow** (#73) — the other half of
+  the interleave: what the section now concludes, the consistency warnings on the
+  screen where they can still be acted on, the detail with a draft on offer, the
+  three-way evidence split, and a Continue that ticks the section reviewed. A
+  source name in the evidence is an errand — it goes to that source and Continue
+  brings you straight back. A gate that re-opens keeps everything already written;
+  **the finish step and the specialist escape hatches** (#74) — what is still
+  outstanding, every way the report leaves the app, and a labelled handoff for each
+  surface that stays in the workbench; and **the accessibility, keyboard and
+  narrow-screen pass** (#75) — every navigation lands focus on the new step's
+  heading, whose accessible name carries its position ("Step 14 of 41 — Queensland
+  Globe") as one announcement and no more; `Alt+→` / `Alt+←` move, documented on
+  the chrome; the step list is a real menu with ↑/↓, Home/End and Esc; no keyboard
+  trap, and focus is never left on `<body>`, including out of the Queensland Globe
+  map; every state carries a glyph and a word, so the mode reads in greyscale; and
+  below 620px the chrome collapses, the nav footer becomes a sticky thumb-reachable
+  bar, and the photo zones offer a real pick/camera control instead of paste-only
+  affordances. Step transitions are suppressed under `prefers-reduced-motion`.
+  That completes epic #68.
+  See `docs/ARCHITECTURE.md` → *Focus mode*.
 
 ## Deliberately manual (by nature, not backlog)
 

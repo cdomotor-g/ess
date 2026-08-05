@@ -32,6 +32,73 @@ python3 -m http.server 8000
 Opening `index.html` directly with `file://` will **not** work (browsers block
 `fetch()` of the JSON data from the filesystem). Serve it, or publish to Pages.
 
+### Two views of the same assessment
+
+There are two ways through the tool, and one button in the header switches
+between them at any point without losing anything — the label always names where
+it goes. Both render the same work, save to the same place and export the same
+file, so the choice is only about how you like to work.
+
+- **Focus** *(the default)* — one column, one step per screen, and the tool
+  decides what comes next. The report is built into the flow rather than sitting
+  beside it: once every source feeding, say, *Invasive Plants* has an answer,
+  that section is put in front of you for review, and then the flow moves on to
+  the next section's sources. **All steps ▾** opens the whole ordered list, with
+  what each step still needs, and jumps to any of them; **Skip for now** is always
+  there. Where you got to is remembered per site.
+
+  The opening run of steps is the site itself: the station record read back for
+  confirmation (with the assessment date, and one **Correct these details** if the
+  Bureau's record is wrong), the two locator maps, any site photos, and then —
+  straight away, while it is all still fresh — **the report's front page as it now
+  reads**, to be checked and ticked off. The three automated passes follow, one per
+  step; applying an assistant's reply says what it answered and drops you at the
+  first source that still needs a human.
+
+  Then the bulk of the work: **one source per screen**. What that source is for and
+  what to look for are simply written there, not folded behind an ⓘ; whatever came
+  back from it is shown in full, not clipped to four lines; and the screen asks one
+  question — Found, Nothing, Failed or Manual — with room for your note, a place to
+  drop a screenshot once you have found something, and a quiet line saying which
+  report section it will feed. **Continue** records your sign-off and moves on.
+  Sources that are already settled are stepped over rather than shown again; they
+  are still one click away in **All steps ▾**. Anything specialist that belongs to a
+  particular source — Queensland Globe's site map, the PMST spreadsheet import, the
+  live API checks — is right there on that source's own screen.
+
+  And then, the moment the last source feeding a section has an answer, **that
+  section of the report**, while the evidence is still in your head: what it now
+  concludes, anything inconsistent about that, the detail (with a draft on offer
+  from the evidence and the standard wording), and what the whole thing rests on —
+  the findings at full weight, *checked, nothing found* on one line, and **⚠ not yet
+  checked** as a caveat. The consistency warnings are the point of putting it here:
+  in the workbench they sit in the right pane, where you may never look; on the step
+  they are in front of you at the moment you can still act on them. Any source name
+  in the evidence takes you to that source and **Continue brings you straight back**,
+  with the section exactly as you left it. **Continue** ticks the section reviewed —
+  the same tick, and the same tally, as the report pane's checkbox. A section that
+  nothing on this site feeds still gets a screen saying so; a section you have
+  already reviewed whose sources go back to *Not checked* says it needs another look,
+  and keeps everything you wrote. Anything specialist that is genuinely not
+  step-shaped — the batch tray, chiefly — stays in the workbench behind a labelled
+  button that says what it opens, so nothing is reachable in only one mode.
+
+  Focus works from the keyboard alone. **Continue** and **Back** — and `Alt+→` /
+  `Alt+←`, which do the same from anywhere on the step — move you on and put the
+  cursor on the new step's heading, so a screen reader announces *"Step 14 of 41 —
+  Queensland Globe"* and nothing more. **All steps ▾** is a menu you can walk with
+  ↑/↓, Home/End and Esc. Every step's state is a symbol *and* a word, so the whole
+  mode reads in greyscale, and step transitions are suppressed if you have asked
+  your system to reduce motion. On a phone it is a better fit than the workbench
+  rather than a worse one: one column, no pane switcher, the navigation within
+  thumb reach at the foot of the screen, and the photo steps offering a real
+  **Take or choose a photo** button instead of a paste gesture the device cannot
+  make.
+- **Workbench** — the two-pane view described in the rest of this README:
+  everything reachable at once, and you choose what to look at next.
+
+The walkthrough below describes the **workbench**.
+
 The left pane is the workflow, numbered in the order you work it. Everything
 belonging to another way of working — batches, file imports, the in-browser
 agent, display preferences — is folded into **Advanced options** at the foot of
@@ -163,8 +230,9 @@ that pane, so the four steps are all you see until you go looking.
    came back *Found*, a "matters present" statement with no supporting detail, or
    a section asserting a conclusion while some of its sources have not been
    checked. Those flags are scaffolding for **you**, so they stay in the app: they
-   are not written into the handover document, and exporting with any of them
-   still open says so first, naming the count and offering to go and review them.
+   are not written into the handover document, and exporting with any of them still
+   open says so first — once per site — naming the count and offering to go to the
+   first one.
    One **Export ▾** menu takes the report out of the app — **Print/PDF** (the
    handover format) first, then **HTML file**, **JSON export**, **Copy summary**;
    photos travel with the export (embedded, so the HTML/JSON stay
