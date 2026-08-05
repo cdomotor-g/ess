@@ -26,12 +26,16 @@ slice. Each backlog item names the files to touch and how to verify.
   reference photo from Wikipedia with licensing attribution. All photos are
   embedded as data URLs, so they travel into the report and every export.
 - **Automatic reference-image sourcing** — the same Wikipedia pipeline runs
-  hands-free: an **Auto from notes** button (and note-blur) extracts species/
-  subjects from a card's free-text findings, and **imports + live agent runs**
-  fetch photos from the agent's `image_subjects` (or extracted text). Extraction
-  is high-precision (curated lists + scientific binomials only); a global toggle
-  governs it. Schema: optional `image_subjects[]` on species `collection_log`
-  entries.
+  hands-free: **Apply response / import always fetches** a photo for every species
+  named on a Found species card, from the agent's `image_subjects` (or subjects
+  extracted from the findings text), with a **Reference image from notes** button
+  for a single card. Paced by one global queue — 3 fetches in flight across the
+  whole import, started on idle, abandoned on a site switch or Clear cache — with
+  progress and a final count on step 3's status line. Extraction is high-precision
+  (curated lists + scientific binomials only) and each result is filtered again by
+  the article's own categories, so maps, flags, logos and diagrams don't reach a
+  report. The display toggle now governs live agent runs only. Schema: optional
+  `image_subjects[]` on species `collection_log` entries.
 - **Batch mode** — a `ess-findings-batch/1` envelope (`{ sites: [ <ess-findings/1>,
   … ] }`) runs end-to-end, with two entry points into the same **batch picker bar**.
   (1) **In the browser** — a **Batch multiple sites** button in **Advanced

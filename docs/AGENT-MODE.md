@@ -85,7 +85,9 @@ options** at the foot of the left pane and click **Agent mode…**.
     the agent works, so cards fill live. For species/subject sources it marks
     `found`, the agent also passes `image_subjects` (the species/subjects it
     identified); the browser auto-fetches a labelled Wikipedia reference photo for
-    each onto that card (gated by the "Auto-fetch reference images" toggle).
+    each onto that card, queued a few at a time (gated by the "Auto-fetch
+    reference images during agent runs" toggle — the paste-back path always
+    fetches, since pressing **Apply response** is itself the request).
 - When every source has a result, it stops. You review Manual/Failed and export.
 
 ### The key
@@ -136,5 +138,7 @@ but re-importing an exported file preserves them. A species/subject
 identifiable species/subjects the agent found. It isn't photo data: on import
 (and during a live BYOK run) the browser tool fetches a labelled Wikipedia
 reference photo for each name into that card. If it's omitted, the tool falls
-back to extracting subjects from `note`/`result_text`. Backward compatible —
-older files simply have no `image_subjects`.
+back to extracting subjects from `note`/`result_text`. Either way a name is only
+illustrated if it resolves to something biological, so a subject like a lot/plan
+number or a region name is dropped rather than given whatever photo the search
+returned. Backward compatible — older files simply have no `image_subjects`.

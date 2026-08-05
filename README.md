@@ -166,9 +166,27 @@ that pane, so the four steps are all you see until you go looking.
    a labelled reference photo straight from Wikipedia — no hunting for one — with
    its licensing credit attached. Or hit **Reference image from notes** and the
    tool reads the species/subjects out of that card's findings text and fetches a
-   photo for each; with **Auto-fetch reference images** on (Advanced options →
-   Display options) this also happens automatically on **Import** and during
-   agent runs.
+   photo for each.
+   * **You shouldn't have to ask.** Pressing **Apply response** (or importing a
+     findings file) fetches them for you: every species card that came back
+     **Found** and has no photo of its own gets one per species named, and step 3's
+     status line carries the progress and the final count — *"14 sources answered ·
+     fetching reference images (3 of 8)…"* → *"· 11 reference images added"*. The
+     fetches are queued three at a time and start once the page has finished
+     re-rendering, so the tab stays responsive; each card shows a placeholder in its
+     photo strip while its own is outstanding. Switching site or clearing the cache
+     abandons whatever is still in flight. A photo you already attached is never
+     overwritten, and anything auto-sourced can be deleted like any other photo.
+     In a **batch**, each site fetches when you open it, not all twenty up front.
+   * A photo is only attached if it looks like a picture of a living thing — the
+     article has to be filed under something biological (or be titled as a
+     scientific binomial), and lead images that are locator maps, flags, logos or
+     diagrams are rejected outright, which is what keeps a map of Queensland or a
+     diagram of HTML tags out of a report. If none of the top few search results
+     qualifies, the card simply gets no photo, and the status line says so.
+   * **Auto-fetch reference images during agent runs** (Advanced options → Display
+     options) governs the *other* automatic path — a live agent run, which answers
+     one source at a time. It doesn't affect **Apply**: that's an explicit request.
    * The **EPBC PMST** card's **Open the source ↗** link bakes the site's lat/long into
      the URL, so the Protected Matters Search Tool loads straight onto the
      location with its export panel open. Draw the buffer, generate the **Excel**

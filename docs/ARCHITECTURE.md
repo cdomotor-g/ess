@@ -162,12 +162,18 @@ Vanilla JS, no dependencies, no build. It:
   — so a user doesn't have to go and find one. Runs entirely in the user's
   browser (MediaWiki returns anonymous CORS; `upload.wikimedia.org` allows the
   cross-origin canvas read); network/CORS failures are non-fatal. The same
-  pipeline runs **automatically**: an "Auto from notes" button (and note-blur,
-  when enabled) scans a card's free-text findings for subjects and fetches a
-  photo for each; imports and live agent runs do the same from `image_subjects`
-  (or extracted text). Extraction is deliberately high-precision — only curated
-  reference-list names and scientific binomials, never bare capitalised words —
-  so a wrong photo isn't attached; a global toggle (default on) governs it;
+  pipeline runs **automatically**: "Reference image from notes" scans a card's
+  free-text findings for subjects and fetches a photo for each, and **applying a
+  pasted reply / importing a findings file does it for the whole site** from each
+  entry's `image_subjects` (or extracted text). Extraction is deliberately
+  high-precision — only curated reference-list names and scientific binomials,
+  never bare capitalised words — and every *automatic* fetch is filtered again at
+  the far end (`looksLikeSubjectPage`): the resolved article must be filed under
+  something biological or titled as a binomial, and lead images that are SVGs or
+  named like maps/flags/logos/diagrams are rejected, so a locator map of
+  Queensland or a diagram of HTML tags can't reach a report. A typed "Fetch"
+  is unfiltered — the operator asked for that page. See **the auto-fetch queue**
+  below for how the work is paced;
 - renders the auto **satellite locator map** by stitching keyless Esri World
   Imagery tiles onto a canvas with a pin, and (default on, toggleable) composites
   transparent Esri road + locality/place **reference overlays** on top — same
@@ -365,6 +371,48 @@ Vanilla JS, no dependencies, no build. It:
   in the *Check report* prompt and in `sections[].warnings` in the JSON (working
   state that round-trips back into the tool, not a document); `guardExport` is
   what stops unresolved ones leaving unnoticed.
+
+#### The auto-fetch queue
+Reference photos are now fetched **without being asked**, so the cost of fetching
+them is a design constraint rather than something an operator opts into. Each
+subject is three network round trips (search → image → credit) plus a canvas
+decode/re-encode; the original code kicked every card off at once, which on a
+site with eight species cards meant two dozen fetches and two dozen encodes
+racing each other on the main thread immediately after an import had re-rendered
+both panes. That is what the old default-off toggle was protecting against.
+
+One global queue replaces it (`queueAutoFetch` → `pumpAutoQueue` →
+`autoFetchImages`):
+
+- **`AUTO_FETCH_CONCURRENCY` (3) cards in flight at a time**, across the whole
+  app — not per card. A card's own subjects stay sequential, so the ceiling is a
+  handful of live requests rather than a burst. `autoFetchInFlight` still
+  serialises per source, so a stray button press can't double-fetch one card.
+- **Started on idle** (`requestIdleCallback`, falling back to a timeout), so the
+  first request goes out *after* the post-import render has settled.
+- **Bounded twice**: `MAX_AUTO_IMAGES_PER_CARD` (6) per card, and a shared
+  `MAX_AUTO_IMAGES_PER_IMPORT` (20) budget across one sweep, so one verbose reply
+  can't fetch a hundred photos.
+- **Abandonable**: `autoFetchGen` is bumped by `cancelAutoFetch()` on a site
+  switch (`loadSiteState`) and by Clear cache (via `ESS.cancelAutoImages`, called
+  before storage is wiped). That empties the queue, and every in-flight fetch
+  re-checks the generation after each `await`, so nothing lands on the wrong site
+  or writes a photo back into keys that were just deleted.
+- **Visible while it runs**: the queued/fetching source ids are in `autoPending`,
+  which puts a placeholder in the card's photo strip (or a "fetching a photo…"
+  line on a settled card, which has no strip), and drives the progress the caller
+  narrates — `applyPastedJson` splices it into step 3's own status line and
+  reports the final count *including* the subjects that came back with no usable
+  photo.
+
+Which paths fetch, and what the toggle means now:
+
+| Path | Fetches | Governed by the toggle |
+|---|---|---|
+| **Apply response** / import a findings file | always | no — the gesture *is* the request |
+| **Batch** import | the site being opened, as it opens (`ui.autoImages` records that a site has been swept, so reopening it doesn't drag back a deleted photo) | no |
+| **Live agent run** (`ESS.setResult`) | one source at a time, as results land | yes (default on) |
+| **Reference image from notes**, **Fetch** | on the click | no |
 
 ### Focus mode — the second presentation (`#focus`, `assets/app.js`)
 The split view described above is a **cockpit**: everything reachable, nothing
@@ -810,8 +858,12 @@ to `http(s)` on import). Each **species/subject** `collection_log[]` entry
 It's a *hint*, not stored photo data: on import (and during a live agent run) the
 browser tool fetches a labelled Wikipedia reference photo for each name and adds
 it to that card's `images`. When it's absent, the tool falls back to extracting
-subjects from the entry's `note`/`result_text`. Auto-fetch is gated by a
-tool-side toggle (default on) and never overwrites existing photos.
+subjects from the entry's `note`/`result_text`. The names are kept on the finding
+(`imageSubjects`), because in a batch the fetch doesn't happen until that site is
+opened. Import always fetches (the toggle governs live agent runs only), nothing
+is fetched for a card that already has photos, and a name that doesn't resolve to
+something biological is dropped rather than illustrated — see **the auto-fetch
+queue** above.
 
 An optional top-level `qld_globe_map` carries the provenance of the Queensland
 Globe site map: `{ captured_at, lat, lon, scale, pin_in_view, selection[],
