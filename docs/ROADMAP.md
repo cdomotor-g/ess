@@ -56,6 +56,16 @@ slice. Each backlog item names the files to touch and how to verify.
   the collection cards. A matching consistency warning fires when a section states
   a conclusion with unchecked sources behind it. The printed and exported HTML
   carry the same split; the `ess-findings/1` JSON is unchanged.
+- **Handover artefact vs operator scaffolding** — the consistency warnings are
+  written *to the operator about their own draft* ("reconsider the statement"),
+  so they no longer travel into the Print/PDF or HTML export, which is the
+  document the delivery group receives. They keep working everywhere they face
+  the operator — the on-screen strip, the header count, the Focus section step,
+  the **Check report** prompt, `sections[].warnings` in the JSON — and
+  `guardExport` makes the removal safe rather than merely quiet: exporting with
+  warnings still open names the count and offers to go to the first one.
+  The **⚠ Not yet checked** caveat is the opposite case (a fact addressed to the
+  reader) and stays in every export.
 - **Report self-check prompt** — a **Check report** button (report toolbar)
   builds a self-contained fact-and-consistency-check prompt for the finished
   report and copies it for any assistant. The output contract is deliberately

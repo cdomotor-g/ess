@@ -309,7 +309,13 @@ Vanilla JS, no dependencies, no build. It:
   (category collapses), `ui.filter`, `ui.flow` (how far step 3 got) and
   `ui.focus.step` (Focus mode's cursor — see below);
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
-  are embedded inline in all three.
+  are embedded inline in all three. The consistency warnings are **not** written
+  into the handover artefacts (Print/PDF, HTML): they address the operator about
+  their own draft — *"reconsider the statement"* — and the recipient cannot act
+  on them. They stay on-screen, in the header count, on the Focus section step,
+  in the *Check report* prompt and in `sections[].warnings` in the JSON (working
+  state that round-trips back into the tool, not a document); `guardExport` is
+  what stops unresolved ones leaving unnoticed.
 
 ### Focus mode — the second presentation (`#focus`, `assets/app.js`)
 The split view described above is a **cockpit**: everything reachable, nothing

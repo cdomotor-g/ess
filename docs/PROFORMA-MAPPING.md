@@ -84,8 +84,19 @@ drafts those paragraphs:
 The report flags the mistakes the human sheets are full of: a standardized
 statement that **contradicts its evidence** (says "no known…" while sources came
 back *Found* or the note lists species), and a "matters present" statement left
-with **no supporting detail**. Warnings show on-screen and as review flags in the
-Print/HTML export and the JSON (`sections[].warnings`).
+with **no supporting detail**, and a statement asserting a conclusion while some
+of its sources have **not been checked**.
+
+Warnings are scaffolding for the person *building* the ESS, so they stay where
+they face that person: the on-screen strip under each section, the report
+header's warning count (which jumps to the first one), the Focus mode section
+step, the **Check report** prompt's automated-flags block, and
+`sections[].warnings` in the JSON interop object. They are **not** written into
+the Print/PDF or HTML export — those are the handover artefact, read by someone
+who cannot act on "reconsider the statement". Exporting with warnings still open
+asks first (`guardExport`), naming the count and offering to go to the first one.
+(The **⚠ Not yet checked** caveat is a different thing — a statement of fact
+about the assessment, addressed to the reader — and does appear in every export.)
 
 ### Biosecurity declaration text
 The proforma's biosecurity cell (`A19`) uses an `IFS` to expand the chosen level

@@ -7176,11 +7176,20 @@
           + ` — these sources have not been checked, so the statement above is not yet fully evidenced.</p>`);
       return `<div class="pr-ev">${rows.join("")}</div>`;
     };
+    // `sec.warnings` is deliberately NOT rendered into the artefact. The
+    // consistency checker talks to the *operator* about their own draft — second
+    // person, "reconsider the statement", "add the specifics" — and this file is
+    // the deliverable, read by someone who cannot act on that instruction. The
+    // warnings keep working everywhere they face the operator (the on-screen
+    // .r-warns strip, the header count, the Focus section step, the Check report
+    // prompt, and `sections[].warnings` in the JSON interop object), and
+    // guardExport() stops unresolved ones leaving unnoticed.
+    // The "⚠ Not yet checked" caveat in evNotesHtml is the opposite case — a fact
+    // about the assessment, addressed to the reader — and stays.
     const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${nl2br(sec.detail)}</p>` : ""}
       ${sec.note ? `<p>${nl2br(sec.note)}</p>` : ""}
-      ${(sec.warnings || []).map((wn) => `<p class="pr-warn">⚠ Review: ${esc(wn)}</p>`).join("")}
       ${evNotesHtml(sec)}
       ${photosHtml(sec.images, false, interactive)}</div>`).join("");
     // Internal / login-only sources are operator working items — keep their
@@ -7315,7 +7324,6 @@
       .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
       .pr-map-img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid #bbb;border-radius:6px}
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}
-      .pr-warn{font-size:11px;font-weight:600;color:#b3261e;background:#fbe6e4;border-radius:5px;padding:5px 8px;margin:6px 0 0}
       .pr-appendix{page-break-before:always;break-before:page}
       .pr-appendix-blurb{font-size:11.5px;color:#444;margin:0 0 10px}
       .pr-appendix-cols{column-count:2;column-gap:22px}
@@ -7393,7 +7401,8 @@
         const ok = confirm(
           `${n} consistency warning${n === 1 ? "" : "s"} ${n === 1 ? "is" : "are"} still open on this report`
           + ` — the first is on ${first.title}.\n\n`
-          + "These are the report's own checks on itself, and once it leaves the app nobody can act on them.\n\n"
+          + "These are the report's own checks on itself. They do not appear in the exported"
+          + " report — it is the handover document, and its reader cannot act on them.\n\n"
           + "OK to export anyway, or Cancel to go to the first one.");
         if (!ok) { showReportSection(first.id); return; }
         exportWarned.add(key);
