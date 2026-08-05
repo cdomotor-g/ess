@@ -1418,6 +1418,7 @@
     persistBatch();
     loadSite(firstSite);             // open the first site (restore + render); highlights its chip
     renderBatchBar();
+    offerBatchHandoff(keys.length);  // …and, in Focus, says where the other sites are
     toast(`Imported ${keys.length} site${keys.length > 1 ? "s" : ""} — pick one below to review`);
   }
 
@@ -1445,6 +1446,7 @@
     persistBatch();
     loadSite(firstSite);               // open the first site (restore + render); highlights its chip
     renderBatchBar();
+    offerBatchHandoff(keys.length);    // …and, in Focus, says where the other sites are
     toast(`Batch of ${keys.length} site${keys.length > 1 ? "s" : ""} ready — pick one below to start`);
   }
 
@@ -4927,6 +4929,59 @@
     return out;
   }
 
+  /* ------------------------------------------------- findings at a glance (#65)
+     The "did I miss anything?" instrument: every source this site has, grouped by
+     what it came back with, in the order the answer matters — the findings first,
+     then everything a human still owns, then the empty searches that are good news.
+
+     ONE implementation, deliberately. Focus mode's finish step is where it earns
+     its keep (it is the only place in that mode that looks at the whole
+     assessment at once), and it is written as a free-standing node so the report
+     pane can mount the same card at its head without a second copy appearing.
+
+     Status is carried by the count, the word AND the glyph — `statusDot` renders
+     an empty span that the stylesheet's one status vocabulary fills, so this card
+     cannot drift from the chips, the dots or the result picker. */
+  const GLANCE_ROWS = [
+    { key: STATUS.FOUND, says: "a matter is present at or near the site" },
+    { key: STATUS.MANUAL, says: "the check needs a person — a portal, a login, a visit" },
+    { key: STATUS.FAILED, says: "the check was attempted and could not be completed" },
+    { key: STATUS.UNSET, says: "nobody has looked yet" },
+    { key: STATUS.NONE, says: "checked, and nothing relevant came back" },
+  ];
+
+  function renderFindingsGlance() {
+    const c = statusCounts();
+    const box = el("div", { class: "glance", role: "group", "aria-label": "Findings at a glance" });
+    box.append(el("p", { class: "glance-lead" + (c.n && !c.outstanding ? " is-clear" : "") },
+      outstandingSentence(c)));
+    if (!c.n) return box;
+    const rows = el("ul", { class: "glance-rows" });
+    GLANCE_ROWS.forEach((row) => {
+      const n = c.byStatus[row.key] || 0;
+      // The first source carrying this result, which is what the row jumps to. A
+      // row with none has nowhere to go, so it is rendered as a fact rather than
+      // as a control — a zero on "Not checked" is the reassurance this card
+      // exists to give, and it must still be shown.
+      const first = n ? sourcesForSite().find((s) => statusOf(state.findings[s.id] || {}) === row.key) : null;
+      const kids = [
+        statusDot(row.key),
+        el("span", { class: "glance-n" }, String(n)),
+        el("span", { class: "glance-label" }, STATUS_LABEL[row.key]),
+        el("span", { class: "glance-says" }, row.says),
+      ];
+      rows.append(el("li", { class: "glance-row" + (n ? "" : " is-zero"), "data-status": row.key },
+        first
+          ? el("button", { type: "button", class: "glance-hit",
+              title: `Go to the first: ${first.name}`,
+              "aria-label": `${n} ${STATUS_LABEL[row.key]} — ${row.says}. Go to the first, ${first.name}.`,
+              onclick: () => showSourceCard(first.id) }, kids)
+          : el("span", { class: "glance-hit" }, kids)));
+    });
+    box.append(rows);
+    return box;
+  }
+
   // The document header: who this report is for, how far through it is, and what
   // the consistency checker has to say. Text-only updates against markup that is
   // already in the page, so every path that changes a section can call it without
@@ -4992,18 +5047,26 @@
     renderReportCompleteness(r);
   }
 
+  // What is still empty, as a list of { list, text } — one definition of "a gap in
+  // this report", shared by the pane's completeness box and by Focus mode's finish
+  // step, so the two can never name different gaps for the same state. Only the
+  // gaps that exist come back; an empty array IS "nothing missing".
+  function completenessGaps(r) {
+    return [
+      { list: r.noChoice, text: (n) => `${n} with no statement chosen` },
+      { list: r.noNote, text: (n) => `${n} with an empty comment` },
+      { list: r.noEvidence, text: (n) => `${n} with no evidence included` },
+      { list: r.unreviewed, text: (n) => `${n} still to review` },
+    ].filter((g) => g.list.length);
+  }
+
   // Where the section list ends: what is still empty. The report used to simply
   // stop, without ever saying whether it was finished.
   function renderReportCompleteness(r) {
     const box = $("#report-complete");
     if (!box) return;
     box.innerHTML = "";
-    const gaps = [
-      { list: r.noChoice, text: (n) => `${n} with no statement chosen` },
-      { list: r.noNote, text: (n) => `${n} with an empty comment` },
-      { list: r.noEvidence, text: (n) => `${n} with no evidence included` },
-      { list: r.unreviewed, text: (n) => `${n} still to review` },
-    ].filter((g) => g.list.length);
+    const gaps = completenessGaps(r);
     if (!gaps.length) {
       box.append(el("p", { class: "r-complete-lead is-done" },
         `All ${r.total} sections carry a statement, a comment and included evidence — and every one is reviewed.`));
@@ -5178,9 +5241,10 @@
        step is reachable from the step list at any time, "Skip for now" is always
        available, and no step is a dead end.
 
-     This section owns the shell and the step graph. The step BODIES are still
-     being built out; until then each one states what it is for and hands off to
-     the workbench with a labelled button (focusHandoffTo). ============================ */
+     This section owns the shell, the step graph and every step body. Where a
+     surface is too large or too specialised to have a Focus equivalent, the step
+     hands off to the workbench with a labelled button (focusHandoffTo) — a route
+     to the same controls rather than a dead end. ============================ */
 
   // ------------------------------------------------------------- the step graph
   // A pure function of state, computed on every render and NEVER stored. That is
@@ -5222,7 +5286,12 @@
   let focusReturn = null;
   // A different site is a different step list. Called wherever state.site is
   // reassigned, so one site's place can never be read as another's.
-  function resetFocusCursor() { focusCursor = null; focusSkipped = new Set(); focusStepIds = []; focusReturn = null; }
+  function resetFocusCursor() {
+    focusCursor = null; focusSkipped = new Set(); focusStepIds = []; focusReturn = null;
+    // …and any offer that belonged to the site being left. The batch importer sets
+    // this AFTER it has opened the first site, so its own offer survives.
+    focusBatchOffer = 0;
+  }
 
   function focusSteps() {
     const site = state.site;
@@ -5516,6 +5585,7 @@
     root.append(
       el("div", { class: "fx-shell" },
         renderFocusIntro(),
+        renderFocusBatchOffer(),
         renderFocusFlash(),
         renderFocusChrome(step, steps, at, done),
         renderFocusList(steps, at),
@@ -5616,6 +5686,49 @@
     done: "Done", "needs-you": "Needs you", skipped: "Skipped",
     blocked: "Waiting on its sources", "not-reached": "Not started",
   };
+
+  /* ----------------------------------------------------- the batch handoff
+     The one surface that is genuinely NOT Focus-shaped. A batch is a way of
+     working ACROSS sites — a tray of them, their states side by side, one
+     consistency check over the lot — and Focus is a way of working THROUGH one.
+     Building a Focus equivalent would mean a second navigation model inside a
+     mode whose whole argument is that there is only one thing on screen.
+
+     So it hands over, by the rule every handoff in this mode follows: a labelled,
+     deliberate action that says what it opens and why. Never a silent mode flip
+     — the batch has just loaded and the first site is open in Focus already, so
+     declining is a real answer and costs nothing. Focus is still reachable per
+     site from the tray, by the same top-bar button that got them here. */
+  let focusBatchOffer = 0; // sites in the batch that just landed; 0 = no offer open
+  function offerBatchHandoff(n) {
+    if (!focusLive()) return;
+    focusBatchOffer = n;
+    // focus:false — the batch importer moved the operator to a new site already,
+    // and this is a notice about that move rather than a second one.
+    renderFocus({ focus: false });
+  }
+  function renderFocusBatchOffer() {
+    const n = focusBatchOffer;
+    if (!n) return null;
+    return el("div", { class: "fx-handoff", role: "status" },
+      el("p", { class: "fx-handoff-lead" },
+        `A batch of ${n} site${n === 1 ? "" : "s"} is loaded, and the first one is open here.`),
+      el("p", { class: "fx-lede" },
+        "Working across several sites — the tray of all of them, each one's state, and one consistency check over the lot "
+        + "— is the workbench's job; Focus works through one site a step at a time. Both read the same saved work, and "
+        + "Focus is one click away again from the top bar."),
+      el("div", { class: "fx-actions" },
+        el("button", {
+          type: "button", class: "btn secondary",
+          title: "Switches to the workbench and lands on the batch tray. Your work on this site is untouched.",
+          onclick: () => { focusBatchOffer = 0; setUiMode("workbench"); jumpTo($("#batch-bar")); },
+        }, "Open the batch in the workbench ▸"),
+        el("button", {
+          type: "button", class: "btn tertiary",
+          title: "Stay on this step. The batch stays loaded, and the tray is in the workbench whenever you want it.",
+          onclick: () => { focusBatchOffer = 0; renderFocus({ focus: false }); },
+        }, "Stay in Focus")));
+  }
 
   function renderFocusChrome(step, steps, at, done) {
     const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
@@ -5820,9 +5933,10 @@
   }
 
   // ------------------------------------------------------------- the step bodies
-  // Being built out step by step. Until a step has its own body it states what it
-  // is for and hands off to the workbench, which is a labelled route to the same
-  // controls rather than a dead end — no capability exists in only one mode.
+  // Every step id in the graph resolves to a body now. The lede-plus-handoff
+  // fallback at the foot of focusStepBody stays as the safety net for a step id
+  // that ever gets added without one: a labelled route to the same controls in the
+  // workbench, rather than a screen that says nothing.
   const FOCUS_LEDE = {
     "site:details": "Filled in from the Bureau station list. Read it back — it is usually right — then set the date this assessment was made.",
     "site:maps": "Two satellite locators are stitched for every site: the close surrounds, and the region around them. Check they show the place you mean.",
@@ -5991,7 +6105,78 @@
           focusGoTo((steps[after + 1] || steps[steps.length - 1]).id);
         },
       }, "Skip all three ▸")));
+    // …and the other way past all three: the BYOK agent, offered on the first of
+    // them because it is an alternative to the whole sequence, not an extra pass.
+    if (step.id === "checks:auto") body.append(focusAgentHatch());
     return body;
+  }
+
+  /* ------------------------------------------------ the BYOK agent, from Focus
+     `assets/agent.js` writes through the same narrow `window.ESS` seam every
+     other route into state uses, so a live run needs no Focus-specific plumbing
+     at all: `setResult` calls `refreshCard`, which in Focus re-renders the step,
+     and the step graph is recomputed from state on every one of those — so the
+     flow reshapes itself under the operator as the answers land.
+
+     What this adds is the offer and the landing. The panel is the workbench's
+     own node, borrowed (key field, model picker, Run and its status line), so
+     there is no second copy of a control that holds an API key. Shut by default:
+     an assessment that is going to be worked by hand should not be met by a
+     request for a credential. */
+  let focusAgentOpen = false;
+  // How many sources the agent run in flight has recorded. Reset by ESS.beginRun,
+  // counted by ESS.setResult, read by ESS.endRun — which is the only way to tell a
+  // run that did the work from one that failed on its first turn, since endRun
+  // fires from agent.js's `finally` either way.
+  let agentRunWrote = 0;
+  function focusAgentHatch() {
+    // agent.js is optional — index.html ships the empty panel and the button that
+    // opens it, and the module unhides that button when it activates. No module,
+    // no offer, rather than a control that does nothing.
+    const settings = $("#btn-agent-settings"), panel = $("#agent-panel");
+    if (!settings || settings.hidden || !panel) return null;
+    const box = el("div", { class: "fx-hatch" });
+    box.append(el("div", { class: "fx-actions" }, el("button", {
+      type: "button", class: "btn tertiary",
+      "aria-expanded": focusAgentOpen ? "true" : "false", "aria-controls": "agent-panel",
+      title: "Claude works through every source itself using your own Anthropic API key, instead of the copy-prompt round trip. The key stays in this browser.",
+      onclick: () => { focusAgentOpen = !focusAgentOpen; renderFocus({ focus: false }); },
+    }, focusAgentOpen ? "Hide the Claude runner ▴" : "Or have Claude run every source ▾")));
+    if (focusAgentOpen) {
+      const holder = el("div", { class: "fx-adopt fx-agent" });
+      adoptNode(panel, holder);
+      // The panel carries its own Close, which hides it. In the workbench that is
+      // the whole gesture; here it would leave an open disclosure over nothing, so
+      // the disclosure follows it shut. A bubbling listener, so it runs after
+      // agent.js's own handler has done the hiding — and no change to agent.js,
+      // which is the point of the seam.
+      holder.addEventListener("click", () => {
+        if (!panel.hidden) return;
+        focusAgentOpen = false;
+        renderFocus({ focus: false });
+      });
+      box.append(holder);
+    }
+    return box;
+  }
+
+  // Where a finished agent run leaves the operator. The run answers a large part
+  // of the list in one action and reshapes the flow doing it, so landing silently
+  // on whatever step was open when it started would leave that unsaid — this is
+  // the same contract as focusAfterApply, for the other route to the same result.
+  function focusAfterRun(wrote) {
+    const c = statusCounts();
+    const said = [
+      wrote ? `${wrote} source${wrote === 1 ? "" : "s"} answered` : "Run finished",
+      c.outstanding ? `${c.outstanding} still need${c.outstanding === 1 ? "s" : ""} you` : "nothing left outstanding",
+    ].join(" · ");
+    const steps = focusSteps();
+    // The first step that still wants a human: a source if there is one, else the
+    // first output waiting to be reviewed, else the finish step. Never a dead end.
+    const target = steps.find((s) => s.id.startsWith("src:") && s.state === "needs-you")
+      || steps.find((s) => s.kind === "output" && s.state === "needs-you")
+      || steps[steps.length - 1];
+    focusGoTo(target.id, `✓ Claude's run finished — ${said}.`);
   }
 
   // Where an applied reply leaves the operator, and what it tells them on arrival.
@@ -6021,6 +6206,7 @@
     "checks:auto": focusChecksBody,
     "checks:prompt": focusChecksBody,
     "checks:paste": focusChecksBody,
+    "finish:export": focusFinishBody,
   };
 
   /* -------------------------------------------------------------- a source step
@@ -6337,6 +6523,97 @@
 
     refreshSection(section, body, rstate); // the warnings, for the state as it stands
     queueCardMetrics();                    // …and the note's height, once it is laid out
+    return body;
+  }
+
+  /* --------------------------------------------------------- the finish step
+     Where the flow ends, and the only place in Focus mode that shows the whole
+     report at once. By this point every section has been reviewed on a step of
+     its own, so this is a last look and a handover — not a second review, and
+     emphatically not a form.
+
+     Six things, in the order a person leaving the building uses them:
+
+       1  at a glance        what this site's sources came back with (#65)
+       2  what's still missing   the report's own gaps, each one a jump
+       3  unresolved warnings    the last moment they can be acted on (#64)
+       4  read the whole thing   the assembled artefact, on screen
+       5  Export ▾               the workbench's own menu, borrowed
+       6  Check report           the workbench's own button, borrowed
+
+     Items 5 and 6 are `adoptNode`s rather than copies, which is what makes "an
+     export from Focus is byte-identical to an export from the workbench" true by
+     construction: they are the same two controls, with the same handlers, and
+     the artefact is built from state that has no per-mode half.
+
+     Finishing is never gated on completeness. A person who has to hand something
+     over now gets to — with every gap named. */
+  function focusFinishBody(step, body) {
+    body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["finish:export"]));
+    const r = reportRollup();
+
+    // ---- 1. at a glance ------------------------------------------------------
+    // The traffic-light card, whole. Every row jumps to the first source that
+    // came back that way, so "23 answered, 2 still not checked" is also the route
+    // to the two.
+    body.append(el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "At a glance"),
+      renderFindingsGlance()));
+
+    // ---- 2. what's still missing --------------------------------------------
+    // The report pane's own roll-up, with its own wording (completenessGaps is
+    // shared), but pointed at steps instead of at a scroll position:
+    // showReportSection resolves to `sec:…` while Focus is live.
+    const gaps = completenessGaps(r);
+    const missing = el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "What's still missing"));
+    if (!gaps.length) {
+      missing.append(el("p", { class: "fx-finish-clear" },
+        `✓ All ${r.total} sections carry a statement, a comment and included evidence — and every one is reviewed.`));
+    } else {
+      missing.append(el("p", { class: "fx-lede" }, `Of ${r.total} report sections:`));
+      missing.append(el("ul", { class: "fx-gaps" }, gaps.map((g) => el("li", {},
+        el("button", {
+          type: "button", class: "fx-gap",
+          title: `Go to the step that fixes the first of these: ${g.list[0].title}`,
+          onclick: () => showReportSection(g.list[0].id),
+        }, g.text(g.list.length))))));
+    }
+    body.append(missing);
+
+    // ---- 3. unresolved warnings ---------------------------------------------
+    // Only when there are some. An export is the last moment anybody can act on
+    // them — which is why the export handler says so too (guardExport), and why
+    // this row is a jump rather than a notice. (Whether they should also be
+    // stripped OUT of the artefact is #64's question, not this step's.)
+    if (r.warnCount) {
+      const first = r.warnings[0].section;
+      body.append(el("div", { class: "fx-zone" },
+        el("span", { class: "zone-label" }, "Unresolved warnings"),
+        el("button", {
+          type: "button", class: "fx-finish-warn",
+          title: `Go to the first: ${first.title}`,
+          onclick: () => showReportSection(first.id),
+        },
+          el("span", { "aria-hidden": "true" }, "⚠ "),
+          `${r.warnCount} consistency warning${r.warnCount === 1 ? "" : "s"} — first on ${first.title}`),
+        el("p", { class: "fx-lede" },
+          "These are the report contradicting itself — a statement that does not match the evidence under it. "
+          + "Once the report leaves the app nobody can act on them, so this is the moment to.")));
+    }
+
+    // ---- 4, 5 and 6 — everything that takes the report out of the app --------
+    const tools = el("div", { class: "fx-actions fx-finish-out" });
+    // Export first, because it is what this step is for. The menu is the report
+    // header's own node — same four formats, same order, same handlers.
+    adoptNode($("#report-export-menu"), tools);
+    tools.append(el("button", {
+      type: "button", class: "btn secondary",
+      title: "The whole assembled report, exactly as it will be handed over — on screen, without exporting a file first",
+      onclick: () => openReportPreview(),
+    }, "Read the whole report"));
+    adoptNode($("#btn-check-report"), tools);
+    body.append(tools);
     return body;
   }
 
@@ -6788,6 +7065,56 @@
     $("#print-root").innerHTML = buildReportHtml(true);
     window.print();
   }
+
+  /* --------------------------------------- the whole report, before it leaves
+     Focus mode shows one section at a time, on purpose — but the operator about
+     to hand a report over is entitled to read the thing they are handing over,
+     and "export it and open the file" is a poor answer to that. So the finish
+     step carries one action that puts the assembled artefact on screen.
+
+     It is the SAME string the printed report is built from (`buildReportHtml`),
+     wearing the same stylesheet (`.pr-paper`, shared with `#print-root`), so
+     this is a preview of the deliverable rather than a third rendering of the
+     report. Read-only by construction: there is nothing to edit in a built
+     string, and every route to changing something is a step away. */
+  let RP = null, rpRelease = null;
+  function ensureReportPreview() {
+    if (RP) return RP;
+    const paper = el("div", { class: "rp-paper pr-paper" });
+    const close = el("button", { type: "button", class: "btn tertiary", onclick: () => closeReportPreview() }, "✕ Close");
+    const frame = el("div", { class: "rp-frame" },
+      el("div", { class: "rp-head" },
+        el("div", {},
+          el("h2", { class: "rp-title", id: "rp-title" }, "The whole report, as it will leave the app"),
+          el("p", { class: "rp-sub" }, "Read-only. Anything that needs changing is on the step it belongs to.")),
+        close),
+      paper);
+    const overlay = el("div", { class: "rp-overlay", id: "report-preview", role: "dialog",
+      "aria-modal": "true", "aria-labelledby": "rp-title" }, frame);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeReportPreview(); });
+    document.body.append(overlay);
+    RP = { overlay, paper, close };
+    return RP;
+  }
+  const rpKeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeReportPreview(); } };
+  function openReportPreview() {
+    if (!state.site) return;
+    const rp = ensureReportPreview();
+    // Built fresh every time: the point of this surface is that it shows the
+    // report as it stands right now, not as it stood the last time it was opened.
+    rp.paper.innerHTML = buildReportHtml(true);
+    rp.overlay.classList.add("show");
+    document.addEventListener("keydown", rpKeydown);
+    rpRelease = trapFocus(rp.overlay); // …and hands focus back to the button that opened it
+    rp.close.focus();
+  }
+  function closeReportPreview() {
+    if (!RP) return;
+    RP.overlay.classList.remove("show");
+    RP.paper.innerHTML = ""; // a report carries every photo inline; don't hold two copies
+    document.removeEventListener("keydown", rpKeydown);
+    if (rpRelease) { rpRelease(); rpRelease = null; }
+  }
   // Every export runs through here, so this is where "the operator has finished a
   // site" is recorded once — after which the how-to guide is on demand only.
   function download(name, mime, text) {
@@ -6877,6 +7204,37 @@
     lines.push("", "Collection log:");
     r.collection_log.filter((c) => !c.internal).forEach((c) => lines.push(`  [${(STATUS_LABEL[c.status] || c.status).toUpperCase()}] ${c.name}${c.note ? " — " + c.note : ""}`));
     copy(lines.join("\n"));
+  }
+
+  /* ------------------------------------------- exporting over an open warning
+     A consistency warning is the report contradicting itself — a section that
+     says "nothing found" over evidence that found something. They are the
+     report's own doubts about the working copy, and an export is the last moment
+     anybody can act on them: whatever leaves the app is what the recipient reads.
+     Saying so at that moment is worth one dialog.
+
+     Worth ONE. It is not a gate: a person who has to hand something over now
+     gets to, with the gaps named. So it warns once per site per session, and
+     only when the operator went ahead — a warning that fires on all four export
+     formats in turn is a warning that gets clicked through. */
+  const exportWarned = new Set(); // siteKey of a site whose warnings were accepted
+  function guardExport(run) {
+    return (e) => {
+      const r = state.site ? reportRollup() : null;
+      const key = state.site ? siteKey(state.site) : "";
+      if (r && r.warnCount && !exportWarned.has(key)) {
+        const n = r.warnCount;
+        const first = r.warnings[0].section;
+        const ok = confirm(
+          `${n} consistency warning${n === 1 ? "" : "s"} ${n === 1 ? "is" : "are"} still open on this report`
+          + ` — the first is on ${first.title}.\n\n`
+          + "These are the report's own checks on itself, and once it leaves the app nobody can act on them.\n\n"
+          + "OK to export anyway, or Cancel to go to the first one.");
+        if (!ok) { showReportSection(first.id); return; }
+        exportWarned.add(key);
+      }
+      run(e);
+    };
   }
   // Build a complete, self-contained, model-agnostic prompt for the current
   // site. It embeds every step, every applicable source aimed at the location,
@@ -8247,10 +8605,13 @@
       rdocDetail.setAttribute("aria-expanded", open ? "true" : "false");
       rdocDetail.textContent = open ? "Details ▴" : "Details ▾";
     });
-    $("#btn-print").addEventListener("click", doPrint);
-    $("#btn-download-html").addEventListener("click", downloadHtml);
-    $("#btn-download-json").addEventListener("click", downloadJson);
-    $("#btn-copy-summary").addEventListener("click", copySummary);
+    // Wrapped, not replaced: these are the buttons BOTH modes press (Focus's
+    // finish step borrows this very menu), so the open-warning check belongs on
+    // the handler rather than on either mode's copy of the control.
+    $("#btn-print").addEventListener("click", guardExport(doPrint));
+    $("#btn-download-html").addEventListener("click", guardExport(downloadHtml));
+    $("#btn-download-json").addEventListener("click", guardExport(downloadJson));
+    $("#btn-copy-summary").addEventListener("click", guardExport(copySummary));
     $("#btn-check-report").addEventListener("click", copyReviewPrompt);
     wireOverflowMenu();
     const batchReviewBtn = $("#btn-batch-review");
@@ -8444,6 +8805,7 @@
       if (resultText) f.result = { html: esc(String(resultText)).replace(/\n/g, "<br>"), ts: Date.now() };
       save(); refreshCard(id); renderCollectionStatus(); renderReport();
       maybeAutoFetchForSource(id, imageSubjects); // reference photos for species cards (Task 3)
+      agentRunWrote++; // what endRun reports, and what tells a real run from one that fell over
       return true;
     },
     queryAla: (radius) => alaQuery(state.site.lat, state.site.lon, radius || 10),
@@ -8455,10 +8817,27 @@
     // function of state and the cheapest way to check the interleave is to log it
     // for a real site — re-route a card, re-log, and watch the step move.
     focusSteps: () => focusSteps().map((s) => ({ ...s })),
-    beginRun: () => { renderCollectionStatus(); },
+    beginRun: () => { agentRunWrote = 0; renderCollectionStatus(); },
     // An agent run fills the list itself and leaves the rest to a human, so when it
     // finishes the collection bar lands on that subset — see focusOnOutstanding.
-    endRun: () => { focusOnOutstanding(); save(); renderDashboard(); },
+    endRun: () => {
+      focusOnOutstanding();
+      // The run IS the automated round trip, done in one action rather than three,
+      // so it records the same per-site receipts the three passes do — otherwise
+      // the flow would go on asking for a prompt to be copied that nobody needs.
+      // Only for a run that actually wrote something: endRun fires from agent.js's
+      // `finally`, so a run that fell over on its first turn arrives here too.
+      if (agentRunWrote) {
+        markFlowDone("auto", "Claude ran the checks");
+        markFlowDone("prompt", "Claude researched the sources itself");
+        markFlowDone("applied", `${agentRunWrote} source${agentRunWrote === 1 ? "" : "s"} answered by Claude`);
+      }
+      save();
+      // Focus resumes at the first step that still needs a human; the workbench
+      // has no cursor to move, so it just repaints the list the run has changed.
+      if (focusLive()) { focusAfterRun(agentRunWrote); return; }
+      renderDashboard();
+    },
   };
 
   document.addEventListener("DOMContentLoaded", init);

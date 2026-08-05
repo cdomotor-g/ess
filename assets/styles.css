@@ -489,6 +489,70 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-flow-do .flow-do-block { padding-top: 0; }
 .fx-receipt { margin: 0; font-size: var(--fs-meta); color: var(--reviewed); font-weight: 600; }
 
+/* ---- an escape hatch to a specialist tool. Offered, never imposed: shut at rest,
+   one labelled disclosure, and the tool itself borrowed whole when it is opened.
+   Ruled off above so it reads as an alternative to the step rather than as one
+   more thing the step is asking for. */
+.fx-hatch { display: flex; flex-direction: column; gap: var(--sp-2);
+  border-top: 1px dashed var(--line); padding-top: var(--sp-3); }
+
+/* ---- a handoff to the other mode. The one case where Focus says, in words, that
+   the workbench is the right place for this — so it has to look like a considered
+   offer with a way out, not an error. */
+.fx-handoff { display: flex; flex-direction: column; gap: var(--sp-2);
+  border: 1px solid var(--brand); border-left: 4px solid var(--brand); border-radius: var(--radius);
+  background: var(--link-bg); padding: var(--sp-3); }
+.fx-handoff-lead { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.5; color: var(--brand); }
+
+/* ---- the finish step. A last look, not a second review: the roll-ups are set to
+   be read at a glance and every count in them is a way back to the work. */
+.fx-gaps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* Bigger than the report pane's chips (.r-complete-gap): over there they sit in a
+   footer strip, and here they are the step's own content. */
+.fx-gap { font: inherit; font-size: var(--fs-meta); font-weight: 650; cursor: pointer;
+  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: var(--sp-1) var(--sp-3); }
+.fx-gap:hover { border-color: var(--brand); color: var(--brand); background: var(--link-bg); }
+.fx-finish-clear { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.5; color: var(--reviewed); }
+/* The last moment these can be acted on, so they carry an alert's weight — the
+   same tint the section steps give them, in a shape that is a jump. */
+.fx-finish-warn { font: inherit; font-size: var(--fs-body); font-weight: 650; text-align: left; cursor: pointer;
+  color: var(--failed); background: var(--failed-bg); border: 1px solid var(--failed);
+  border-left: 4px solid var(--failed); border-radius: 8px; padding: var(--sp-2) var(--sp-3); }
+.fx-finish-warn:hover { background: var(--surface); }
+/* Everything that takes the report out of the app, on one row, Export first. The
+   borrowed menu keeps its own primary — on this step it IS the primary, and
+   Continue steps back to "or start again" (see renderFocus). */
+.fx-finish-out { align-items: center; border-top: 1px dashed var(--line); padding-top: var(--sp-3); }
+.fx-finish-out .menu-list { right: auto; left: 0; }
+
+/* ---- "Read the whole report": the assembled artefact, on screen, before it
+   leaves. `.pr-paper` is the report's own stylesheet — the same one #print-root
+   wears — so this is a preview of the deliverable rather than a third rendering
+   of it. White page on a scrim, because that is what it is going to be. */
+.rp-overlay { position: fixed; inset: 0; z-index: 80; display: none;
+  align-items: flex-start; justify-content: center; padding: var(--sp-4) var(--sp-3);
+  background: rgba(8, 14, 18, .72); }
+.rp-overlay.show { display: flex; }
+.rp-frame { display: flex; flex-direction: column; width: min(860px, 100%); max-height: 100%;
+  background: #fff; color: #111; border-radius: var(--radius); box-shadow: 0 18px 48px rgba(0, 0, 0, .4); }
+.rp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid #ddd; }
+.rp-title { margin: 0; font-size: var(--fs-title); line-height: 1.25; color: #111; }
+.rp-sub { margin: var(--sp-hair) 0 0; font-size: var(--fs-meta); color: #555; }
+/* The close button is on a white panel, not on the app's surface tokens. */
+.rp-head .btn { color: #333; border-color: #ccc; background: #fff; flex: 0 0 auto; }
+.rp-head .btn:hover { border-color: #888; color: #111; }
+.rp-paper { overflow: auto; padding: var(--sp-4); background: #fff; }
+/* On paper the appendix starts its own page; on screen a forced break is nothing
+   but a scroll the reader did not ask for. */
+.rp-paper .pr .pr-appendix { break-before: auto; page-break-before: auto; }
+@media (max-width: 620px) {
+  .rp-overlay { padding: 0; }
+  .rp-frame { border-radius: 0; }
+  .rp-paper .pr .pr-appendix-cols { column-count: 1; }
+}
+
 /* ---- one way forward. Back and Skip are demoted; Continue is the only primary
    action on the surface. */
 .fx-nav { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
@@ -1934,6 +1998,50 @@ a.photo-credit:hover { text-decoration: underline; }
   color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
   padding: var(--sp-0) var(--sp-2); }
 .r-complete-gap:hover { border-color: var(--brand); color: var(--brand); }
+
+/* ---------- findings at a glance ----------
+   The "did I miss anything?" card: every source this site has, grouped by what it
+   came back with. One implementation, mounted wherever the whole assessment is
+   being looked at at once — today Focus mode's finish step.
+
+   A traffic light in the honest sense: the rank is the ROW ORDER (findings, then
+   what a human still owns, then the empty searches that are good news), and each
+   row carries a count, a word AND the status glyph, so the reading survives
+   greyscale and colour-vision deficiency. Colour is the confirmation, never the
+   message — the same rule the status chips and dots follow, using the same
+   `--glyph-*` vocabulary via .s-dot. */
+.glance { display: flex; flex-direction: column; gap: var(--sp-2); }
+.glance-lead { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.5; }
+.glance-lead.is-clear { color: var(--reviewed); }
+.glance-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: var(--sp-hair); border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-2); padding: var(--sp-1); }
+.glance-hit { display: grid; grid-template-columns: 1.2em 2.2em auto 1fr; align-items: baseline;
+  gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--fs-meta);
+  color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: var(--sp-1) var(--sp-2); }
+button.glance-hit { cursor: pointer; }
+button.glance-hit:hover { background: var(--surface); border-color: var(--line); }
+.glance-n { font-size: var(--fs-body); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.glance-label { font-weight: 650; }
+.glance-says { color: var(--ink-soft); min-width: 0; overflow-wrap: anywhere; }
+/* A row at zero is still shown — a zero against "Not checked" is exactly the
+   reassurance this card exists to give — but it is not a control, and it does not
+   compete with the rows that have something in them. */
+.glance-row.is-zero .glance-hit { color: var(--ink-soft); }
+.glance-row[data-status="found"] .glance-n { color: var(--found); }
+.glance-row[data-status="manual"] .glance-n { color: var(--manual); }
+.glance-row[data-status="failed"] .glance-n { color: var(--failed); }
+.glance-row[data-status="none"] .glance-n { color: var(--none); }
+/* Last, and deliberately: same specificity as the four above, so a zero row is
+   quiet whatever status it is for. */
+.glance-row.is-zero .glance-n { color: var(--ink-soft); font-weight: 600; }
+/* Four columns stop fitting long before the words do. The count and its label
+   keep the row; what the status MEANS drops to a second line under them. */
+@media (max-width: 620px) {
+  .glance-hit { grid-template-columns: 1.2em 2.2em 1fr; row-gap: var(--sp-hair); }
+  .glance-says { grid-column: 3; }
+}
 .rsection .r-warns:empty { display: none; }
 .rsection .r-warn { font-size: var(--fs-meta); font-weight: 600; color: var(--failed); background: var(--failed-bg); border-radius: 7px; padding: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); }
 .report-map { margin: 0; }
@@ -2213,8 +2321,13 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 /* ---------- print ---------- */
 #print-root { display: none; }
 @media print {
+  /* #focus is the whole of the app while Focus mode is live, and Print / PDF is
+     one of the four exports its finish step carries — a printout that carried the
+     step chrome as well as the report would not be the same artefact the
+     workbench produces. .rp-overlay is the on-screen preview of that artefact,
+     and printing a preview of the thing being printed is one copy too many. */
   .topbar, .railnav, .pane-divider, .mshell, #site-picker, #run-checks, #advanced, #dashboard, #collection-status,
-  .head-actions, .r-review, .foot, #app > .banner { display: none !important; }
+  .head-actions, .r-review, .foot, #app > .banner, #focus, .rp-overlay { display: none !important; }
   /* A pane collapsed on screen — by a pane handle on the wide layout, or by the
      tab switcher on the narrow one — must not go missing from the printout. */
   .split.pane-hide-left > .col-left, .split.pane-hide-right > .col-right,
@@ -2226,70 +2339,73 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
   main { max-width: none; padding: 0; }
   #print-root { display: block; }
 }
-/* Print styling for the generated report (kept in one place, applied via #print-root) */
-#print-root .pr { font-size: 12px; color: #000; }
-#print-root .pr h1 { font-size: 20px; margin-bottom: var(--sp-0); }
-#print-root .pr .pr-sec { border: 1px solid #bbb; border-radius: 6px; padding: var(--sp-2); margin: var(--sp-2) 0; break-inside: avoid; }
-#print-root .pr .pr-sec h2 { font-size: 13px; background: #12507b; color: #fff; margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) var(--sp-2); padding: var(--sp-1) var(--sp-2); border-radius: 6px 6px 0 0; }
-#print-root .pr table { width: 100%; border-collapse: collapse; font-size: 11px; }
-#print-root .pr th, #print-root .pr td { border: 1px solid #ccc; padding: var(--sp-1); text-align: left; vertical-align: top; }
-#print-root .pr .k { color: #444; width: 32%; }
-#print-root .pr .st { font-weight: 700; }
-#print-root .pr .st-found { color: #c1123c; }
-#print-root .pr .st-none { color: #8a6d1a; }
-#print-root .pr .st-failed { color: #b3261e; }
-#print-root .pr .st-manual { color: #3a5a99; }
-#print-root .pr .pr-photos { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
-#print-root .pr .pr-photos figure { margin: 0; width: 150px; break-inside: avoid; }
-#print-root .pr .pr-photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #bbb; border-radius: 4px; }
-#print-root .pr .pr-photos figcaption { font-size: 10px; color: #444; margin-top: var(--sp-0); }
+/* The generated report's own styling, in one place. Keyed on `.pr-paper` rather
+   than on `#print-root` because there are now two places the built artefact is
+   shown: the hidden print root, and Focus mode's "Read the whole report" preview
+   (.rp-paper). Both wear the class, so the preview cannot drift from the paper. */
+.pr-paper .pr { font-size: 12px; color: #000; }
+.pr-paper .pr h1 { font-size: 20px; margin-bottom: var(--sp-0); }
+.pr-paper .pr .pr-sec { border: 1px solid #bbb; border-radius: 6px; padding: var(--sp-2); margin: var(--sp-2) 0; break-inside: avoid; }
+.pr-paper .pr .pr-sec h2 { font-size: 13px; background: #12507b; color: #fff; margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) var(--sp-2); padding: var(--sp-1) var(--sp-2); border-radius: 6px 6px 0 0; }
+.pr-paper .pr table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.pr-paper .pr th, .pr-paper .pr td { border: 1px solid #ccc; padding: var(--sp-1); text-align: left; vertical-align: top; }
+.pr-paper .pr .k { color: #444; width: 32%; }
+.pr-paper .pr .st { font-weight: 700; }
+.pr-paper .pr .st-found { color: #c1123c; }
+.pr-paper .pr .st-none { color: #8a6d1a; }
+.pr-paper .pr .st-failed { color: #b3261e; }
+.pr-paper .pr .st-manual { color: #3a5a99; }
+.pr-paper .pr .pr-photos { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.pr-paper .pr .pr-photos figure { margin: 0; width: 150px; break-inside: avoid; }
+.pr-paper .pr .pr-photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #bbb; border-radius: 4px; }
+.pr-paper .pr .pr-photos figcaption { font-size: 10px; color: #444; margin-top: var(--sp-0); }
 /* Site photographs print larger and uncropped (whole frame, ~3× the evidence thumbs) */
-#print-root .pr .pr-photos.pr-photos-large { gap: var(--sp-3); }
-#print-root .pr .pr-photos.pr-photos-large figure { width: 300px; }
-#print-root .pr .pr-photos.pr-photos-large img { height: auto; max-height: 340px; object-fit: contain; }
-#print-root .pr .pr-ev { margin: var(--sp-1) 0 0; }
-#print-root .pr .pr-ev-item { font-size: 11px; color: #333; margin: var(--sp-0) 0; }
+.pr-paper .pr .pr-photos.pr-photos-large { gap: var(--sp-3); }
+.pr-paper .pr .pr-photos.pr-photos-large figure { width: 300px; }
+.pr-paper .pr .pr-photos.pr-photos-large img { height: auto; max-height: 340px; object-fit: contain; }
+.pr-paper .pr .pr-ev { margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-ev-item { font-size: 11px; color: #333; margin: var(--sp-0) 0; }
 /* The evidence split, on paper: findings under a heading, empty searches on one
    line, and outstanding sources as a caveat the reader cannot mistake for a
    result. Mirrors .r-evidence on screen. */
-#print-root .pr .pr-ev-h { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+.pr-paper .pr .pr-ev-h { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: #444; margin: var(--sp-1) 0 var(--sp-0); }
-#print-root .pr .pr-ev-line { font-size: 10.5px; color: #333; margin: var(--sp-1) 0 0; }
-#print-root .pr .pr-ev-none { color: #444; }
-#print-root .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
+.pr-paper .pr .pr-ev-line { font-size: 10.5px; color: #333; margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-ev-none { color: #444; }
+.pr-paper .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
   border-radius: 4px; padding: var(--sp-1) var(--sp-2); }
-#print-root .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
+.pr-paper .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
 /* Both locator maps in the printed report: side by side, square, equal, full width. */
-#print-root .pr .pr-maps { display: flex; gap: var(--sp-3); align-items: flex-start; break-inside: avoid; }
-#print-root .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
-#print-root .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
-#print-root .pr .pr-map-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
-#print-root .pr .pr-warn { font-size: 10px; font-weight: 700; color: #b3261e; background: #fbe6e4; border-radius: 4px; padding: var(--sp-1) var(--sp-2); margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-maps { display: flex; gap: var(--sp-3); align-items: flex-start; break-inside: avoid; }
+.pr-paper .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
+.pr-paper .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
+.pr-paper .pr .pr-map-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-warn { font-size: 10px; font-weight: 700; color: #b3261e; background: #fbe6e4; border-radius: 4px; padding: var(--sp-1) var(--sp-2); margin: var(--sp-1) 0 0; }
 /* Appendix A — the Queensland Globe layer list. Starts its own page (it is an
    annexure, not part of the findings) and runs in two columns so forty layers
    take one page instead of four. Groups never split across a column break. */
-#print-root .pr .pr-appendix { break-before: page; page-break-before: always; break-inside: auto; }
-#print-root .pr .pr-appendix-blurb { font-size: 10.5px; color: #444; margin: 0 0 var(--sp-2); }
-#print-root .pr .pr-appendix-cols { column-count: 2; column-gap: var(--sp-4); }
-#print-root .pr .pr-appendix-group { break-inside: avoid; page-break-inside: avoid; margin: 0 0 var(--sp-2); }
-#print-root .pr .pr-appendix-group h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #12507b; margin: 0 0 var(--sp-0); }
-#print-root .pr .pr-appendix-group ul { margin: 0; padding-left: var(--sp-4); }
-#print-root .pr .pr-appendix-group li { font-size: 10px; line-height: 1.4; margin: 0 0 var(--sp-0); }
-#print-root .pr .pr-appendix-src { display: block; font-size: 8.5px; color: #777; }
-#print-root .pr .pr-appendix-gsrc { margin: 0 0 var(--sp-0); font-style: italic; }
+.pr-paper .pr .pr-appendix { break-before: page; page-break-before: always; break-inside: auto; }
+.pr-paper .pr .pr-appendix-blurb { font-size: 10.5px; color: #444; margin: 0 0 var(--sp-2); }
+.pr-paper .pr .pr-appendix-cols { column-count: 2; column-gap: var(--sp-4); }
+.pr-paper .pr .pr-appendix-group { break-inside: avoid; page-break-inside: avoid; margin: 0 0 var(--sp-2); }
+.pr-paper .pr .pr-appendix-group h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #12507b; margin: 0 0 var(--sp-0); }
+.pr-paper .pr .pr-appendix-group ul { margin: 0; padding-left: var(--sp-4); }
+.pr-paper .pr .pr-appendix-group li { font-size: 10px; line-height: 1.4; margin: 0 0 var(--sp-0); }
+.pr-paper .pr .pr-appendix-src { display: block; font-size: 8.5px; color: #777; }
+.pr-paper .pr .pr-appendix-gsrc { margin: 0 0 var(--sp-0); font-style: italic; }
 /* Legend boxes in the printed appendix — the swatch is the service's own PNG,
    so the reader can match a colour on the map to the layer that drew it. */
-#print-root .pr .pr-legend { display: block; margin: var(--sp-0) 0 0; }
-#print-root .pr .pr-legend-key { display: flex; align-items: center; gap: var(--sp-1); font-size: 9px; color: #333; }
-#print-root .pr .pr-legend-swatch { width: 13px; height: 13px; object-fit: contain; border: 1px solid #bbb;
+.pr-paper .pr .pr-legend { display: block; margin: var(--sp-0) 0 0; }
+.pr-paper .pr .pr-legend-key { display: flex; align-items: center; gap: var(--sp-1); font-size: 9px; color: #333; }
+.pr-paper .pr .pr-legend-swatch { width: 13px; height: 13px; object-fit: contain; border: 1px solid #bbb;
   border-radius: 2px; background: #fff; vertical-align: -2px; margin-right: var(--sp-1); flex: 0 0 auto; }
-#print-root .pr .pr-legend-more { display: block; font-size: 8.5px; color: #888; font-style: italic; }
+.pr-paper .pr .pr-legend-more { display: block; font-size: 8.5px; color: #888; font-style: italic; }
 /* The click-to-enlarge overlay is an on-screen device; on paper it would print
    a second copy of the same map. */
-#print-root .pr .pr-lightbox { display: none !important; }
-#print-root .pr .pr-globe { margin: var(--sp-2) 0 0; break-inside: avoid; }
-#print-root .pr .pr-globe-img { display: block; width: 100%; height: auto; border: 1px solid #bbb; border-radius: 6px; }
-#print-root .pr .pr-globe-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
+.pr-paper .pr .pr-lightbox { display: none !important; }
+.pr-paper .pr .pr-globe { margin: var(--sp-2) 0 0; break-inside: avoid; }
+.pr-paper .pr .pr-globe-img { display: block; width: 100%; height: auto; border: 1px solid #bbb; border-radius: 6px; }
+.pr-paper .pr .pr-globe-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
 
 /* ---------- report appendix (on-screen preview) ---------- */
 .rsection.rsec-appendix { border-style: dashed; }

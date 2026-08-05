@@ -654,7 +654,10 @@
   </div>
 
   <!-- report render target for export/print -->
-  <div id="print-root" aria-hidden="true"></div>
+  <!-- Where doPrint() builds the report for the printer. `pr-paper` carries the
+       report's own stylesheet, and Focus mode's on-screen "Read the whole report"
+       preview wears the same class, so the two can never render it differently. -->
+  <div id="print-root" class="pr-paper" aria-hidden="true"></div>
 
   <!-- Queensland Globe site map. Loaded before app.js so the button on the
        Queensland Globe card can hand straight off to it; the Esri bundle it
