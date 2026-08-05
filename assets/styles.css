@@ -1650,6 +1650,9 @@ body.qm-open { overflow: hidden; }
 .src-mini-body b { font-weight: 700; }
 .src-sum-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .src-sum-inc { font-size: var(--fs-micro); color: var(--ink-soft); }
+/* "a reference photo is on its way" on a settled card, which shows no photo strip
+   of its own to put a placeholder in (see renderSummaryCard). */
+.src-sum-fetch { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-micro); color: var(--ink-soft); }
 .src-sum-inc.is-in { color: var(--reviewed); font-weight: 700; }
 .src-sum-foot .signoff { margin-left: auto; }
 /* A card opened above its resting density fades its content in — no height
@@ -1915,6 +1918,14 @@ body.qm-open { overflow: hidden; }
 .photo-thumb .photo-remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; line-height: 18px;
   padding: 0; border-radius: 50%; border: none; background: rgba(17,24,29,.65); color: #fff; font-size: var(--fs-title); cursor: pointer; }
 .photo-thumb .photo-cap { width: 100%; border: none; border-top: 1px solid var(--line); border-radius: 0; padding: var(--sp-1); font-size: var(--fs-micro); background: transparent; }
+/* The photo that hasn't arrived yet: thumbnail-shaped and in the thumbnail's own
+   place, so the strip doesn't jump when the real one replaces it. Dashed and
+   unfilled — it is a promise, not evidence. */
+.photo-thumb.photo-ph { border-style: dashed; background: transparent; }
+.photo-thumb.photo-ph .ph-box { display: flex; align-items: center; justify-content: center; width: 100%; height: 90px; }
+.photo-grid.small .photo-thumb.photo-ph .ph-box { height: 64px; }
+.photo-thumb.photo-ph figcaption { font-size: var(--fs-micro); line-height: 1.25; color: var(--ink-soft);
+  padding: var(--sp-1); border-top: 1px solid var(--line); }
 .photo-thumb.view { cursor: default; }
 .photo-thumb.view .photo-open { cursor: zoom-in; }
 .photo-thumb.view figcaption { font-size: var(--fs-micro); color: var(--ink-soft); padding: var(--sp-1); }

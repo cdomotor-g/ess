@@ -33,9 +33,9 @@
   // just persists which layers were ticked and what the capture recorded.
 
   // Global preference: auto-source reference photos for the species/subjects
-  // identified in a card's findings (from note edits, imports, and agent runs).
-  // Persisted in localStorage; default on. Auto-fetch only ever *adds* images —
-  // the user can delete any, and the manual "Fetch image" field always works.
+  // identified in a card's findings during a live agent run. Persisted in
+  // localStorage. Auto-fetch only ever *adds* images — the user can delete any,
+  // and the manual "Fetch image" field always works.
   const LS_AUTO_IMAGES = "ess-workbench:v1:auto-images";
   // Batch membership (the list of sites imported together). Only the site keys +
   // display info live here; each site's full findings stay under its own per-site
@@ -61,13 +61,23 @@
   // Closed by default: the four numbered steps are the whole primary workflow, and
   // everything in there belongs to a different way of working.
   const LS_ADVANCED = "ess-workbench:v1:advanced-open";
-  // Default OFF: auto-fetching reference photos fires a burst of Wikipedia requests
-  // + canvas re-encoding, which was bogging the browser down. It now runs only when
-  // the operator opts in via the dashboard toggle (and even then only on import /
-  // agent / API runs — never as a side effect of editing a card's notes).
-  const autoImagesOn = () => { try { return localStorage.getItem(LS_AUTO_IMAGES) === "1"; } catch (_) { return false; } };
+  // Applying a reply (or importing a findings file) ALWAYS fetches — see
+  // autoFetchAfterImport. Pressing Apply is an explicit act with an obvious
+  // intent, and a preference buried two disclosures deep should not silently
+  // swallow its result. What this toggle governs is the AMBIENT fetching: a live
+  // agent run, which writes one source at a time over minutes and is nobody's
+  // single gesture.
+  //
+  // It was default OFF because auto-fetching fired a burst of Wikipedia requests
+  // + canvas re-encoding that bogged the browser down. That burst is now a
+  // trickle — every fetch goes through one global queue, at most
+  // AUTO_FETCH_CONCURRENCY at a time, started only once the render has settled —
+  // so the reason for the default is gone with it.
+  const autoImagesOn = () => { try { return localStorage.getItem(LS_AUTO_IMAGES) !== "0"; } catch (_) { return true; } };
   const setAutoImagesPref = (on) => { try { localStorage.setItem(LS_AUTO_IMAGES, on ? "1" : "0"); } catch (_) {} };
-  const MAX_AUTO_IMAGES_PER_CARD = 3; // cap per source so a wordy note can't spam fetches
+  const MAX_AUTO_IMAGES_PER_CARD = 6;    // every subject a card names, bounded
+  const MAX_AUTO_IMAGES_PER_IMPORT = 20; // …and bounded again across one import,
+                                         // so one verbose reply can't fetch a hundred
 
   // Default free-text seeded into a report section's note when a site is first
   // loaded (only if the operator hasn't written anything there yet). The general
@@ -238,6 +248,11 @@
     // catId -> true (open) / false (collapsed). Categories they haven't touched
     // follow the automatic rule in groupIsOpen(). Persisted per site.
     groupOpen: {},
+    // Whether this site's reference photos have already been swept for (see
+    // autoFetchAfterImport). Persisted per site so a batch site fetches once, when
+    // it is first opened, and reopening it later doesn't drag back a photo the
+    // operator deleted.
+    autoImagesSwept: false,
     batch: null,            // { generated, keys: [siteKey,…], active: siteKey|null } when a batch is loaded
   };
   const mapGenTokens = {}; // per-slot guard against a stale async render landing after a newer request
@@ -563,25 +578,93 @@
   // Network/CORS failures are reported like any other source check, never fatal.
   const WM_API = "https://en.wikipedia.org/w/api.php";
 
-  // Resolve a free-text term (usually a common name) to the best Wikipedia article
-  // and its lead image via generator=search, so "Gamba grass" finds the right page
-  // even though the article is titled "Andropogon gayanus".
-  async function wmFindLeadImage(term) {
+  // Search Wikipedia for a free-text term (usually a common name) and return the
+  // top articles that have a lead image, in search-rank order — so "Gamba grass"
+  // finds the right page even though the article is titled "Andropogon gayanus".
+  // Each candidate carries the article's own categories, which is what tells a
+  // photo of a weed from a locator map (see looksLikeSubjectPage): they ride along
+  // on the one request, so the filter costs no extra round trip.
+  async function wmSearchPages(term, limit) {
     const url = `${WM_API}?action=query&format=json&origin=*&redirects=1` +
-      `&generator=search&gsrsearch=${encodeURIComponent(term)}&gsrlimit=1&gsrnamespace=0` +
-      `&prop=pageimages%7Cinfo&piprop=original%7Cthumbnail&pithumbsize=1000&inprop=url`;
+      `&generator=search&gsrsearch=${encodeURIComponent(term)}&gsrlimit=${limit}&gsrnamespace=0` +
+      `&prop=pageimages%7Cinfo%7Ccategories&piprop=original%7Cthumbnail&pithumbsize=1000&inprop=url` +
+      `&cllimit=100&clshow=!hidden`;
     const data = await fetchJson(url);
     const pages = data && data.query && data.query.pages;
-    if (!pages) return null;
-    const page = Object.values(pages)[0];
-    if (!page) return null;
-    const imageUrl = (page.original && page.original.source) || (page.thumbnail && page.thumbnail.source);
-    if (!imageUrl) return null;
-    return {
-      title: page.title,
-      pageUrl: safeHttpUrl(page.fullurl) || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
-      imageUrl, fileTitle: page.pageimage ? `File:${page.pageimage}` : null,
-    };
+    if (!pages) return [];
+    return Object.values(pages)
+      .sort((a, b) => (a.index || 0) - (b.index || 0)) // search rank, which key order doesn't keep
+      .map((page) => {
+        const imageUrl = (page.original && page.original.source) || (page.thumbnail && page.thumbnail.source);
+        if (!page.title || !imageUrl) return null;
+        return {
+          title: page.title,
+          pageUrl: safeHttpUrl(page.fullurl) || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+          imageUrl, fileTitle: page.pageimage ? `File:${page.pageimage}` : null,
+          categories: (page.categories || []).map((c) => (c && c.title) || "").filter(Boolean),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  /* -------------------------------------- is this a picture of a living thing?
+     A full-text search always returns its best hit, and for a term that isn't a
+     species that hit is something else entirely: reports have come back carrying
+     a locator map of Queensland and a diagram of HTML tags, because a subject
+     like "Wide Bay" or a stray fragment of markup resolved to an article about a
+     region or a markup language. Nobody attending a site is helped by those, and
+     a wrong photo in a government report is worse than no photo at all.
+
+     So an UNASKED-FOR photo has to earn its place, judged from data the search
+     response already carries (one request, no extra round trip):
+       · the lead image can't be an SVG, or a file named like a map, flag, logo,
+         emblem, diagram or screenshot — those are the shape junk arrives in;
+       · the article can't be filed under geography, administration, computing or
+         the other subject areas a false hit lands in; and
+       · it must be filed under something biological — or be titled as a
+         scientific binomial, which is what a taxon article usually is.
+     Typing a name into "Fetch" is deliberate and stays unfiltered: the operator
+     asked for that page, and gets it. */
+  const SUBJECT_CATEGORY_OK = new RegExp("\\b(flora|fauna|plants?|animals?|species|genera|genus|taxa|taxon|biota|" +
+    "birds?|mammals?|marsupials?|rodents?|bats|insects?|arachnids?|spiders?|fungi|fungal|oomycetes?|mildews?|" +
+    "bacteri\\w*|viruses|viral|pathogens?|parasites?|diseases?|blights?|rusts?|wilts?|moulds?|molds?|" +
+    "weeds?|invasive|introduced|naturalised|naturalized|feral|pests?|vermin|livestock|" +
+    "trees?|shrubs?|grasses|herbs?|vines?|orchids?|palms?|ferns?|conifers?|cacti|mosses|algae|seagrasses|" +
+    "reptiles?|amphibians?|frogs?|toads?|snakes?|lizards?|turtles?|crocodil\\w*|fish|fishes|sharks?|" +
+    "molluscs?|crustaceans?|snails?|beetles?|moths?|butterflies|ants|bees|wasps?|flies|mosquitoes|corals?)\\b", "i");
+  const SUBJECT_CATEGORY_BAD = new RegExp("\\b(disambiguation|geography|regions? of|towns in|suburbs|cities|" +
+    "populated places|local government areas|electorates?|electoral|rivers? of|roads?|highways?|railways?|" +
+    "markup|computing|software|programming|internet|websites?|file formats|standards|" +
+    "surnames|given names|politicians|companies|organisations|organizations|legislation|acts of|" +
+    "government agencies|sports?|music|films?|albums?|video games)\\b", "i");
+  // A filename is a strong signal on its own: File:Queensland_locator_map.svg and
+  // File:HTML_element_diagram.png announce themselves before anything is loaded.
+  const SUBJECT_FILE_BAD = new RegExp("(^|[_\\-. ])(locator|location|map|maps|mapping|distribution|" +
+    "flag|flags|logo|logos|emblem|seal|arms|crest|coat|diagram|chart|graph|plot|screenshot|icon|banner|" +
+    "disambig|placeholder|blank|nomap|question)([_\\-. ]|$)", "i");
+  const BINOMIAL_TITLE_RE = /^[A-Z][a-z]+ [a-z]{3,}(\s+(subsp|var|ssp|f)\.?\s+[a-z]{3,})?$/;
+
+  function looksLikeSubjectPage(cand) {
+    if (!cand || !cand.imageUrl) return false;
+    if (/\.svg(\?|$)/i.test(cand.imageUrl)) return false; // logos, diagrams and locator maps live here
+    let file = cand.fileTitle || cand.imageUrl;
+    try { file = decodeURIComponent(file); } catch (_) {}
+    if (SUBJECT_FILE_BAD.test(file.replace(/^.*\//, ""))) return false;
+    const cats = (cand.categories || []).join(" · ");
+    if (SUBJECT_CATEGORY_BAD.test(cats)) return false;
+    return BINOMIAL_TITLE_RE.test(cand.title) || SUBJECT_CATEGORY_OK.test(cats);
+  }
+
+  // `strict` (every automatic fetch) looks past a junk first hit — the second or
+  // third result is often the actual organism — and attaches nothing at all if
+  // none of them is one. Unfiltered otherwise, for the operator's own search.
+  const WM_STRICT_CANDIDATES = 3;
+  async function wmFindLeadImage(term, opts) {
+    const strict = !!(opts && opts.strict);
+    const cands = await wmSearchPages(term, strict ? WM_STRICT_CANDIDATES : 1);
+    if (!cands.length) return null;
+    if (!strict) return cands[0];
+    return cands.find(looksLikeSubjectPage) || null;
   }
 
   // Best-effort licensing attribution (artist + short licence name) for the lead
@@ -711,34 +794,42 @@
 
   // Auto-source reference photos for a list of subject names into a source card,
   // skipping any already attached (by term or resolved article title) and capping
-  // the count. Best-effort per term (a miss/blocked image is swallowed). Renders
-  // once at the end. Returns the number of images added.
+  // the count. Best-effort per term — a miss is counted, never thrown. Renders
+  // once at the end. Returns { added, failed }, which is what the import sweep's
+  // status line is built from.
   //
-  // Serialised per source: the blur-triggered run and the button (or import + a
-  // stray blur) can fire together, and each would otherwise snapshot the same
-  // "already have" set and fetch every subject twice. A second concurrent call
-  // for the same source is a no-op until the first finishes.
+  // Serialised per source: the card's own button and the import sweep can fire
+  // together, and each would otherwise snapshot the same "already have" set and
+  // fetch every subject twice. A second concurrent call for the same source is a
+  // no-op until the first finishes.
   const autoFetchInFlight = new Set();
   async function autoFetchImages(sourceId, terms, opts = {}) {
     terms = (terms || []).map((t) => String(t).trim()).filter(Boolean);
-    if (!terms.length || autoFetchInFlight.has(sourceId)) return 0;
+    if (!terms.length || autoFetchInFlight.has(sourceId)) return { added: 0, failed: 0 };
     autoFetchInFlight.add(sourceId);
     const site = state.site; // guard against a site switch mid-fetch (see addSiteImages)
+    const gen = autoFetchGen; // …and against a Clear cache, which doesn't change state.site
     const f = state.findings[sourceId] || (state.findings[sourceId] = { status: STATUS.UNSET, note: "", result: null, images: [] });
     if (!f.images) f.images = [];
     const have = new Set(f.images.map((im) => (im.caption || "").toLowerCase()));
     const cap = opts.max || MAX_AUTO_IMAGES_PER_CARD;
-    let added = 0;
+    const budget = opts.budget || null; // shared across one import's whole sweep
+    let added = 0, failed = 0;
     try {
       for (const term of terms) {
         if (added >= cap) break;
+        if (budget && budget.left <= 0) break;
+        if (autoFetchGen !== gen || state.site !== site) break; // superseded — drop silently
         if (have.has(term.toLowerCase())) continue;
         try {
-          const found = await wmFindLeadImage(term);
-          if (!found || have.has((found.title || "").toLowerCase())) continue;
+          const found = await wmFindLeadImage(term, { strict: opts.strict !== false });
+          // No article, no lead image, or nothing that looked like the organism:
+          // a miss, and one the summary owns up to rather than hiding.
+          if (!found) { failed++; continue; }
+          if (have.has((found.title || "").toLowerCase())) continue;
           const dataUrl = await wmImageToDataUrl(found.imageUrl);
           const credit = await wmImageCredit(found.fileTitle);
-          if (state.site !== site) return added; // superseded — drop silently
+          if (autoFetchGen !== gen || state.site !== site) break; // superseded — drop silently
           f.images.push({
             id: newImgId(), dataUrl, caption: found.title,
             credit: credit ? `Wikipedia · ${credit}` : "Source: Wikipedia",
@@ -746,18 +837,124 @@
           });
           have.add((found.title || "").toLowerCase()); have.add(term.toLowerCase());
           added++;
-        } catch (_) { /* best-effort per term */ }
+          if (budget) budget.left--;
+        } catch (_) { failed++; /* best-effort per term */ }
       }
     } finally {
       autoFetchInFlight.delete(sourceId);
     }
-    if (added && state.site === site) { saveImages(); refreshCard(sourceId); renderReport(); }
-    return added;
+    if (added && autoFetchGen === gen && state.site === site) { saveImages(); refreshCard(sourceId); renderReport(); }
+    return { added, failed };
   }
 
-  // Task-2 path: scan THIS card's own note + result text for subjects and fetch a
-  // reference photo for each new one. Triggered by the card's "Auto-fetch" button
-  // and (when the global preference is on) when the note field loses focus.
+  /* ------------------------------------------------------- the auto-fetch queue
+     Auto-fetching now happens without being asked, so it has to be cheap by
+     construction rather than by being switched off. Each subject costs three
+     network round trips (search → image → credit) plus a canvas decode/re-encode,
+     and the old code kicked every card off at once: eight species cards was up to
+     24 fetches and 24 encodes racing each other on the main thread, immediately
+     after an import had just re-rendered both panes. That is what "bogging the
+     browser down" was.
+
+     One global queue fixes both halves of it. AUTO_FETCH_CONCURRENCY cards are in
+     flight at a time across the whole app (each card's own subjects stay
+     sequential, so the ceiling is a handful of requests, not a burst), and the
+     queue only starts pumping once the browser is idle — after the post-import
+     render has settled, never competing with it.
+
+     `autoFetchGen` is the abandon switch. Switching site or clearing the cache
+     bumps it, which empties the queue and makes every fetch already in flight
+     drop what it comes back with. Nothing lands on the wrong site. */
+  const AUTO_FETCH_CONCURRENCY = 3;
+  const autoQueue = [];        // jobs waiting for a slot
+  const autoPending = new Set(); // source ids queued or fetching — their cards say so
+  let autoActive = 0;
+  let autoFetchGen = 0;
+
+  const whenIdle = (fn) => (typeof requestIdleCallback === "function"
+    ? requestIdleCallback(() => fn(), { timeout: 1500 })
+    : setTimeout(fn, 250));
+
+  // Abandon everything outstanding: the queue is dropped and in-flight fetches
+  // discard their results (autoFetchImages re-checks the generation after every
+  // await). Called on a site switch and before Clear cache wipes storage.
+  function cancelAutoFetch() {
+    autoFetchGen++;
+    autoQueue.length = 0;
+    autoPending.clear();
+  }
+
+  // Repaint the cards whose "fetching…" state just changed. In Focus mode the step
+  // IS the card, so one re-render covers however many ids changed at once.
+  function repaintAutoCards(ids) {
+    if (!ids.length) return;
+    if (focusLive()) { renderFocus({ focus: false }); return; }
+    ids.forEach((id) => refreshCard(id));
+  }
+
+  function pumpAutoQueue() {
+    while (autoActive < AUTO_FETCH_CONCURRENCY && autoQueue.length) {
+      const job = autoQueue.shift();
+      if (job.gen !== autoFetchGen) { finishAutoJob(job, null); continue; }
+      autoActive++;
+      // Two callbacks rather than .then().catch(): a throw out of finishAutoJob
+      // itself must not make the job report a second time as a failure.
+      autoFetchImages(job.id, job.terms, { max: job.cap, budget: job.budget })
+        .then((r) => finishAutoJob(job, r), () => finishAutoJob(job, { added: 0, failed: job.terms.length }))
+        .finally(() => { autoActive--; pumpAutoQueue(); });
+    }
+  }
+
+  function finishAutoJob(job, result) {
+    if (autoPending.delete(job.id)) repaintAutoCards([job.id]);
+    const run = job.run;
+    if (!run) return;
+    run.done++;
+    if (result) { run.added += result.added; run.failed += result.failed; }
+    else run.abandoned++;
+    if (run.report) run.report(run);
+  }
+
+  // The gates, in one place: species/subject cards only, only where the source came
+  // back FOUND, and only where the card has no photos of its own — auto-fetch adds,
+  // it never overwrites the operator's own evidence. Returns the subject names to
+  // fetch: the agent's explicit `image_subjects` where it gave any, else what can
+  // be extracted from the finding text.
+  function autoTermsFor(id, subjects) {
+    const src = DATA.sources.find((s) => s.id === id);
+    if (!src || !WIKI_IMAGE_CATEGORIES.has(src.category)) return [];
+    const f = state.findings[id];
+    if (!f || f.status !== STATUS.FOUND || (f.images && f.images.length)) return [];
+    let terms = (Array.isArray(subjects) ? subjects : (Array.isArray(f.imageSubjects) ? f.imageSubjects : []))
+      .map((t) => String(t).trim()).filter(Boolean);
+    if (!terms.length) terms = extractSubjects(src.category, findingText(f));
+    return terms.slice(0, MAX_AUTO_IMAGES_PER_CARD * 2); // headroom for dedupe/misses
+  }
+
+  // Queue one sweep. `entries` is [{ id, subjects? }]; `opts.report(run)` is called
+  // as jobs land so a caller can narrate progress (see applyPastedJson). Returns
+  // how many cards were queued — 0 means there was nothing to fetch.
+  function queueAutoFetch(entries, opts = {}) {
+    const budget = { left: opts.budget || MAX_AUTO_IMAGES_PER_IMPORT };
+    const jobs = [];
+    (entries || []).forEach((e) => {
+      if (!e || !e.id || autoPending.has(e.id)) return;
+      const terms = autoTermsFor(e.id, e.subjects);
+      if (terms.length) jobs.push({ id: e.id, terms, gen: autoFetchGen, cap: MAX_AUTO_IMAGES_PER_CARD, budget });
+    });
+    const run = { total: jobs.length, done: 0, added: 0, failed: 0, abandoned: 0, report: opts.report || null };
+    if (!jobs.length) { if (run.report) run.report(run); return 0; }
+    jobs.forEach((j) => { j.run = run; autoQueue.push(j); autoPending.add(j.id); });
+    repaintAutoCards(jobs.map((j) => j.id)); // the placeholders go up before the first request
+    if (run.report) run.report(run);
+    whenIdle(pumpAutoQueue); // …and the requests wait for the render to settle
+    return jobs.length;
+  }
+
+  // One card at a time, on the operator's own click: scan THIS card's note +
+  // result text for subjects and fetch a reference photo for each new one. Runs
+  // straight away rather than through the queue — it is one card, and the person
+  // who pressed the button is watching it.
   function findingText(f) {
     if (!f) return "";
     const resultText = f.result && f.result.html ? f.result.html.replace(/<[^>]+>/g, " ") : "";
@@ -771,40 +968,40 @@
     const orig = btn ? btn.innerHTML : "";
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Fetching…`; }
     try {
-      const n = await autoFetchImages(sourceId, terms);
-      // On a quiet (blur-triggered) run, only speak up when we actually added
-      // something; the explicit button always reports the outcome.
-      if (n) toast(`Added ${n} reference image${n > 1 ? "s" : ""}.`);
+      const { added } = await autoFetchImages(sourceId, terms);
+      // A `quiet` caller only speaks up when something was actually added; the
+      // explicit button always reports the outcome, including "nothing".
+      if (added) toast(`Added ${added} reference image${added > 1 ? "s" : ""}.`);
       else if (!quiet) toast("No new reference images found for the detected names.");
     } finally {
       if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = orig; }
     }
   }
 
-  // Task-3 path: after a source is resolved by the API/agent (live BYOK run, the
-  // ALA check, or an import), auto-source reference photos for a species card
-  // that came back FOUND and has no evidence yet — using the agent's explicit
-  // `image_subjects` when given, else subjects extracted from the finding text.
-  // Never overwrites existing photos; silent + best-effort.
+  // The AMBIENT path: one source has just been resolved by a live agent run or an
+  // API check. This is the one auto-fetch nobody explicitly asked for, so it is
+  // the one the preference still governs. Queued like everything else.
   function maybeAutoFetchForSource(id, imageSubjects) {
     if (!autoImagesOn()) return;
-    const src = DATA.sources.find((s) => s.id === id);
-    if (!src || !WIKI_IMAGE_CATEGORIES.has(src.category)) return;
-    const f = state.findings[id];
-    if (!f || f.status !== STATUS.FOUND || (f.images && f.images.length)) return;
-    let terms = Array.isArray(imageSubjects) ? imageSubjects : [];
-    if (!terms.length) terms = extractSubjects(src.category, findingText(f));
-    if (terms.length) autoFetchImages(id, terms);
+    queueAutoFetch([{ id, subjects: Array.isArray(imageSubjects) ? imageSubjects : null }]);
   }
 
-  // Sweep an imported collection_log, kicking off an auto-fetch per species card
-  // (honours each entry's optional `image_subjects`). Runs after the workspace is
-  // rendered so cards fill in as their photos arrive.
-  function autoFetchAfterImport(collectionLog) {
-    if (!autoImagesOn()) return;
-    (collectionLog || []).forEach((c) => {
-      if (c && c.id) maybeAutoFetchForSource(c.id, Array.isArray(c.image_subjects) ? c.image_subjects : null);
-    });
+  // The IMPORT path: sweep a collection_log and queue every species card that came
+  // back Found, honouring each entry's optional `image_subjects`. Runs after the
+  // workspace is rendered, so cards fill in as their photos arrive — and runs
+  // whatever the preference says, because pressing Apply is the ask.
+  function autoFetchAfterImport(collectionLog, opts) {
+    const entries = (collectionLog || [])
+      .filter((c) => c && c.id)
+      .map((c) => ({ id: c.id, subjects: Array.isArray(c.image_subjects) ? c.image_subjects : null }));
+    return queueAutoFetch(entries, opts || {});
+  }
+
+  // The same sweep for a site whose findings are already in `state` — a batch site
+  // being opened for the first time, where the subjects came in with the batch and
+  // were stored on each finding rather than being passed in here.
+  function autoFetchForOpenSite(opts) {
+    return queueAutoFetch(Object.keys(state.findings || {}).map((id) => ({ id })), opts || {});
   }
 
   // Editable thumbnail (remove button + caption field) — used in the picker galleries.
@@ -1131,6 +1328,10 @@
   // each site's stored state in turn (e.g. to build a batch review) without touching
   // the DOM or kicking off per-site map/image work.
   function loadSiteState(site) {
+    // Whatever reference photos were still being fetched belonged to the site we
+    // are leaving. Drop the queue and disown anything already in flight, so none
+    // of it lands on this one.
+    cancelAutoFetch();
     state.site = site;
     state.findings = {};
     state.report = {};
@@ -1141,6 +1342,7 @@
     state.maintenance = "";
     state.filter = "all";  // restore() brings back this site's own filter choice
     state.groupOpen = {};  // …and its own collapse choices
+    state.autoImagesSwept = false; // …and whether its reference photos were fetched
     state.flow = freshFlow(); // …and how far it got through step 3
     resetFocusCursor();    // …and where Focus mode had got to (restore() brings this site's back)
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
@@ -1156,6 +1358,16 @@
     loadSiteState(site);
     syncBatchActive(); // highlight the matching chip if this site belongs to the loaded batch
     renderWorkspace(opts);
+    // A batch is imported whole but fetched one site at a time: twenty sites'
+    // worth of reference photos up front is exactly the burst the queue exists to
+    // prevent. So a batch site's sweep waits until the site is actually opened,
+    // and is marked done as it starts — reopening a site must not drag back a
+    // photo the operator deleted.
+    if (state.batch && !state.autoImagesSwept) {
+      state.autoImagesSwept = true;
+      save();
+      autoFetchForOpenSite({ report: autoImageToast });
+    }
   }
 
   // Step 1 folds away once a site is open (see renderWorkspace). It is shown again
@@ -1260,10 +1472,18 @@
     state.findings = {};
     json.collection_log.forEach((c) => {
       if (!c || !c.id) return;
+      // `image_subjects` is a hint, not data: it is what the reference-photo sweep
+      // searches for. It is kept on the finding (and saved with it) because in a
+      // batch the sweep doesn't run until that site is opened, which can be a day
+      // and a reload after the file that named them.
+      const subjects = Array.isArray(c.image_subjects)
+        ? c.image_subjects.map((s) => String(s).trim()).filter(Boolean).slice(0, MAX_AUTO_IMAGES_PER_CARD * 2)
+        : [];
       state.findings[c.id] = {
         status: c.status || STATUS.UNSET, note: c.note || "", reviewed: !!c.reviewed,
         result: c.result_text ? { html: esc(c.result_text).replace(/\n/g, "<br>"), ts: Date.now() } : null,
         images: importImages(c.images),
+        imageSubjects: subjects.length ? subjects : undefined,
       };
     });
     const sameSite = isSameSite(prevSite, state.site);
@@ -1272,6 +1492,10 @@
     // already open confirms the round trip the operator just made, while a file
     // for a different site starts that sequence again.
     state.flow = sameSite ? normalizeFlow(prevFlow) : freshFlow();
+    // A new set of findings has arrived, so this site's species cards are owed a
+    // reference-photo sweep again — whether it happens now (a single import) or
+    // when the site is opened (a batch).
+    state.autoImagesSwept = false;
     // …and so does Focus mode's place in the flow: a reply for the site already open
     // leaves the operator where they were (their step list simply gains a lot of
     // answered steps); a file for a different site starts that walk again.
@@ -1380,7 +1604,11 @@
 
   // Load a completed (or partial) ess-findings/1 object — from the agent skill
   // or a prior export — and populate the same review/export surface.
-  function importFindings(json) {
+  // `opts.onImages(run)` is called as the reference-photo sweep progresses, so the
+  // caller that made the gesture can narrate it where the gesture happened (the
+  // paste box's own status line). Without one, the sweep still runs and reports
+  // itself with a single toast at the end.
+  function importFindings(json, opts) {
     if (!isFindingsObject(json))
       throw new Error("Not an ESS findings file — expected a `site` object and a `collection_log` array.");
     flushSave(); // persist any pending debounced edit for the previously loaded site first
@@ -1388,8 +1616,20 @@
     applyFindings(json);
     renderWorkspace();
     imagesDirty = true; // imported photos + map must be written to the image key
+    state.autoImagesSwept = true; // …and this site's sweep is the one starting now
     save();
-    autoFetchAfterImport(json.collection_log); // async, best-effort (Task 3)
+    // Reference photos for every species card that came back Found — queued,
+    // throttled, and started once the render above has settled. Not gated by the
+    // preference: the import IS the request.
+    autoFetchAfterImport(json.collection_log, { report: (opts && opts.onImages) || autoImageToast });
+  }
+
+  // The default narration, for the import paths with no status line of their own
+  // (the Advanced file import, and Focus mode where the paste box has scrolled
+  // away): one toast, once, when there is something to say.
+  function autoImageToast(run) {
+    if (!run || run.done < run.total || run.abandoned) return;
+    if (run.added) toast(`${run.added} reference image${run.added > 1 ? "s" : ""} added.`);
   }
 
   // Import an ess-findings-batch/1 object: { sites: [ <ess-findings/1>, … ] }.
@@ -2855,6 +3095,13 @@
       mini,
       el("div", { class: "src-sum-foot" },
         el("span", { class: "src-line-sec" }, `→ ${sectionTitleOf(src, f)}`),
+        // A settled card shows no photo strip, so its share of an outstanding
+        // auto-fetch is said here instead — otherwise the only card densities that
+        // admit to fetching are the ones that were already open.
+        autoPending.has(src.id)
+          ? el("span", { class: "src-sum-fetch", role: "status" },
+            el("span", { class: "spin", "aria-hidden": "true" }), " fetching a photo…")
+          : null,
         el("span", { class: "src-sum-inc" + (included ? " is-in" : "") }, included ? "✓ In report" : "not included"),
         renderSignOff(src, f)));
 
@@ -2928,7 +3175,8 @@
     // (the report is a separate DOM tree, so rebuilding it never disturbs a click
     // on this card). Editing the notes NEVER triggers a Wikipedia image search —
     // that turned every note edit into a burst of network fetches + canvas work.
-    // Reference photos are pulled only on explicit request, from + Add photo.
+    // Reference photos arrive with an import, or on explicit request from the
+    // buttons under + Add photo; typing is not a request.
     const note = el("textarea", {
       class: "note-field", rows: "1",
       "aria-label": `Your note on ${src.name}`,
@@ -3269,6 +3517,11 @@
     const body = el("div", { class: "src-photos" });
     const grid = el("div", { class: "photo-grid small" });
     f.images.forEach((im) => grid.append(renderPhotoThumb(im, () => removeFindingImage(src.id, im.id), (v) => { im.caption = v; saveImages(); })));
+    // A reference photo for this card is queued or in flight. Saying so is the
+    // whole difference between "no photos yet" and "no photos coming" — and the
+    // placeholder is where the photo will actually appear, so it reads as one
+    // thing arriving rather than a message about it somewhere else.
+    if (autoPending.has(src.id)) grid.append(autoPhotoPlaceholder());
     const tools = el("div", { class: "photo-tools", id: `photos-${src.id}`, hidden: true });
     const addBtn = el("button", {
       type: "button", class: "btn tiny photo-add", "aria-expanded": "false", "aria-controls": tools.id,
@@ -3279,6 +3532,17 @@
     // the page doesn't jump) so a second paste doesn't need re-opening it.
     if (CARD_OPEN.photos.has(src.id)) setPhotoTools(src, addBtn, tools, true, false);
     return { addBtn, body };
+  }
+
+  // The thumbnail-shaped "one is on its way". role=status so a screen reader is
+  // told once, without the placeholder having to be focusable or interactive. The
+  // caption is one short word because the frame is 84 px wide — the full sentence
+  // is there for anyone who needs it, just not wrapped over three lines.
+  function autoPhotoPlaceholder() {
+    return el("figure", { class: "photo-thumb photo-ph", role: "status",
+      title: "Fetching a reference photo from Wikipedia" },
+      el("span", { class: "ph-box" }, el("span", { class: "spin", "aria-hidden": "true" })),
+      el("figcaption", {}, "Fetching…", el("span", { class: "sr-only" }, " a reference photo from Wikipedia")));
   }
 
   function setPhotoTools(src, btn, tools, open, focus) {
@@ -3331,8 +3595,9 @@
       DATA.weeds.forEach((w) => dl.append(el("option", { value: w })));
       searchRow.append(dl);
     }
-    // Auto-fetch: scan this card's notes for species/subjects and fetch a photo for
-    // each (also runs on note blur when the global "Auto-fetch" preference is on).
+    // Scan this card's notes for species/subjects and fetch a photo for each. Left
+    // here for the card an import didn't cover — one whose note was written by hand,
+    // or whose photos were deleted and are wanted back.
     const autoBtn = el("button", { type: "button", class: "btn tiny tertiary",
       title: "Scan this card's notes and fetch a labelled Wikipedia photo for every species/subject detected",
       onclick: () => autoFetchFromNotes(src.id, autoBtn) }, "Reference image from notes");
@@ -3752,9 +4017,9 @@
   // Single entry point for every path that brings findings in (the step-3 paste
   // box, the Advanced file import): a batch envelope opens the batch tray, a
   // single findings object loads straight into the workspace.
-  function routeImport(json) {
+  function routeImport(json, opts) {
     if (json && Array.isArray(json.sites)) { importBatch(json); return "batch"; }
-    importFindings(json);
+    importFindings(json, opts);
     return "site";
   }
 
@@ -3776,12 +4041,36 @@
       return;
     }
     const answered = answeredCount(json);
+    // What Apply says about itself, with the reference-photo sweep's progress
+    // spliced into the same sentence. The photos arrive over the following seconds
+    // and this is the only place that can say so — silence leaves no way to tell
+    // "no photos yet" from "no photos coming".
+    const applied = `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}`;
+    const tail = ". Anything left over is in step 4 below.";
+    let fetching = false; // set by the sweep's first (synchronous) report, below
+    const sayImages = (run) => {
+      if (!run || !run.total || run.abandoned) return; // nothing to fetch, or the site changed under it
+      fetching = true;
+      if (run.done < run.total) {
+        setFlowStatus("#paste-status", `${applied} · fetching reference images (${run.done} of ${run.total})…`, "ok");
+        return;
+      }
+      const bits = [];
+      if (run.added) bits.push(`${run.added} reference image${run.added > 1 ? "s" : ""} added`);
+      if (run.failed) bits.push(`${run.failed} subject${run.failed > 1 ? "s" : ""} had no usable photo`);
+      setFlowStatus("#paste-status", applied + (bits.length ? ` · ${bits.join(", ")}` : "") + tail, "ok");
+      // Focus mode has moved the operator on by now and the paste box with it, so
+      // the outcome is also said where they are actually looking.
+      if (focusLive() && run.added) toast(`${run.added} reference image${run.added > 1 ? "s" : ""} added.`);
+    };
     try {
-      const kind = routeImport(json);
+      const kind = routeImport(json, { onImages: sayImages });
       if (box) box.value = "";
-      setFlowStatus("#paste-status", kind === "batch"
-        ? "✓ Batch loaded — pick a site from the tray above."
-        : `✓ Response applied${answered ? ` — ${answered} source${answered > 1 ? "s" : ""} answered` : ""}. Anything left over is in step 4 below.`, "ok");
+      // …unless the sweep has already written its own first line here (it queues
+      // during the import above), in which case it owns this status line until it
+      // resolves — and re-stating the plain sentence would only blink over it.
+      if (kind === "batch") setFlowStatus("#paste-status", "✓ Batch loaded — pick a site from the tray above.", "ok");
+      else if (!fetching) setFlowStatus("#paste-status", applied + tail, "ok");
       markFlowDone("applied", answered ? `${answered} source${answered > 1 ? "s" : ""} answered` : "Response applied");
       if (kind !== "site") return;
       // Applying a reply answers a large part of the list in one action and
@@ -7063,7 +7352,8 @@
       // step list is derived and re-orders as work lands (an index would silently
       // point at a different step after any change). Nothing else about Focus mode
       // is stored — the steps themselves are recomputed from this payload.
-      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow, focus: { step: focusCursor } },
+      ui: { groups: state.groupOpen, filter: state.filter, flow: state.flow, focus: { step: focusCursor },
+        autoImages: !!state.autoImagesSwept },
     };
     try {
       localStorage.setItem(key, JSON.stringify(textPayload));
@@ -7163,6 +7453,7 @@
       state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
       state.filter = (d.ui && FILTERS[d.ui.filter]) ? d.ui.filter : "all";
       state.flow = normalizeFlow(d.ui && d.ui.flow);
+      state.autoImagesSwept = !!(d.ui && d.ui.autoImages);
       // Close the tab on step 19 and come back tomorrow to step 19. resolveFocusCursor
       // handles an id that no longer exists (a re-routed card, hidden internal sources).
       const fx = d.ui && d.ui.focus;
@@ -9015,7 +9306,9 @@
       autoImgCb.checked = autoImagesOn();
       autoImgCb.addEventListener("change", () => {
         setAutoImagesPref(autoImgCb.checked);
-        toast(autoImgCb.checked ? "Auto-fetch reference images: on" : "Auto-fetch reference images: off");
+        toast(autoImgCb.checked
+          ? "Agent runs will fetch reference images"
+          : "Agent runs won't fetch reference images (Apply still does)");
       });
     }
     // The collection bar's segments are built per render (they carry live counts),
@@ -9247,6 +9540,10 @@
       agentRunWrote++; // what endRun reports, and what tells a real run from one that fell over
       return true;
     },
+    // Abandon any outstanding reference-photo fetches. Called by the topbar's
+    // Clear cache before it wipes storage: a fetch that resolved in the gap would
+    // otherwise write a photo straight back into the keys just deleted.
+    cancelAutoImages: () => cancelAutoFetch(),
     queryAla: (radius) => alaQuery(state.site.lat, state.site.lon, radius || 10),
     queryWildnet: (radius) => {
       const src = DATA.sources.find((x) => x.api && x.api.kind === "wildnet");

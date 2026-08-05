@@ -363,6 +363,10 @@
       "OK to clear?"
     );
     if (!ok) return;
+    // Stop any reference-photo fetches first. They resolve on their own timeline,
+    // and one landing between the wipe below and the reload would write a photo
+    // straight back into a key that was just deleted.
+    try { if (window.ESS && window.ESS.cancelAutoImages) window.ESS.cancelAutoImages(); } catch (_) {}
     // Remove every ess-workbench:* localStorage key except the key + model choice.
     try {
       const doomed = [];

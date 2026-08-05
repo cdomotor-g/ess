@@ -475,7 +475,7 @@
           <h3>Display options</h3>
           <div class="adv-checks">
             <label class="inline-check"><input type="checkbox" id="toggle-manual-internal" checked /> Show internal / manual sources</label>
-            <label class="inline-check" title="Off by default (keeps the browser light). When on, the tool auto-sources labelled Wikipedia reference photos for the species/subjects identified in a card's findings on import / agent / API runs. Editing a card's notes never triggers a search — use the buttons on a species card to fetch reference images on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images</label>
+            <label class="inline-check" title="On by default. Governs the reference photos fetched during a live agent run, source by source. Applying a pasted response (or importing a findings file) always fetches them — that is an explicit request, and this switch does not override it. Editing a card's notes never triggers a search; the buttons on a species card fetch on demand."><input type="checkbox" id="toggle-auto-images" /> Auto-fetch reference images during agent runs</label>
           </div>
         </section>
 
