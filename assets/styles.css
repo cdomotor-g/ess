@@ -379,15 +379,16 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-maps .map-controls { display: none; }
 .fx-maps.is-tuning .map-controls { display: flex; }
 .fx-maps .map-head { margin-bottom: var(--sp-1); }
-/* Side by side, and square — the pane crops them to a 3:1 strip because they sit
-   in a column beside everything else, but this step exists to LOOK at them, and
-   this is the shape the report's front page shows them in anyway. Two of them
-   stacked at full width is the one step in this phase that needed a scrollbar. */
+/* Side by side — the pane crops them to a 3:1 strip because they sit in a column
+   beside everything else, but this step exists to LOOK at them, and this is the
+   shape the report's front page shows them in anyway. Two of them stacked at full
+   width is the one step in this phase that needed a scrollbar. */
 .fx-maps .site-maps { margin-top: 0; display: grid; grid-template-columns: 1fr 1fr;
   gap: var(--sp-3); align-items: start; }
 /* Loading, failed and ready are all the same box, so the step doesn't jump under
-   the operator as each map lands. */
-.fx-maps .map-frame, .fx-maps .map-frame.is-loading, .fx-maps .map-frame.is-error { aspect-ratio: 1 / 1; }
+   the operator as each map lands. 4/3, the same window the report and the artefact
+   crop to — what is tuned here is what the front page shows. */
+.fx-maps .map-frame, .fx-maps .map-frame.is-loading, .fx-maps .map-frame.is-error { aspect-ratio: 4 / 3; }
 
 /* ---- the report's front page, shown as the report says it. */
 .fx-rdoc { border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: var(--radius);
@@ -2136,8 +2137,58 @@ button.glance-hit:hover { background: var(--surface); border-color: var(--line);
   text-transform: uppercase; letter-spacing: .05em; margin: 0 0 var(--sp-1); }
 .report-maps { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
 .report-maps .report-map { margin: 0; min-width: 0; }
-.report-maps .report-map img { width: 100%; max-width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+/* 4/3 rather than square — a quarter less height for the same width. The stitched
+   image is square and centred on the station pin, so the window crops evenly top
+   and bottom and the pin stays in the middle of the picture. The maps establish
+   where the site is; they were spending screen the findings needed. */
+.report-maps .report-map img { width: 100%; max-width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 @media (max-width: 560px) { .report-maps { grid-template-columns: 1fr; } }
+
+/* ---------- findings at a glance, at the head of the report (#65) ----------
+   One row per report section, in report order: marker, words, section name. The
+   reader has just established where the site is; this is the next thing they see,
+   and its only job is to point at the sections worth reading.
+
+   Every row carries the glyph AND the words (they come from SUM_STATES in app.js,
+   one definition for the pane, Focus mode and the exported artefact), so the state
+   survives greyscale printing, a photocopier and a screen reader. Colour is the
+   confirmation, never the message — the same binding rule the status chips follow.
+
+   Rows are buttons: each one jumps to its section, and hovering lights the section
+   it points at through the same reciprocal highlight a collection card gets. */
+.r-summary .r-sum-verdict { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); font-weight: 650; color: var(--ink); }
+.r-sum { list-style: none; margin: 0; padding: var(--sp-1); display: flex; flex-direction: column;
+  gap: var(--sp-hair); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.r-sum-hit { display: grid; grid-template-columns: 1.1em minmax(0, 13.5em) 1fr; align-items: center;
+  gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--fs-meta);
+  color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: var(--sp-1) var(--sp-2); cursor: pointer; }
+.r-sum-hit:hover { background: var(--surface); border-color: var(--line); }
+/* The marker is iconography, not text on the ramp: it has to read as a shape from
+   a metre away and survive a photocopy, so it is sized above the words it labels.
+   The font stack is for one character — ◐ (U+25D0). The UI stack's first hits do
+   not all carry it, and a marker that falls back to a tofu box or a sliver is a
+   marker that isn't there; ● ○ – are safe everywhere but ride along for the sake
+   of one consistent set of shapes. Same stack on paper and in the export, which
+   are opened on machines we know nothing about. */
+.r-sum-mark { font-size: 15px; line-height: 1; text-align: center;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; }
+.r-sum-state { font-weight: 650; }
+.r-sum-name { min-width: 0; overflow-wrap: anywhere; }
+/* The marker and the words it belongs to take the state's colour together; the
+   section name stays ink, because it is the destination, not the verdict. */
+.r-sum-row[data-sum="found"] .r-sum-mark, .r-sum-row[data-sum="found"] .r-sum-state { color: var(--found-edge); }
+.r-sum-row[data-sum="partial"] .r-sum-mark, .r-sum-row[data-sum="partial"] .r-sum-state { color: var(--caution); }
+.r-sum-row[data-sum="clear"] .r-sum-mark, .r-sum-row[data-sum="clear"] .r-sum-state { color: var(--ink-soft); }
+/* A section with no applicable source is still listed — "we considered permits and
+   none apply here" is information — but it is the quietest row on the card. */
+.r-sum-row[data-sum="na"] .r-sum-hit { color: var(--ink-soft); }
+/* Three columns stop fitting long before the words do; the section name drops to a
+   second line under them rather than the state losing its wording. */
+@media (max-width: 620px) {
+  .r-sum-hit { grid-template-columns: 1.2em 1fr; row-gap: var(--sp-hair); }
+  .r-sum-name { grid-column: 2; }
+}
 
 /* The captured Queensland Globe map. Unlike the evidence photos this one has to
    be READ — the whole point of it is the layers drawn over the site — so it
@@ -2453,10 +2504,29 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 .pr-paper .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
   border-radius: 4px; padding: var(--sp-1) var(--sp-2); }
 .pr-paper .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
-/* Both locator maps in the printed report: side by side, square, equal, full width. */
+/* Findings at a glance on paper (#65) — the traffic-light table at the head of the
+   artefact. Marker AND words in every row, so a greyscale photocopy still tells the
+   three states apart; kept on one page, because a summary split across a page break
+   is not a glance. Mirrors .r-sum on screen. */
+.pr-paper .pr .pr-summary { break-inside: avoid; }
+.pr-paper .pr .pr-sum { font-size: 11.5px; }
+.pr-paper .pr .pr-sum-verdict { font-size: 12px; font-weight: 700; margin: 0 0 var(--sp-1); }
+.pr-paper .pr .pr-sum td { border: none; border-bottom: 1px solid #e2e2e2; padding: var(--sp-0) var(--sp-1); }
+.pr-paper .pr .pr-sum tr:last-child td { border-bottom: none; }
+.pr-paper .pr .pr-sum-mark { width: 14px; text-align: center; font-size: 13px; line-height: 1;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; }
+.pr-paper .pr .pr-sum-state { width: 34%; font-weight: 700; white-space: nowrap; }
+.pr-paper .pr .pr-sum-found .pr-sum-mark, .pr-paper .pr .pr-sum-found .pr-sum-state { color: #c1123c; }
+.pr-paper .pr .pr-sum-partial .pr-sum-mark, .pr-paper .pr .pr-sum-partial .pr-sum-state { color: #8a6d1a; }
+.pr-paper .pr .pr-sum-clear .pr-sum-mark, .pr-paper .pr .pr-sum-clear .pr-sum-state { color: #555; }
+.pr-paper .pr .pr-sum-na td { color: #8a8a8a; }
+.pr-paper .pr .pr-sum-foot { font-size: 10px; color: #666; margin: var(--sp-1) 0 0; }
+/* Both locator maps in the printed report: side by side, equal, full width, and a
+   quarter shorter than they were — 4/3 windows onto the square stitched image, which
+   crops evenly around the centred pin and gives the page back the height. */
 .pr-paper .pr .pr-maps { display: flex; gap: var(--sp-3); align-items: flex-start; break-inside: avoid; }
 .pr-paper .pr .pr-map-fig { margin: 0; flex: 1 1 0; min-width: 0; }
-.pr-paper .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
+.pr-paper .pr .pr-map-img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid #bbb; border-radius: 6px; }
 .pr-paper .pr .pr-map-cap { font-size: 10px; color: #444; margin: var(--sp-1) 0 0; }
 /* Appendix A — the Queensland Globe layer list. Starts its own page (it is an
    annexure, not part of the findings) and runs in two columns so forty layers

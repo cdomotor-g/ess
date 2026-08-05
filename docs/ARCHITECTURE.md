@@ -173,7 +173,12 @@ Vanilla JS, no dependencies, no build. It:
   transparent Esri road + locality/place **reference overlays** on top — same
   host/CORS as the imagery, so the result stays a self-contained, exportable
   JPEG. The chosen span (km) and the labels toggle persist per site and travel
-  into the report + exports;
+  into the report + exports. The stitched image is square (`MAP_PX`), but every
+  surface that *shows* it crops to a **4/3 window** — a quarter less height than
+  the square it used to draw, given back to the findings under it. `object-fit:
+  cover` around a centred pin crops evenly top and bottom, so nothing about where
+  the site is is lost, and the same ratio is used by the report pane, the Focus map
+  step, `#print-root` and the HTML export, so what is tuned is what is delivered;
 - orders the **left column as the workflow itself** — ① choose a site, ② check the
   site details, ③ run the checks, ④ finish & include each source, with the report
   itself in the right column (it is the deliverable, not a fifth step, so it
@@ -252,6 +257,50 @@ Vanilla JS, no dependencies, no build. It:
   printed and exported HTML (`evNotesHtml`), built from the `status` each
   `evidence_notes` entry already had, so the `ess-findings/1` JSON schema is
   unchanged;
+- says **what the whole assessment amounts to, before the reader reads any of it**
+  (`summaryRollup` → `reportSummaryBlock` on screen, `summaryHtml` in the
+  artefact): one row per report section, in report order, directly below the
+  locator maps on the front page. Someone about to attend a site does not read an
+  ESS — they skim it looking for the one thing that changes what they do today, and
+  that answer was distributed across eleven sections and twenty evidence blocks.
+  The card is deliberately **high level**: a marker, the words, the section name.
+  No counts of species, no source names, no narrative — its only job is to point at
+  the sections worth reading. Four states, and the **three** that carry risk are
+  the whole reason it is not a binary: `found` (● *Found — read this section*),
+  `partial` (◐ *Not fully checked*), `clear` (○ *Checked, nothing found*), plus
+  `na` (– *No sources apply*, still listed rather than omitted, because "we
+  considered permits and none apply here" is information). A found/not-found
+  marker would paint a section resting on four unopened portals the same green as
+  one that was properly cleared — the failure the evidence split above exists to
+  stop, reintroduced at the top of the page in a bigger font. Every row carries the
+  glyph **and** the words, so the state survives greyscale, a photocopier and a
+  screen reader; colour is the confirmation, never the message. Two deliberate
+  computations: it counts **every applicable source routed to the section**
+  (`applicableSources` + `targetSectionOf`), *not* `includedCardsForSection` — the
+  evidence list is include-driven, so a source that came back **Found** and was
+  never pressed into the report contributes nothing to it, and for a card whose
+  purpose is *"is there something here I need to worry about"*, under-reporting
+  because of a missed button press is the one failure that could hurt someone; and
+  it counts **internal / login-only sources too**, because on most sites the only
+  source routed to *Permits* is the Bureau's own permits register and to
+  *Biosecurity* the POPE / leasing files — excluding them would print *"No sources
+  apply"* against permits for a site whose permit position nobody had checked.
+  Reading `applicableSources()` rather than `sourcesForSite()` also keeps a marker
+  from moving when the collection header's *Show internal* checkbox is ticked. A
+  section whose standardized statement is a "matters present" option reads as
+  `found` even with no found card behind it (`statementAssertsMatters`, the same
+  index logic `sectionWarnings` uses — see `dropdowns.json` below); "still needs
+  someone" is `isOutstanding`, the same definition the collection bar, the rail
+  badges and the group roll-ups count with. One pure function feeds all three
+  surfaces — the report pane, Focus mode's front-page step and the exported
+  artefact — so they cannot disagree about a marker; on screen each row is a jump to
+  its section and hovering it lights that section through the same reciprocal
+  highlight a collection card gets (`linkPartners`), in the HTML export each row
+  links to the section anchor (`id="pr-sec-…"`, added in that build only, so the
+  print string injected into the live document carries no duplicate ids), and in
+  Print/PDF the rows are inert. The card re-renders with the report, and
+  `refreshSummaryCard()` replaces it in place from `refreshSection()`, so a
+  statement change moves its marker without rebuilding an image-heavy pane;
 - lays the workspace out as **two independently scrolling columns** (collection
   left, report right) sized to the viewport below the topbar. Each column pins
   what has to stay reachable while the other content scrolls: the progress card on
@@ -439,8 +488,9 @@ which in practice means one of three shapes:
    synchronisation routine because there is nothing to synchronise. What is
    borrowed goes home on the next render or mode switch (`releaseAdoptedNodes`).
    A borrowed node can be re-styled for the step it is standing in — the map
-   sections come square and side by side, and their tuning controls fold away
-   behind one button, because at rest that step asks *one* question.
+   sections come side by side in the report's own 4/3 crop rather than the pane's
+   3:1 strip, and their tuning controls fold away behind one button, because at rest
+   that step asks *one* question.
 2. **Share the renderer**, where the report pane and a step must show the same
    thing but cannot share a node (the pane isn't built while Focus is live):
    `reportIdentityText()`, `reportMapsBlock()`, `reportPhotosBlock()` and
@@ -537,7 +587,9 @@ Two consequences worth stating. The report's **front page** (`#rsec-identity`,
 `state.report.identity`) became a real report section with its own Reviewed tick,
 because a Focus step needed one and a control that exists in only one mode is not
 allowed; the locator maps and the station photographs were two headed blocks
-before and are its two halves now. And the **station record is correctable** —
+before and are its two halves now, with the traffic-light summary card between them
+(`reportSummaryBlock`, above) — both modes build the front page from the same three
+functions, so the page a Focus user signs off is the page the report shows. And the **station record is correctable** —
 name, WMO, delivery group, facility and state — from a disclosure that both modes
 show, because the step reads the record back as a confirmation and a confirmation
 you cannot act on is a dead end. Station number and coordinates are deliberately
@@ -554,8 +606,10 @@ order a person leaving the building uses them:
    source grouped by what it came back with, findings first, then what a human
    still owns, then the empty searches that are good news. Each row jumps to the
    first source with that result. Count, word *and* `.s-dot` glyph, so it survives
-   greyscale and CVD. It is a free-standing node on purpose — the report pane can
-   mount the same card at its head without a second implementation appearing.
+   greyscale and CVD. It is a free-standing node on purpose. Not to be confused
+   with the report's own summary card (`summaryRollup`, above): this one counts
+   **sources by status** for the operator, that one marks **sections** for whoever
+   reads the report.
 2. **What's still missing** — `completenessGaps(reportRollup())`, the same gap
    definition the pane's `#report-complete` box uses, so the two can never name
    different gaps for the same state. Every count is a jump, and in Focus
@@ -842,6 +896,16 @@ Every source resolves to one of four, and the difference is the product:
 
 "Nothing found" and "failed" are deliberately distinct: *absent* and *unknown*
 are different risk positions for someone about to attend a site.
+
+That distinction is what the report's summary card is built on. Its four section
+states are derived from these four, never a re-definition of them: any **Found**
+source (or a "matters present" statement) makes a section `found`; any source still
+**Manual**, **Search failed** or **Not checked** — `isOutstanding`, the one
+definition every tally in the app counts with — makes it `partial`; only a section
+whose sources have all answered and none found is `clear`. A two-state
+found/not-found summary was considered and rejected for exactly the reason above:
+it would collapse *absent* and *unknown* into one green marker at the top of the
+page.
 
 ## Why client-side, and the egress caveat
 

@@ -2193,14 +2193,18 @@
     }
   }
 
-  function sourcesForSite() {
+  // Every source that applies to this site's jurisdiction — internal / login-only
+  // working items included. Nothing about this list depends on the UI, which is why
+  // the summary card's rollup reads it directly: a marker on the report must not
+  // move because a checkbox in the collection header was ticked.
+  function applicableSources() {
     const st = state.site.state;
+    return DATA.sources.filter((src) =>
+      !src.states || src.states[0] === "*" || src.states.includes(st));
+  }
+  function sourcesForSite() {
     const showInternal = $("#toggle-manual-internal").checked;
-    return DATA.sources.filter((src) => {
-      if (src.states && src.states[0] !== "*" && !src.states.includes(st)) return false;
-      if (src.internal && !showInternal) return false;
-      return true;
-    });
+    return applicableSources().filter((src) => !(src.internal && !showInternal));
   }
 
   // ------------------------------------------------------------ onboarding guide
@@ -4222,6 +4226,14 @@
       const one = document.getElementById(`src-${ev.dataset.evSrc}`);
       return one ? [one] : [];
     }
+    // A summary row (#65) names exactly one section, so hovering it lights that
+    // section — the same reciprocal highlight, from the card at the head of the
+    // report. Tested before .rsection because the card lives inside the front page.
+    const sum = node.closest(".r-sum-row[data-section]");
+    if (sum) {
+      const one = document.getElementById(`rsec-${sum.dataset.section}`);
+      return one ? [one] : [];
+    }
     const sec = node.closest(".rsection[data-section]");
     if (sec) return $$("#col-left .src[data-section]").filter((c) => c.dataset.section === sec.dataset.section);
     return [];
@@ -4496,6 +4508,27 @@
     return parts.filter(Boolean).join("\n\n").trim();
   }
 
+  /* ------------------------------------------- the statement as its own signal
+     The standardized statement lists are ordered [there are no known…, there are
+     known…, …in the local area], so the INDEX of the operator's choice carries
+     meaning on its own: option 0 asserts nothing is present, anything after it
+     asserts matters ARE. Only the none/known scales say that — the biosecurity
+     treatment scale is ordered by treatment, not by presence — so both readers of
+     the signal (the consistency checker below, and the summary card at the head of
+     the report) ask this one function whether a section's list is such a scale,
+     rather than each testing the first option's wording for itself. */
+  function statementScale(section) {
+    if (!section || !section.dropdown) return null;
+    const opts = DATA.dropdowns[section.dropdown] || [];
+    return opts.length && /^there are no/i.test(opts[0]) ? opts : null;
+  }
+  // Does the section's own statement assert that matters are present? An unset or
+  // unrecognised choice asserts nothing either way.
+  function statementAssertsMatters(section, rstate) {
+    const opts = statementScale(section);
+    return !!opts && opts.indexOf((rstate && rstate.choice) || "") >= 1;
+  }
+
   // Flag the mistakes the human sheets are full of: a standardized statement that
   // contradicts the section's evidence, or a "matters present" statement left with
   // no supporting detail. Only applies to the none/known-scale dropdowns (their
@@ -4504,9 +4537,8 @@
   // every card by section in one pass rather than re-filtering the source list
   // eleven times per keystroke; on its own it falls back to the per-section query.
   function sectionWarnings(section, rstate, ev) {
-    if (!section || !section.dropdown) return [];
-    const opts = DATA.dropdowns[section.dropdown] || [];
-    if (!opts.length || !/^there are no/i.test(opts[0])) return [];
+    const opts = statementScale(section);
+    if (!opts) return [];
     const idx = opts.indexOf(rstate.choice || "");
     if (idx < 0) return [];
     ev = ev || includedCardsForSection(section.id);
@@ -4593,6 +4625,10 @@
       identityReviewToggle(box)));
     const maps = reportMapsBlock(), photos = reportPhotosBlock();
     if (maps) box.append(maps);
+    // Directly below the maps and above everything else: the first thing after the
+    // reader has established where the site is (see reportSummaryBlock).
+    const summary = reportSummaryBlock();
+    if (summary) box.append(summary);
     if (photos) box.append(photos);
     // Said rather than left blank: an empty front page is either a map still being
     // stitched or one that failed, and both are worth naming where the reader is.
@@ -4951,6 +4987,156 @@
     return out;
   }
 
+  /* ------------------------------------- the traffic-light summary card (#65)
+     Someone about to attend a site does not read an ESS. They skim it, looking for
+     the one thing that changes what they do today: is there something here I need
+     to worry about? That answer was distributed across eleven sections and twenty
+     evidence blocks — the tool knew it per section and never said it in one place.
+
+     So: one row per report section, one marker per row, at the head of the report.
+     Extremely high level, deliberately — no counts of species, no source names, no
+     narrative. Its only job is to point at the sections worth reading.
+
+     summaryRollup() is pure and takes nothing, so the report pane, Focus mode's
+     front page and the exported artefact all render from the same array and cannot
+     disagree about a marker.
+
+     THREE states, not two. "Checked, nothing found" and "never checked" are
+     different risk positions for someone about to attend a site (see
+     docs/ARCHITECTURE.md, "The status taxonomy") — a binary marker would paint a
+     section resting on four unopened portals the same green as one that was
+     properly cleared, which is the exact failure the evidence split was built to
+     stop, reintroduced at the top of the page in a bigger font.
+
+     Colour is never the only carrier: every row renders the glyph AND the words,
+     so it survives a greyscale photocopier and a screen reader. The glyphs live
+     here rather than in the stylesheet's --glyph-* set (which statusDot draws
+     from) because these four must also travel into the exported artefact, which
+     carries its own stylesheet and cannot see styles.css. One definition, three
+     surfaces.
+
+     Not to be confused with renderFindingsGlance() below: that instrument counts
+     SOURCES by status for the operator in Focus mode's finish step. This one marks
+     SECTIONS for whoever reads the report. */
+  const SUM_STATES = {
+    found:   { glyph: "●", label: "Found — read this section" },  // ● filled
+    partial: { glyph: "◐", label: "Not fully checked" },          // ◐ half
+    clear:   { glyph: "○", label: "Checked, nothing found" },     // ○ hollow
+    na:      { glyph: "–", label: "No sources apply" },           // – dash
+  };
+
+  /* Computed from EVERY applicable source routed to the section, not from the ones
+     the operator pressed ＋ Include on. This is the one place the summary is
+     allowed to disagree with the section body below it: the evidence list is
+     include-driven, so a source that came back Found but was never pressed into
+     the report contributes nothing to it. For a card whose entire purpose is "is
+     there something here I need to worry about", silently under-reporting because
+     of a missed button press is the one failure mode that could actually hurt
+     someone. The rollup sees the finding regardless.
+
+     It reads applicableSources() rather than sourcesForSite(), so internal /
+     login-only sources count here even though their notes never reach the report.
+     Two reasons, and the first is decisive: on most sites the ONLY source routed to
+     Permits is the Bureau's own permits register, and to Biosecurity the POPE /
+     leasing files — excluding them would print "No sources apply" against permits
+     for a site whose permit position nobody had checked, which is the most
+     dangerous sentence this card could carry. The second is that sourcesForSite()
+     follows a checkbox in the collection header, and a marker on the report that
+     moved when a display toggle was ticked would be a marker nobody could trust.
+
+     "Still needs someone" is isOutstanding — the same definition the collection
+     bar, the rail badges and the group roll-ups count with. */
+  function summaryRollup() {
+    if (!state.site || !REPORT_SECTIONS.length) return [];
+    // One pass over the source list, grouped by target section, rather than eleven
+    // filtered passes — this runs on every report render.
+    const bySection = {};
+    applicableSources().forEach((src) => {
+      const f = state.findings[src.id] || {};
+      const target = targetSectionOf(src, f);
+      if (target) (bySection[target] || (bySection[target] = [])).push(f);
+    });
+    return REPORT_SECTIONS.map((sec) => {
+      const list = bySection[sec.id] || [];
+      const foundCount = list.filter((f) => statusOf(f) === STATUS.FOUND).length;
+      const openCount = list.filter(isOutstanding).length;
+      const rstate = state.report[sec.id] || {};
+      // A "matters present" statement reads as a finding even with no found source
+      // behind it: the operator has asserted it in the section's own words, and the
+      // reader is entitled to be sent to the section that says so.
+      let st;
+      if (foundCount || statementAssertsMatters(sec, rstate)) st = "found";
+      else if (!list.length) st = "na";
+      else if (openCount) st = "partial";
+      else st = "clear";
+      return { section: sec.id, title: sec.title, state: st, foundCount, openCount };
+    });
+  }
+
+  // One line above the table: what the table adds up to. A sentence, not a second
+  // instrument — the rows are the thing, this is the reason to read them.
+  function summaryVerdict(rows) {
+    const need = rows.filter((r) => r.state === "found").length;
+    const open = rows.filter((r) => r.state === "partial").length;
+    if (rows.every((r) => r.state === "na")) return "No sources apply to this site yet.";
+    if (!need && !open) return "Nothing found, and every section that applies has been checked.";
+    const bits = [];
+    if (need) bits.push(`${need} section${need === 1 ? "" : "s"} ${need === 1 ? "has" : "have"} findings to read`);
+    // Naming the unit again once "sections" has already been said would be noise —
+    // but standing on its own, a bare count says nothing about what was counted.
+    if (open) bits.push(need
+      ? `${open} ${open === 1 ? "is" : "are"} not fully checked`
+      : `${open} section${open === 1 ? "" : "s"} ${open === 1 ? "is" : "are"} not fully checked`);
+    return bits.join(" · ");
+  }
+
+  /* The card as a free-standing node, mounted on the report's front page directly
+     below the locator maps — in the report pane and on Focus mode's front-page
+     step, which builds from these same blocks.
+
+     Every row is a control: a jump to its section (showReportSection resolves to a
+     scroll in the workbench and to that section's step in Focus), and `data-section`
+     makes hovering a row light the section it points at, through the same
+     reciprocal highlight a collection card gets (see linkPartners).
+
+     Sections with no applicable source are still listed, greyed, rather than
+     omitted: "we considered permits and none apply here" is information, and a
+     table whose row count changes per site is harder to trust at a glance. */
+  function reportSummaryBlock() {
+    const rows = summaryRollup();
+    if (!rows.length) return null;
+    const list = el("ul", { class: "r-sum" });
+    rows.forEach((r) => {
+      const s = SUM_STATES[r.state];
+      list.append(el("li", { class: "r-sum-row", "data-sum": r.state, "data-section": r.section },
+        el("button", { type: "button", class: "r-sum-hit",
+          title: `Go to ${r.title}`,
+          "aria-label": `${s.label} — ${r.title}. Go to this section.`,
+          onclick: () => showReportSection(r.section) },
+          // aria-hidden: the state is already spoken by the words beside it, and by
+          // the row's own label. The glyph is for eyes and for photocopiers.
+          el("span", { class: "r-sum-mark", "aria-hidden": "true" }, s.glyph),
+          el("span", { class: "r-sum-state" }, s.label),
+          el("span", { class: "r-sum-name" }, r.title))));
+    });
+    return el("div", { class: "r-identity-block r-summary", role: "group", "aria-label": "Findings at a glance" },
+      el("h4", {}, "Findings at a glance"),
+      el("p", { class: "r-sum-verdict" }, summaryVerdict(rows)),
+      list);
+  }
+
+  // Refreshed in place. Changing a section's standardized statement moves a marker
+  // (see summaryRollup) but deliberately does NOT run renderReport() — the section
+  // refreshes itself so a keystroke never rebuilds an image-heavy pane — so the one
+  // card that reads every statement has to be replaceable on its own. Called from
+  // refreshSection(), the single funnel every section edit already goes through.
+  function refreshSummaryCard() {
+    $$(".r-summary").forEach((cur) => {
+      const next = reportSummaryBlock();
+      if (next) cur.replaceWith(next); else cur.remove();
+    });
+  }
+
   /* ------------------------------------------------- findings at a glance (#65)
      The "did I miss anything?" instrument: every source this site has, grouped by
      what it came back with, in the order the answer matters — the findings first,
@@ -5224,6 +5410,7 @@
   function refreshSection(section, box, rstate) {
     renderReportWarnings(section, box, rstate);
     renderReportHeader();
+    refreshSummaryCard(); // a statement change can move a marker on the summary card
   }
 
   // Tracks the operator's "I've reviewed this report section" progress — updated in
@@ -6217,6 +6404,10 @@
 
     const maps = reportMapsBlock(), photos = reportPhotosBlock();
     if (maps) body.append(maps);
+    // The same card the report pane's front page carries, from the same rollup —
+    // this step IS the front page, so it cannot be missing the summary that page has.
+    const summary = reportSummaryBlock();
+    if (summary) body.append(summary);
     if (photos) body.append(photos);
     if (!maps) body.append(el("p", { class: "fx-lede" },
       MAP_SLOTS.some((slot) => (state.maps[slot.key] || {}).status === "loading")
@@ -7151,6 +7342,10 @@
       : "";
     const siteShots = s.images && s.images.length
       ? `<div class="pr-sec"><h2>Site photographs</h2>${photosHtml(s.images, true, interactive)}</div>` : "";
+    // The traffic-light card, from the same rollup the pane renders (#65). Sits
+    // directly below the maps: the first thing after the reader has established
+    // where the site is, and above the sections it points at.
+    const summaryBlock = summaryHtml(interactive);
     const nl2br = (x) => esc(x).replace(/\n/g, "<br>");
     // The same three-way split the on-screen pane makes (see
     // renderSectionEvidence): the person receiving the report has to be able to
@@ -7186,7 +7381,11 @@
     // guardExport() stops unresolved ones leaving unnoticed.
     // The "⚠ Not yet checked" caveat in evNotesHtml is the opposite case — a fact
     // about the assessment, addressed to the reader — and stays.
-    const secRows = r.sections.map((sec) => `<div class="pr-sec"><h2>${esc(sec.title)}</h2>
+    // The section id is an anchor for the summary card's rows — but only in the
+    // standalone HTML export. The print build's string is injected into the LIVE
+    // document (#print-root, and the on-screen preview), where a second set of ids
+    // would be a duplicate-id bug, and on paper a link is a promise it cannot keep.
+    const secRows = r.sections.map((sec) => `<div class="pr-sec"${interactive ? ` id="pr-sec-${esc(sec.id)}"` : ""}><h2>${esc(sec.title)}</h2>
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${nl2br(sec.detail)}</p>` : ""}
       ${sec.note ? `<p>${nl2br(sec.note)}</p>` : ""}
@@ -7211,6 +7410,7 @@
           <tr><td class="k">Latitude</td><td>${esc(s.lat)}</td><td class="k">Longitude</td><td>${esc(s.lon)}</td></tr>
         </table></div>
       ${mapBlock}
+      ${summaryBlock}
       ${siteShots}
       ${secRows}
       <div class="pr-sec"><h2>Collection log — sources checked</h2>
@@ -7219,6 +7419,31 @@
       ${appendixBlock}
       <p style="margin-top:10px;color:#555">Prepared with ESS Workbench · contact enviro@bom.gov.au</p>
     </div>`;
+  }
+
+  /* The summary card as report HTML — the same rows, the same glyphs and the same
+     words as the on-screen card, from the same summaryRollup(). No evidence text,
+     no species, no source names: on paper as on screen, its only job is to point at
+     the sections worth reading.
+
+     In the standalone HTML export each row links to its section anchor. In
+     Print/PDF the rows are inert text. */
+  function summaryHtml(interactive) {
+    const rows = summaryRollup();
+    if (!rows.length) return "";
+    const body = rows.map((r) => {
+      const s = SUM_STATES[r.state];
+      const name = interactive ? `<a href="#pr-sec-${esc(r.section)}">${esc(r.title)}</a>` : esc(r.title);
+      return `<tr class="pr-sum-row pr-sum-${esc(r.state)}">
+        <td class="pr-sum-mark">${s.glyph}</td>
+        <td class="pr-sum-state">${esc(s.label)}</td>
+        <td class="pr-sum-name">${name}</td></tr>`;
+    }).join("");
+    return `<div class="pr-sec pr-summary"><h2>Findings at a glance</h2>
+      <p class="pr-sum-verdict">${esc(summaryVerdict(rows))}</p>
+      <table class="pr-sum"><tbody>${body}</tbody></table>
+      <p class="pr-sum-foot">This table points at the sections worth reading; the detail — and what was
+        and was not checked — is in the sections themselves.</p></div>`;
   }
 
   // The map-layer appendix as report HTML — a two-column list so forty layers
@@ -7320,9 +7545,30 @@
       .pr-ev-line{font-size:11px;color:#333;margin:5px 0 0}
       .pr-ev-none{color:#444}
       .pr-ev-caveat{color:#7a5f10;background:#f6efd8;border-left:3px solid #8a6d1a;border-radius:4px;padding:4px 8px}
+      /* Findings at a glance — one row per section, marker + words + section name.
+         The glyph and the words both carry the state, so the table still reads on a
+         greyscale photocopier; the colour is the confirmation, never the message. */
+      .pr-summary table{font-size:11.5px}
+      .pr-sum-verdict{font-size:12px;font-weight:700;margin:0 0 6px}
+      .pr-sum td{border:none;border-bottom:1px solid #e2e2e2;padding:3px 6px}
+      .pr-sum tr:last-child td{border-bottom:none}
+      /* The stack is for ◐ (U+25D0) — see .r-sum-mark in styles.css. This file gets
+         opened on machines we know nothing about, so the marker carries its own. */
+      .pr-sum-mark{width:14px;text-align:center;font-size:13px;line-height:1;
+        font-family:"Segoe UI Symbol","Apple Symbols","Noto Sans Symbols 2","DejaVu Sans",sans-serif}
+      .pr-sum-state{width:34%;font-weight:700;white-space:nowrap}
+      .pr-sum-name a{color:inherit}
+      .pr-sum-found .pr-sum-mark,.pr-sum-found .pr-sum-state{color:#c1123c}
+      .pr-sum-partial .pr-sum-mark,.pr-sum-partial .pr-sum-state{color:#8a6d1a}
+      .pr-sum-clear .pr-sum-mark,.pr-sum-clear .pr-sum-state{color:#555}
+      .pr-sum-na td,.pr-sum-na .pr-sum-name a{color:#8a8a8a}
+      .pr-sum-foot{font-size:10px;color:#666;margin:6px 0 0}
       .pr-maps{display:flex;gap:12px;align-items:flex-start}
       .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
-      .pr-map-img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid #bbb;border-radius:6px}
+      /* 4/3 rather than square: the stitched image is square and centred on the pin,
+         so a 4/3 window crops evenly top and bottom and gives the page back a
+         quarter of the height the two maps used to take. */
+      .pr-map-img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border:1px solid #bbb;border-radius:6px}
       .pr-map-cap{font-size:10px;color:#444;margin:4px 0 0}
       .pr-appendix{page-break-before:always;break-before:page}
       .pr-appendix-blurb{font-size:11.5px;color:#444;margin:0 0 10px}
