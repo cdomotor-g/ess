@@ -386,6 +386,39 @@ It is a presentation, not a second application:
   picker's own action), Continue steps back to `secondary`. The borrowed node's
   own classes are never touched; `syncFlowSteps` owns those and the workbench
   wants them back exactly as they were.
+- **Arriving is one announcement, and it is the only one.** Every navigation moves
+  focus to the step's `<h2>`, and the heading carries an `sr-only` prefix so its
+  accessible *name* is "Step 14 of 41 — Queensland Globe". There is deliberately no
+  `aria-live` on it: focus and live together say the same step twice. The shell is
+  rebuilt by every background re-render — a keystroke in a note, a map landing, an
+  agent writing a result — so a notice that merely *persists* across renders is a
+  brand-new live region each time and gets read out again; `fxLive()` marks a
+  notice live on the render that first shows it and inert on the ones after, keyed
+  by its content. Progress is stated in words (`.fx-done`) beside the bar, which is
+  `aria-hidden`. Step state is a glyph *and* a word, never colour alone.
+- **Focus survives the re-render, because ids do.** Nothing in this mode may leave
+  focus on `<body>` — that is the same as losing it, and it is the failure a step
+  view invites, since the screen is replaced under the operator constantly. Every
+  control that can hold focus has a stable id (`fxli-src:qld-globe`,
+  `fx-open-qldmap`, …), which is what `renderFocus`'s caret hand-back and
+  `restoreFocusAfterDialog` both key on: a dialog that rebuilt its own opener while
+  it was up still finds the replacement, and failing that lands on the step
+  heading. `wireMenuKeys` re-resolves its trigger for the same reason.
+- **Keyboard.** `Alt+→` / `Alt+←` *press* `#fx-next` / `#fx-back` rather than
+  reimplementing them, so a shortcut can never drift from what Continue actually
+  does — the sign-off, the errand return, the last-step wrap all come with it. They
+  are inert while any modal is up (`dialogOpen()`). Alt is forced by the surface:
+  it is full of textareas, selects and a roving-tabindex radiogroup, so bare arrows
+  and Enter belong to the controls. The step list is a real `role="menu"`, one
+  `role="group"` per phase, sharing `wireMenuKeys` with the overflow menus.
+- **Narrow screens and motion.** Below 620px the chrome collapses to phase + *n of
+  m*, the nav footer goes `position: sticky` (never `fixed` — sticky keeps its
+  space in the flow, so it cannot cover the last control), every footer button is
+  ≥44px, and the photo zones drop their paste prose for a full-width pick control,
+  since Ctrl+V and drag-and-drop do not exist there. Tested at 360px. The step
+  transition is gated twice: on `prefers-reduced-motion: no-preference`, and on an
+  `is-entering` class that `renderFocus` sets only for a real navigation — without
+  the second gate a keystroke in a note would re-run it on every character.
 
 #### The step bodies (`FOCUS_BODY`, `focusStepBody`)
 A body is written once and used by both modes wherever that is possible at all,

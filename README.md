@@ -79,9 +79,21 @@ file, so the choice is only about how you like to work.
   the same tick, and the same tally, as the report pane's checkbox. A section that
   nothing on this site feeds still gets a screen saying so; a section you have
   already reviewed whose sources go back to *Not checked* says it needs another look,
-  and keeps everything you wrote. *Focus is still being built out — steps that don't
-  yet have their own controls say what they are for and hand you to the workbench, so
-  nothing is out of reach.*
+  and keeps everything you wrote. Anything specialist that is genuinely not
+  step-shaped — the batch tray, chiefly — stays in the workbench behind a labelled
+  button that says what it opens, so nothing is reachable in only one mode.
+
+  Focus works from the keyboard alone. **Continue** and **Back** — and `Alt+→` /
+  `Alt+←`, which do the same from anywhere on the step — move you on and put the
+  cursor on the new step's heading, so a screen reader announces *"Step 14 of 41 —
+  Queensland Globe"* and nothing more. **All steps ▾** is a menu you can walk with
+  ↑/↓, Home/End and Esc. Every step's state is a symbol *and* a word, so the whole
+  mode reads in greyscale, and step transitions are suppressed if you have asked
+  your system to reduce motion. On a phone it is a better fit than the workbench
+  rather than a worse one: one column, no pane switcher, the navigation within
+  thumb reach at the foot of the screen, and the photo steps offering a real
+  **Take or choose a photo** button instead of a paste gesture the device cannot
+  make.
 - **Workbench** — the two-pane view described in the rest of this README:
   everything reachable at once, and you choose what to look at next.
 
