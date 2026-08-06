@@ -262,7 +262,16 @@ Vanilla JS, no dependencies, no build. It:
   is counted in the header roll-up as well as shown. The split is carried into the
   printed and exported HTML (`evNotesHtml`), built from the `status` each
   `evidence_notes` entry already had, so the `ess-findings/1` JSON schema is
-  unchanged;
+  unchanged. **The split decides weight, never survival** (#83): the two collapsed
+  strips named their sources and stopped, which threw away the prose the operator
+  had typed on those cards — a note on anything but a `found` card reached the JSON
+  and plain-text exports and was missing from the report pane and from the
+  printed/exported HTML of the same report. *"Nothing recorded within 5 km"* is a
+  result, and the person receiving the ESS has to be able to read it. Each strip
+  now carries its entries' notes beneath it, at the strip's weight
+  (`appendGroupNotes` on screen, `evGroupNotes` in the artefact, both from the same
+  `evidence_notes` array), so no export can disagree with another about what the
+  operator wrote;
 - says **what the whole assessment amounts to, before the reader reads any of it**
   (`summaryRollup` → `reportSummaryBlock` on screen, `summaryHtml` in the
   artefact): one row per report section, in report order, directly below the
@@ -958,6 +967,46 @@ whose sources have all answered and none found is `clear`. A two-state
 found/not-found summary was considered and rejected for exactly the reason above:
 it would collapse *absent* and *unknown* into one green marker at the top of the
 page.
+
+## What the operator types must reach the artefact
+
+Two invariants, and the manual checks that hold them. Both were written after #83,
+where a note typed on a card reached the JSON export and was missing from the PDF
+of the same report. There is no test runner in this repo — it is a static site —
+so these are the checks to walk before merging anything that touches how `f.note`
+(card level) or `rstate.note` (section level) is populated, reconciled or rendered.
+
+**1. A note is never silently lost.** Every note in `evidence_notes` reaches every
+export format. The three-way evidence split decides how much *weight* an entry
+gets, never whether its text survives; the same goes for any future grouping,
+folding or summarising. Where a note genuinely cannot be placed — an `internal`
+working source, or a source whose category matches no `report_sections` entry —
+the *card* says so and why (`noteBlockedReason`), because the operator has to find
+out while they are writing rather than by not finding it in the handover.
+
+**2. Predetermined wording never clobbers free text.** A section's standard-wording
+dropdown owns `rstate.choice` and the derived read-only paragraph
+(`syncBioDetail`). It must never write `rstate.note`. The one route from standard
+wording into the note is **Insert suggested detail**, which appends on an explicit
+press and has never overwritten.
+
+Serve the app (`python3 -m http.server 8000`) and walk these:
+
+- [ ] Type a note on a non-internal card in **Focus** mode, mark it **Nothing
+      found**, and take all four exports (Print/PDF, HTML file, JSON, Copy
+      summary). The text is in each — in the report *section*, not only in the
+      collection-log table at the foot of the HTML.
+- [ ] The same in the **workbench** (list) mode.
+- [ ] Repeat with the card left **Manual** / **Search failed** / unanswered. Same
+      result: subordinate to a Finding, never absent.
+- [ ] Open an internal source (tick *Show internal / manual sources*). Its card
+      says its notes never reach the report, and offers no Include control.
+- [ ] On **Biosecurity**, type free text into the section note, then move the
+      dropdown across every value (*General clean* → *Biosecurity declaration* →
+      *Washdown and Virkon treatment*). The typed text is untouched each time, and
+      still present in the export afterwards.
+- [ ] Press **Insert suggested detail** over existing text. It appends below it;
+      nothing typed is replaced.
 
 ## Why client-side, and the egress caveat
 
