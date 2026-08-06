@@ -2203,6 +2203,12 @@ button.glance-hit:hover { background: var(--surface); border-color: var(--line);
    reader has just established where the site is; this is the next thing they see,
    and its only job is to point at the sections worth reading.
 
+   A card in its own right, directly below the front page — not a block inside it.
+   It used to sit between the locator maps and the station photographs, under a
+   heading ("Site and location") that covers neither what it says nor what it is
+   computed from, and inside a review tick that means "this is the right place".
+   Its own card costs one border and answers one question.
+
    Every row carries the glyph AND the words (they come from SUM_STATES in app.js,
    one definition for the pane, Focus mode and the exported artefact), so the state
    survives greyscale printing, a photocopier and a screen reader. Colour is the

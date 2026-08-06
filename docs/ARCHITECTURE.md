@@ -274,8 +274,14 @@ Vanilla JS, no dependencies, no build. It:
   operator wrote;
 - says **what the whole assessment amounts to, before the reader reads any of it**
   (`summaryRollup` → `reportSummaryBlock` on screen, `summaryHtml` in the
-  artefact): one row per report section, in report order, directly below the
-  locator maps on the front page. Someone about to attend a site does not read an
+  artefact): one row per report section, in report order, in **a card of its own**
+  (`reportSummarySection`, `#rsec-summary`) directly below the front page and above
+  the first section — the order the artefact is read in. It rode inside the front
+  page's *Site and location* card until it didn't: one card cannot answer both "is
+  this the right place?" and "what did the whole assessment come back with?", the
+  heading covered only the first, and the review tick it sat under means the first.
+  It carries no tick of its own, because there is nothing here to author or confirm
+  — it is a read-out of the eleven sections under it. Someone about to attend a site does not read an
   ESS — they skim it looking for the one thing that changes what they do today, and
   that answer was distributed across eleven sections and twenty evidence blocks.
   The card is deliberately **high level**: a marker, the words, the section name.
@@ -644,9 +650,15 @@ Two consequences worth stating. The report's **front page** (`#rsec-identity`,
 `state.report.identity`) became a real report section with its own Reviewed tick,
 because a Focus step needed one and a control that exists in only one mode is not
 allowed; the locator maps and the station photographs were two headed blocks
-before and are its two halves now, with the traffic-light summary card between them
-(`reportSummaryBlock`, above) — both modes build the front page from the same three
-functions, so the page a Focus user signs off is the page the report shows. And the **station record is correctable** —
+before and are its two halves now — both modes build the front page from the same
+three functions, so the page a Focus user signs off is the page the report shows.
+The traffic-light summary (`reportSummaryBlock`, above) used to sit between those
+two halves and is a card of its own now, which changes what Focus shows and when:
+`out:identity` is one of the **first five** steps, before the checks have run and
+before a single source has been answered, so the summary there could only ever read
+*"11 sections are not fully checked"* — an alarm about work the operator is on their
+way to do, on a step whose one question is *is this the right place?*. In Focus the
+card appears **only on `finish:export`**, where every row is a real answer. And the **station record is correctable** —
 name, WMO, delivery group, facility and state — from a disclosure that both modes
 show, because the step reads the record back as a confirmation and a confirmation
 you cannot act on is a dead end. Station number and coordinates are deliberately
@@ -656,27 +668,32 @@ different site rather than a typo, and *Change site* is the route to that.
 ##### The finish step (`focusFinishBody`)
 Where the flow ends, and the only place in Focus that looks at the whole
 assessment at once. Every section has already been reviewed on a step of its own,
-so this is a last look and a handover, not a second review — six things, in the
+so this is a last look and a handover, not a second review — seven things, in the
 order a person leaving the building uses them:
 
-1. **At a glance** — `renderFindingsGlance()`, the traffic-light card: every
+1. **At a glance — every source** — `renderFindingsGlance()`, the traffic-light
+   card: every
    source grouped by what it came back with, findings first, then what a human
    still owns, then the empty searches that are good news. Each row jumps to the
    first source with that result. Count, word *and* `.s-dot` glyph, so it survives
-   greyscale and CVD. It is a free-standing node on purpose. Not to be confused
-   with the report's own summary card (`summaryRollup`, above): this one counts
-   **sources by status** for the operator, that one marks **sections** for whoever
-   reads the report.
-2. **What's still missing** — `completenessGaps(reportRollup())`, the same gap
+   greyscale and CVD. It is a free-standing node on purpose.
+2. **Findings at a glance — every section** — `reportSummaryBlock()`, the report's
+   own summary card, from the same rollup the pane and the exported artefact use,
+   so the last thing Focus shows the operator is the first thing the reader of the
+   ESS sees. This is the **only** place in Focus it appears (see above): shown on
+   `out:identity` it summarised an assessment nobody had started yet. The pair is
+   the point — 1 counts **sources by status** for the operator, 2 marks
+   **sections** for whoever reads the report.
+3. **What's still missing** — `completenessGaps(reportRollup())`, the same gap
    definition the pane's `#report-complete` box uses, so the two can never name
    different gaps for the same state. Every count is a jump, and in Focus
    `showReportSection` resolves to the `sec:…` **step** that fixes it.
-3. **Unresolved warnings** — the `reportRollup()` count and a jump to the first.
-4. **Read the whole report** — `openReportPreview()`: the assembled artefact on
+4. **Unresolved warnings** — the `reportRollup()` count and a jump to the first.
+5. **Read the whole report** — `openReportPreview()`: the assembled artefact on
    screen, built from the same `buildReportHtml()` the printer gets and wearing
    the same `.pr-paper` stylesheet as `#print-root`, so it is a preview of the
    deliverable rather than a third rendering of the report.
-5. **Export ▾** and 6. **Check report** — `adoptNode`s of `#report-export-menu`
+6. **Export ▾** and 7. **Check report** — `adoptNode`s of `#report-export-menu`
    and `#btn-check-report`. Not copies: the same two controls with the same
    handlers, which is what makes *an export from Focus is byte-identical to an
    export from the workbench* true by construction rather than by testing.

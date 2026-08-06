@@ -4541,7 +4541,9 @@
     }
     // A summary row (#65) names exactly one section, so hovering it lights that
     // section — the same reciprocal highlight, from the card at the head of the
-    // report. Tested before .rsection because the card lives inside the front page.
+    // report. Tested before .rsection because the row now sits inside a report card
+    // of its own; that card carries no `data-section` (it speaks for all of them),
+    // so the row's own name is the only thing that can point it anywhere.
     const sum = node.closest(".r-sum-row[data-section]");
     if (sum) {
       const one = document.getElementById(`rsec-${sum.dataset.section}`);
@@ -4915,7 +4917,14 @@
      the right place" once, not once per picture grid — and because that is exactly
      what Focus mode presents the moment the site work is done (the out:identity
      step). Both modes build it from these three functions, so the front page a
-     Focus user signs off is the front page the report shows. */
+     Focus user signs off is the front page the report shows.
+
+     What this card is NOT is the findings summary. That used to ride here, between
+     the maps and the photographs, which asked one card to answer two unrelated
+     questions — "is this the right place?" and "what did the whole assessment come
+     back with?" — under a heading that only covers the first, and put the report's
+     one whole-assessment instrument inside a section whose review tick means
+     something else entirely. It is a card of its own now (reportSummarySection). */
   const IDENTITY_SECTION = "identity";
 
   // Both locator maps, side by side, square + equally sized (see .report-maps CSS).
@@ -4953,10 +4962,6 @@
       identityReviewToggle(box)));
     const maps = reportMapsBlock(), photos = reportPhotosBlock();
     if (maps) box.append(maps);
-    // Directly below the maps and above everything else: the first thing after the
-    // reader has established where the site is (see reportSummaryBlock).
-    const summary = reportSummaryBlock();
-    if (summary) box.append(summary);
     if (photos) box.append(photos);
     // Said rather than left blank: an empty front page is either a map still being
     // stitched or one that failed, and both are worth naming where the reader is.
@@ -5007,6 +5012,10 @@
     // whole pane is in the document — see measureClamps().
     const clamps = [];
     if (state.site) wrap.append(reportIdentitySection());
+    // Then what the whole assessment amounts to, before any of it is read — its own
+    // card, between the front page and the first section (see reportSummarySection).
+    const summaryCard = reportSummarySection();
+    if (summaryCard) wrap.append(summaryCard);
     REPORT_SECTIONS.forEach((section) => {
       const rstate = state.report[section.id]; // seeded by ensureReportChoices() above
 
@@ -5457,9 +5466,10 @@
     return bits.join(" · ");
   }
 
-  /* The card as a free-standing node, mounted on the report's front page directly
-     below the locator maps — in the report pane and on Focus mode's front-page
-     step, which builds from these same blocks.
+  /* The verdict and the rows as a free-standing node, deliberately without a
+     heading of its own: its two mounts head it differently — a report card in its
+     own right in the pane (reportSummarySection), a labelled zone on Focus mode's
+     finish step — and one instrument under two names would be two instruments.
 
      Every row is a control: a jump to its section (showReportSection resolves to a
      scroll in the workbench and to that section's step in Focus), and `data-section`
@@ -5486,10 +5496,31 @@
           el("span", { class: "r-sum-state" }, s.label),
           el("span", { class: "r-sum-name" }, r.title))));
     });
-    return el("div", { class: "r-identity-block r-summary", role: "group", "aria-label": "Findings at a glance" },
-      el("h4", {}, "Findings at a glance"),
+    return el("div", { class: "r-summary", role: "group", "aria-label": "Findings at a glance" },
       el("p", { class: "r-sum-verdict" }, summaryVerdict(rows)),
       list);
+  }
+
+  /* The report pane's mount: a card of its own, immediately below the front page
+     and above the first report section — the order the artefact itself is read in
+     (where it is `summaryHtml`, at the head, under its own heading too).
+
+     Its own card rather than a passenger on "Site and location", because it is the
+     only thing on the page that speaks for the WHOLE assessment: it is computed
+     from every applicable source, it is the one block allowed to disagree with the
+     section bodies under it (see summaryRollup), and it carries no review tick,
+     since there is nothing here for an operator to author or confirm — it is a
+     read-out of the eleven sections under it. None of that is true of the card it
+     used to sit inside. */
+  function reportSummarySection() {
+    const block = reportSummaryBlock();
+    if (!block) return null;
+    return el("div", { class: "rsection rsec-summary", id: "rsec-summary" },
+      el("div", { class: "rsec-head" }, el("h3", {}, "Findings at a glance")),
+      el("p", { class: "r-sub" },
+        "One row per report section, in report order — press a row to go to it. Every applicable source counts "
+        + "here, whether or not it was included into the section it feeds."),
+      block);
   }
 
   // Refreshed in place. Changing a section's standardized statement moves a marker
@@ -5497,10 +5528,17 @@
   // refreshes itself so a keystroke never rebuilds an image-heavy pane — so the one
   // card that reads every statement has to be replaceable on its own. Called from
   // refreshSection(), the single funnel every section edit already goes through.
+  //
+  // The node swapped is the headless block, which is what both mounts wrap — so the
+  // card's heading in the pane, and the zone label on Focus mode's finish step, are
+  // left standing exactly as they were.
   function refreshSummaryCard() {
     $$(".r-summary").forEach((cur) => {
       const next = reportSummaryBlock();
-      if (next) cur.replaceWith(next); else cur.remove();
+      if (next) { cur.replaceWith(next); return; }
+      // Nothing left to summarise (no site): the wrapping card goes too, rather
+      // than being left as a heading over an empty box.
+      (cur.closest(".rsec-summary") || cur).remove();
     });
   }
 
@@ -6752,6 +6790,15 @@
   // The first output. Not a summary of the front page — the front page: the
   // document header's own words, the real locator maps, the real photographs, and
   // the same Reviewed tick the report pane carries, writing the same state.
+  //
+  // What it does NOT carry is the findings summary, even though the report pane
+  // shows that card directly below this one. This step is one of the first five —
+  // the checks have not been run, not one source has been answered and no section
+  // has been written — so the summary here could only ever say "11 sections are not
+  // fully checked": an alarm about work the operator is on their way to do, raised
+  // at the one moment it cannot mean anything, on a step whose whole question is
+  // "is this the right place?". In Focus the card belongs where the assessment is
+  // over, and that is the finish step (focusFinishBody).
   function focusIdentityBody(step, body) {
     const idt = reportIdentityText();
     body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["out:identity"]));
@@ -6771,10 +6818,6 @@
 
     const maps = reportMapsBlock(), photos = reportPhotosBlock();
     if (maps) body.append(maps);
-    // The same card the report pane's front page carries, from the same rollup —
-    // this step IS the front page, so it cannot be missing the summary that page has.
-    const summary = reportSummaryBlock();
-    if (summary) body.append(summary);
     if (photos) body.append(photos);
     if (!maps) body.append(el("p", { class: "fx-lede" },
       MAP_SLOTS.some((slot) => (state.maps[slot.key] || {}).status === "loading")
@@ -7258,16 +7301,24 @@
      its own, so this is a last look and a handover — not a second review, and
      emphatically not a form.
 
-     Six things, in the order a person leaving the building uses them:
+     Seven things, in the order a person leaving the building uses them:
 
-       1  at a glance        what this site's sources came back with (#65)
-       2  what's still missing   the report's own gaps, each one a jump
-       3  unresolved warnings    the last moment they can be acted on (#64)
-       4  read the whole thing   the assembled artefact, on screen
-       5  Export ▾               the workbench's own menu, borrowed
-       6  Check report           the workbench's own button, borrowed
+       1  at a glance, by source what this site's sources came back with (#65)
+       2  at a glance, by section the report's own summary card, as it will be read
+       3  what's still missing   the report's own gaps, each one a jump
+       4  unresolved warnings    the last moment they can be acted on (#64)
+       5  read the whole thing   the assembled artefact, on screen
+       6  Export ▾               the workbench's own menu, borrowed
+       7  Check report           the workbench's own button, borrowed
 
-     Items 5 and 6 are `adoptNode`s rather than copies, which is what makes "an
+     Item 2 is the only place in Focus that card appears. It used to be shown on the
+     out:identity step as well, five steps in — a summary of an assessment nobody
+     had started yet, reading as an alarm about work still to come.
+     Here every one of its rows is a real answer, and the two instruments read as the
+     pair they are: 1 counts the SOURCES the operator worked, 2 marks the SECTIONS
+     whoever receives the report will read.
+
+     Items 6 and 7 are `adoptNode`s rather than copies, which is what makes "an
      export from Focus is byte-identical to an export from the workbench" true by
      construction: they are the same two controls, with the same handlers, and
      the artefact is built from state that has no per-mode half.
@@ -7278,15 +7329,28 @@
     body.append(el("p", { class: "fx-lede" }, FOCUS_LEDE["finish:export"]));
     const r = reportRollup();
 
-    // ---- 1. at a glance ------------------------------------------------------
+    // ---- 1. at a glance, by source -------------------------------------------
     // The traffic-light card, whole. Every row jumps to the first source that
     // came back that way, so "23 answered, 2 still not checked" is also the route
     // to the two.
     body.append(el("div", { class: "fx-zone" },
-      el("span", { class: "zone-label" }, "At a glance"),
+      el("span", { class: "zone-label" }, "At a glance — every source"),
       renderFindingsGlance()));
 
-    // ---- 2. what's still missing --------------------------------------------
+    // ---- 2. at a glance, by section ------------------------------------------
+    // The report's own summary card, from the same rollup the pane and the exported
+    // artefact use — so the last thing Focus shows the operator is the first thing
+    // the reader of the ESS will see. Withheld until here on purpose: see the step's
+    // note above, and focusIdentityBody.
+    const summary = reportSummaryBlock();
+    if (summary) body.append(el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "Findings at a glance — every section"),
+      el("p", { class: "fx-lede" },
+        "The card at the head of the report, exactly as whoever receives it will read it. "
+        + "Each row goes to that section's step."),
+      summary));
+
+    // ---- 3. what's still missing --------------------------------------------
     // The report pane's own roll-up, with its own wording (completenessGaps is
     // shared), but pointed at steps instead of at a scroll position:
     // showReportSection resolves to `sec:…` while Focus is live.
@@ -7307,7 +7371,7 @@
     }
     body.append(missing);
 
-    // ---- 3. unresolved warnings ---------------------------------------------
+    // ---- 4. unresolved warnings ---------------------------------------------
     // Only when there are some. An export is the last moment anybody can act on
     // them — which is why the export handler says so too (guardExport), and why
     // this row is a jump rather than a notice. (Whether they should also be
@@ -7328,7 +7392,7 @@
           + "Once the report leaves the app nobody can act on them, so this is the moment to.")));
     }
 
-    // ---- 4, 5 and 6 — everything that takes the report out of the app --------
+    // ---- 5, 6 and 7 — everything that takes the report out of the app --------
     const tools = el("div", { class: "fx-actions fx-finish-out" });
     // Export first, because it is what this step is for. The menu is the report
     // header's own node — same four formats, same order, same handlers.
