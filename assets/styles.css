@@ -1988,6 +1988,14 @@ a.photo-credit:hover { text-decoration: underline; }
   text-align: left; text-decoration: underline; }
 .inc-dest-link:hover { text-decoration: none; }
 .inc-dest-link:focus-visible { --focus-offset: 2px; }
+/* A card whose notes can never reach the report says so, in the place the note is
+   being written. Silence here is how a typed note used to disappear between the
+   card and the PDF (#83). Full-width like the receipt, so it wraps under its row. */
+.inc-blocked { flex: 0 0 100%; margin: var(--sp-1) 0 0; font-size: var(--fs-micro); line-height: 1.5;
+  color: var(--caution); display: flex; align-items: baseline; gap: var(--sp-1); }
+.inc-blocked-mark { flex: none; font-weight: 700; }
+/* Nothing to point at: this source has no destination and never will. */
+.inc-where .inc-never, .include-row .inc-never { font-size: var(--fs-meta); color: var(--ink-soft); font-style: italic; }
 
 /* ---------- site map ---------- */
 /* Two locator maps stacked in the (narrow) collection column; they render side by
@@ -2246,6 +2254,16 @@ button.glance-hit:hover { background: var(--surface); border-color: var(--line);
 .r-ev-goto { margin-left: auto; font: inherit; font-size: var(--fs-micro); font-weight: 650; color: var(--brand);
   background: none; border: none; padding: 0; cursor: pointer; white-space: nowrap; }
 .r-ev-goto:hover { text-decoration: underline; }
+/* What the operator actually typed on a card in a collapsed strip. Indented under
+   the strip and left at the strip's weight — it must not read as a Finding, which
+   is what the split exists to prevent — but it is never thrown away: the same
+   words are in the JSON and plain-text exports and in the artefact (#83). */
+.r-ev-notes { margin: var(--sp-1) 0 0; padding-left: var(--sp-2);
+  border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-1); }
+.r-ev-caveat .r-ev-notes { border-left-color: var(--caution); }
+.r-ev-note-src { margin: 0; }
+.r-ev-notes .r-inc-note { margin: 0; color: var(--ink-soft); }
+.r-ev-notes .r-inc-more { padding-top: 0; }
 /* Pictures belonging to a collapsed entry — the Queensland Globe capture sits on
    a source that is usually still "manual", and it is the one image in the report
    that has to be read, so it survives its entry being collapsed. */
@@ -2514,6 +2532,11 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 .pr-paper .pr .pr-ev-none { color: #444; }
 .pr-paper .pr .pr-ev-caveat { color: #7a5f10; background: #f6efd8; border-left: 3px solid #8a6d1a;
   border-radius: 4px; padding: var(--sp-1) var(--sp-2); }
+/* The notes belonging to a collapsed strip. Indented under it, at its weight —
+   never at a Finding's — and never omitted: "nothing found within 5 km" is a
+   result the reader of the ESS has to be able to read (#83). */
+.pr-paper .pr .pr-ev-notes { margin: var(--sp-0) 0 0 var(--sp-2); padding-left: var(--sp-2); border-left: 2px solid #ccc; }
+.pr-paper .pr .pr-ev-note { font-size: 10.5px; color: #444; margin: var(--sp-0) 0; }
 .pr-paper .pr .pr-photos figcaption .credit { display: block; font-size: 9px; color: #777; margin-top: var(--sp-hair); }
 /* Findings at a glance on paper (#65) — the traffic-light table at the head of the
    artefact. Marker AND words in every row, so a greyscale photocopy still tells the

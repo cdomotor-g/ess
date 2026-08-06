@@ -3029,11 +3029,20 @@
   function statusDot(status) {
     return el("span", { class: `s-dot ${STATUS_LABEL[status] ? status : "unset"}`, "aria-hidden": "true" });
   }
+  // "the report" was the friendly answer when a source mapped to no section, and
+  // it was untrue: nothing on that card reaches any export (#83). Name the gap.
   function sectionTitleOf(src, f) {
     const id = targetSectionOf(src, f);
     const sec = REPORT_SECTIONS.find((s) => s.id === id);
-    return sec ? sec.title : "the report";
+    return sec ? sec.title : "no report section";
   }
+
+  // What the note field invites. "…for the report" is an instruction on most cards
+  // and a contradiction on the few whose notes can never get there — the field has
+  // to agree with the reason printed under it (see noteBlockedReason).
+  const notePlaceholder = (src) => src && src.internal
+    ? "Working notes for staff — these stay in the workbench…"
+    : "Your own words for the report…";
 
   // ---- line density — a settled card ------------------------------------
   // One row: number, result, name, where it lands in the report, and the tick.
@@ -3180,7 +3189,7 @@
     const note = el("textarea", {
       class: "note-field", rows: "1",
       "aria-label": `Your note on ${src.name}`,
-      placeholder: "Your own words for the report…",
+      placeholder: notePlaceholder(src),
       oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
       onchange: () => { renderReport(); },
     });
@@ -4334,6 +4343,21 @@
     if (f && typeof f.included === "boolean") return f.included;
     return !!(f && ((f.note && f.note.trim()) || (f.images && f.images.length)));
   }
+  // Why this card's note can never reach the report, or null when nothing stands
+  // in its way. Two things used to swallow a typed note in silence while the card
+  // still read "→ the report" (#83): an internal working source, whose notes are
+  // staff instructions and are excluded by design; and a source whose category
+  // matches no report section, which simply never matched anywhere below and was
+  // dropped from every export with nothing said. Neither is a bug in itself — the
+  // silence was.
+  function noteBlockedReason(src, f) {
+    if (!src) return null;
+    if (src.internal)
+      return "Internal working item — notes here stay in the workbench. They never reach the report or any export.";
+    if (!targetSectionOf(src, f))
+      return `No report section covers this source's category (${src.category}), so notes here can't be placed in the report. Pick a section below to send them somewhere.`;
+    return null;
+  }
   function includedCardsForSection(sectionId) {
     return sourcesForSite()
       .map((src) => ({ src, f: state.findings[src.id] || {} }))
@@ -4567,14 +4591,29 @@
   function renderIncludeRow(src, opts) {
     const o = opts || {};
     const f = state.findings[src.id] || (state.findings[src.id] = { status: STATUS.UNSET, note: "", result: null, images: [] });
+    // Said here, on the card, where the note is being typed — the operator finds
+    // out before writing into a black hole rather than by missing it in the PDF.
+    const blocked = noteBlockedReason(src, f);
     const included = cardIncluded(f);
     const btn = el("button", { type: "button", class: "btn tiny inc-btn" + (included ? " on" : ""),
       "aria-pressed": included ? "true" : "false",
       onclick: () => toggleInclude(src.id) }, included ? "✓ In report" : "＋ Include");
 
-    const row = el("div", { class: "do-row include-row" + (included ? " is-in" : "") },
-      el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn,
-      o.signoff === false ? null : renderSignOff(src, f));
+    // An internal source's Include control and destination can never take effect,
+    // so the row doesn't offer them: two controls that do nothing, above a line
+    // explaining that they do nothing, is worse than the line on its own. A source
+    // with no section keeps its picker — choosing one is how the operator fixes it.
+    const row = src.internal
+      ? el("div", { class: "do-row include-row is-blocked" },
+          el("span", { class: "do-lead" }, "Report"),
+          el("span", { class: "inc-where inc-never" }, "not part of the report"),
+          o.signoff === false ? null : renderSignOff(src, f))
+      : el("div", { class: "do-row include-row" + (included ? " is-in" : "") + (blocked ? " is-blocked" : "") },
+          el("span", { class: "do-lead" }, "Report"), renderIncludeTarget(src, f), btn,
+          o.signoff === false ? null : renderSignOff(src, f));
+    if (blocked)
+      row.append(el("p", { class: "inc-blocked", role: "note" },
+        el("span", { class: "inc-blocked-mark", "aria-hidden": "true" }, "⚠"), blocked));
 
     // The flight path: pressing Include used to land 3,000px down the other pane
     // with nothing on the card to say so. This names where it went, and the name
@@ -4980,6 +5019,14 @@
       box.append(el("div", { class: "rsec-head" }, el("h3", {}, section.title),
         sectionReviewToggle(section.id, { box })));
 
+      // INVARIANT — the predetermined wording and the operator's free text are two
+      // separate fields and this handler owns exactly one of them. It sets
+      // `rstate.choice` and re-derives the read-only suggested paragraph
+      // (syncBioDetail); it must NEVER write `rstate.note`. Switching Biosecurity
+      // between "General clean" and "Washdown and Virkon treatment" over a note
+      // somebody spent ten minutes on has to leave that note alone. The only route
+      // from the standard wording into the note is "Insert suggested detail" below,
+      // which appends on an explicit press. Same invariant in Focus mode.
       if (section.dropdown) {
         const opts = DATA.dropdowns[section.dropdown] || [];
         const sel = el("select", { onchange: (e) => { rstate.choice = e.target.value; save(); refreshSection(section, box, rstate); if (section.bioDetail) syncBioDetail(section, box); } });
@@ -5122,22 +5169,27 @@
     }
 
     // "We looked at these four and found nothing" is one sentence, not four panels.
-    if (none.length)
+    if (none.length) {
       wrap.append(el("p", { class: "r-ev-line r-ev-none" },
         el("span", { class: "r-ev-label" }, `Checked, nothing found (${none.length})`),
         evSourceList(none)));
+      appendGroupNotes(wrap, none, clamps, "none");
+    }
 
     // The honest reading of a manual/failed/unset entry — and the one that creates
     // useful pressure to go and finish it.
-    if (open.length)
-      wrap.append(el("div", { class: "r-ev-caveat" },
+    if (open.length) {
+      const caveat = el("div", { class: "r-ev-caveat" },
         el("p", { class: "r-ev-line" },
           el("span", { class: "r-ev-label" }, `⚠ Not yet checked (${open.length})`),
           evSourceList(open, (f) => f.status === STATUS.FAILED ? " (search failed)" : ""),
           el("button", { type: "button", class: "r-ev-goto",
             title: `These sources still owe this section an answer — ${evGoTitle(open[0].src.name)}`,
             onclick: () => showSourceCard(open[0].src.id) },
-            focusLive() ? "go and check these →" : "go to these in collection →"))));
+            focusLive() ? "go and check these →" : "go to these in collection →")));
+      appendGroupNotes(caveat, open, clamps, "open");
+      wrap.append(caveat);
+    }
 
     // A collapsed entry's PICTURES are not collapsed with it. The Queensland Globe
     // capture rides on a source that is almost always still "manual", and it is the
@@ -5153,6 +5205,44 @@
     });
     if (media.children.length) wrap.append(media);
     return wrap;
+  }
+
+  // The operator's own prose, clamped to three lines with a "Show all" that only
+  // appears once measurement proves there is more to show. Shared by the full
+  // Finding panel and by the notes under the collapsed strips, so the two can't
+  // drift apart. Returns the pair to append, in order.
+  function noteBlock(f, clamps) {
+    const note = el("div", { class: "r-inc-note is-clamped" }, f.note.trim());
+    const toggle = el("button", { type: "button", class: "r-inc-more", hidden: "hidden", "aria-expanded": "false",
+      onclick: () => {
+        const clamped = note.classList.toggle("is-clamped");
+        toggle.textContent = clamped ? "Show all" : "Show less";
+        toggle.setAttribute("aria-expanded", clamped ? "false" : "true");
+      } }, "Show all");
+    clamps.push({ note, toggle });
+    return [note, toggle];
+  }
+
+  // The strips above name their sources and stop. That was right for the *weight*
+  // — a portal nobody opened must never read as a finding — but it also threw away
+  // the words the operator had typed on those cards: a note on anything except a
+  // `found` card reached the JSON and plain-text exports and was dropped from the
+  // report pane and from the printed/exported HTML (#83). "Nothing found within
+  // 5 km of the site" is a result, and the person receiving the ESS needs to read
+  // it. So the notes are rendered under their strip, at the strip's weight —
+  // subordinate to a Finding, which is the whole point of the split — never
+  // discarded. Sources with no note add nothing here; the strip already named them.
+  function appendGroupNotes(node, rows, clamps, kind) {
+    const withNotes = rows.filter(({ f }) => f.note && f.note.trim());
+    if (!withNotes.length) return;
+    const box = el("div", { class: `r-ev-notes r-ev-notes-${kind}` });
+    withNotes.forEach(({ src, f }) => {
+      box.append(el("p", { class: "r-ev-note-src" },
+        el("button", { type: "button", class: "r-ev-src", "data-ev-src": src.id,
+          title: evGoTitle(src.name), onclick: () => showSourceCard(src.id) }, src.name)),
+        ...noteBlock(f, clamps));
+    });
+    node.append(box);
   }
 
   // One finding, at full weight: status, source, its prose (clamped to three lines
@@ -5176,19 +5266,7 @@
       el("div", { class: "r-inc-actions" },
         el("button", { type: "button", class: "btn tiny r-inc-remove", title: "Remove this source from the report section", onclick: () => toggleInclude(src.id) }, "Remove")));
     const item = el("div", { class: "r-inc-item status-" + st, "data-ev-src": src.id }, head);
-    if (f.note && f.note.trim()) {
-      const note = el("div", { class: "r-inc-note is-clamped" }, f.note.trim());
-      // Hidden until measurement proves there is more to show — a two-line note
-      // with a "Show all" under it is a control that does nothing.
-      const toggle = el("button", { type: "button", class: "r-inc-more", hidden: "hidden", "aria-expanded": "false",
-        onclick: () => {
-          const clamped = note.classList.toggle("is-clamped");
-          toggle.textContent = clamped ? "Show all" : "Show less";
-          toggle.setAttribute("aria-expanded", clamped ? "false" : "true");
-        } }, "Show all");
-      item.append(note, toggle);
-      clamps.push({ note, toggle });
-    }
+    if (f.note && f.note.trim()) item.append(...noteBlock(f, clamps));
     const shown = appendEvidenceImages(item, src, f, seenImg);
     if ((!f.note || !f.note.trim()) && !shown)
       item.append(el("div", { class: "r-inc-empty" }, "Included — add notes or photos on the source card."));
@@ -6884,7 +6962,7 @@
     const note = el("textarea", {
       class: "note-field", id: `fx-note-${src.id}`, rows: "1",
       "aria-label": `Your note on ${src.name}`,
-      placeholder: "Your own words for the report…",
+      placeholder: notePlaceholder(src),
       oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
       onchange: () => { renderReport(); },
     });
@@ -7093,6 +7171,9 @@
     // eleven, and here it is the section's conclusion.
     if (section.dropdown) {
       const opts = DATA.dropdowns[section.dropdown] || [];
+      // INVARIANT (see the workbench's copy of this handler): `choice` only. The
+      // operator's free text in `rstate.note` is never written from here, so
+      // changing the statement can't clobber what they typed.
       const sel = el("select", { class: "fx-sec-choice", id: `fx-sec-choice-${section.id}`,
         "aria-label": `The standardized statement for ${section.title}`,
         onchange: (e) => {
@@ -7645,6 +7726,18 @@
     // untouched — the status each entry already carries is what does the sorting.
     const evNames = (notes) => notes.map((e) =>
       esc(e.source) + (e.status === STATUS.FAILED ? " (search failed)" : "")).join(" · ");
+    // The strips name their sources; these are the words the operator typed on
+    // those cards. Every note in `evidence_notes` reaches the artefact, whatever
+    // the card's status — the split decides WEIGHT, never whether the text
+    // survives. It used to decide both, which is how a note on a "nothing found"
+    // card could sit in the JSON export and be missing from the PDF of the same
+    // report (#83). Mirrors appendGroupNotes on screen.
+    const evGroupNotes = (notes) => {
+      const withNotes = notes.filter((e) => e.note && e.note.trim());
+      if (!withNotes.length) return "";
+      return `<div class="pr-ev-notes">` + withNotes.map((e) =>
+        `<p class="pr-ev-note"><b>${esc(e.source)}</b> — ${esc(e.note.trim())}</p>`).join("") + `</div>`;
+    };
     const evNotesHtml = (sec) => {
       const notes = sec.evidence_notes || [];
       if (!notes.length) return "";
@@ -7656,10 +7749,12 @@
         rows.push(`<p class="pr-ev-h">Findings (${found.length})</p>` + found.map((e) =>
           `<p class="pr-ev-item"><span class="st st-${esc(e.status)}">${esc(STATUS_LABEL[e.status] || e.status)}</span> <b>${esc(e.source)}</b> — ${esc(e.note)}</p>`).join(""));
       if (none.length)
-        rows.push(`<p class="pr-ev-line pr-ev-none"><b>Checked, nothing found (${none.length}):</b> ${evNames(none)}</p>`);
+        rows.push(`<p class="pr-ev-line pr-ev-none"><b>Checked, nothing found (${none.length}):</b> ${evNames(none)}</p>`
+          + evGroupNotes(none));
       if (open.length)
         rows.push(`<p class="pr-ev-line pr-ev-caveat"><b>⚠ Not yet checked (${open.length}):</b> ${evNames(open)}`
-          + ` — these sources have not been checked, so the statement above is not yet fully evidenced.</p>`);
+          + ` — these sources have not been checked, so the statement above is not yet fully evidenced.</p>`
+          + evGroupNotes(open));
       return `<div class="pr-ev">${rows.join("")}</div>`;
     };
     // `sec.warnings` is deliberately NOT rendered into the artefact. The
@@ -7836,6 +7931,11 @@
       .pr-ev-line{font-size:11px;color:#333;margin:5px 0 0}
       .pr-ev-none{color:#444}
       .pr-ev-caveat{color:#7a5f10;background:#f6efd8;border-left:3px solid #8a6d1a;border-radius:4px;padding:4px 8px}
+      /* The words typed on a card in a collapsed strip: indented under it, at the
+         strip's weight, but always present — the artefact has to carry every note
+         the JSON and plain-text exports carry. */
+      .pr-ev-notes{margin:3px 0 0 8px;padding-left:8px;border-left:2px solid #ccc}
+      .pr-ev-note{font-size:11px;color:#444;margin:3px 0}
       /* Findings at a glance — one row per section, marker + words + section name.
          The glyph and the words both carry the state, so the table still reads on a
          greyscale photocopier; the colour is the confirmation, never the message. */
