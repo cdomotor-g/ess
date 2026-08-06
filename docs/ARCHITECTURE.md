@@ -819,6 +819,52 @@ rendered full width with the height following the width, and clicking it opens i
 full screen — via the existing lightbox on screen, and via a script-free
 `:target` overlay in the exported HTML, so a saved copy still works offline.
 
+### Feedback — "Report a bug" (`index.html`, `assets/app.js`)
+A top-bar button opens a modal that formats a bug report or feature request and
+hands it to the operator's mail client, addressed to the maintainer, who triages
+it into a GitHub issue by hand.
+
+The shape of this is set by one constraint (issue #67): **operators do not have
+GitHub accounts.** A prefilled `issues/new` link is zero-backend and dead on
+arrival — it still asks them to sign in to press Submit. It survives as the
+secondary path, at the foot of the form, for the minority who do have one.
+
+- **Diagnostics are the point.** `feedbackDiagnostics()` collects what the tool
+  was doing: page URL, data build, user agent, viewport, theme, wide/narrow
+  layout, which view and which step, the site (name, number, state — all already
+  public in `data/stations.json`), the source count and the tally by status,
+  whether a batch is loaded, and the error buffer. **Never** the API key, the
+  report free-text, the notes or the photos. It is collected when the dialog
+  opens and shown in full, in a disclosure, before anything is sent — the string
+  in the `<pre>` is the same string that goes into the email, so the two cannot
+  disagree.
+- **The error ring buffer lives in `index.html`, not `app.js`.** An always-on
+  `window.onerror` / `unhandledrejection` handler keeps the last 8 errors in
+  `window.ESSErrors` (message, location, timestamp — bounded, never page
+  content). It is registered in the page head because an error thrown while
+  `app.js` is still parsing is exactly the kind that leaves the tool visibly
+  broken, and a handler inside `app.js` would miss it.
+- **The mail client cannot be observed.** There is no event for "a mail app
+  opened" and no error for "there isn't one", so the confirmation says what was
+  attempted, states plainly that nothing has been sent yet, and gives the address
+  and a **Copy report** button for the browser that has no handler.
+- **Nothing is ever lost.** Long reports are trimmed in a stated order —
+  diagnostics first, because they are reconstructible and the operator's words
+  are not — to stay under `MAILTO_MAX` (1,800 chars), which mail clients silently
+  truncate past. Whenever anything is trimmed the whole report goes to the
+  clipboard and the confirmation says so. Closing the dialog does not clear the
+  form.
+- **The dialog is the batch builder's.** It wears `.bb-overlay` / `.bb-dialog`
+  deliberately: same scrim, same Esc, same `trapFocus`, and the two places that
+  ask "is a modal up?" (Focus mode's `Alt`+arrow keys and the page-level paste
+  handler) already name `.bb-overlay`, so there is no third selector to keep in
+  sync.
+
+When a Worker is stood up to hold a GitHub token (issue #67, and `ROADMAP.md`
+Phase 4 contemplates one for the Anthropic key), only the last step changes:
+`fbSend()` POSTs the same validated parts instead of opening a `mailto:`, and
+this stays as the fallback for a Worker that is unreachable or proxy-blocked.
+
 ### Agent skill (`.claude/skills/ess-collect/`)
 `resolve.py` does the deterministic half (resolve station, filter sources, fill
 URL templates) and prints the worklist. `SKILL.md` tells the agent how to work

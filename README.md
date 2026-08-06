@@ -421,6 +421,32 @@ docs/                          Architecture, roadmap, how to add a source, mappi
 - [Human ESS vs the workbench](docs/HUMAN-VS-WORKBENCH.md) — assessment of real
   staff-completed ESS documents against the tool, and the improvements it drove.
 
+## Reporting a bug, or asking for something
+
+**Report a bug** in the top bar (on a narrow screen, under the **⋯**) opens a
+short form: broken vs. wanted, a one-line summary, what happened, and your name
+if you'd like an answer. It writes the email for you and attaches what the tool
+was doing at the time — the build, the browser, which view and step you were on,
+the site and how far through it you were, and any errors the page has thrown.
+That attachment is what makes a report fixable, and you can read every line of it
+in the form before you send.
+
+You don't need a GitHub account. The email goes to the maintainer, who raises the
+issue by hand — so there may be a day or two before it appears on the tracker. If
+you *do* have an account, the same report is one link away at the foot of the
+form, prefilled into the issue.
+
+Two things worth knowing:
+
+- **Nothing leaves the browser until you press Send in your own mail app.** The
+  tool only opens a pre-written draft; it has no backend and no credentials.
+- Reports are triaged into a **public** issue tracker. Your report free-text,
+  your notes and your photos are never attached automatically — but don't type
+  anything internal or sensitive into the form either.
+
+If no mail app opens, the browser has none configured: press **Copy report** and
+send it to `cameron.domotor@bom.gov.au` from wherever you do email.
+
 ## Scope & honesty
 
 This automates the **desktop research** stage of an ESS. It flags gaps rather
