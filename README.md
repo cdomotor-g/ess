@@ -235,6 +235,14 @@ that pane, so the four steps are all you see until you go looking.
    for, however far down you have scrolled and whichever site a batch has just
    switched to. Beside that: **n of 11 sections reviewed** and a
    **consistency-warning count** that takes you to the first warning.
+   Below the front page, in **a card of its own**, **Findings at a glance** says
+   what the whole assessment amounts to before any of it is read: one row per
+   report section — *Found — read this section*, *Not fully checked*, *Checked,
+   nothing found*, *No sources apply* — marker **and** words, each row a jump to
+   that section. It counts every applicable source, including ones not included
+   into the section they feed. In Focus mode the same card is held back to the
+   **finish step**: at the front-page step no source has been answered yet, so a
+   summary there would only be an alarm about work you are on your way to do.
    Each section's evidence is grouped by what it actually is: **Findings** at full
    weight (the first three expanded, each note clamped to three lines with *Show
    all*), **Checked, nothing found** as a single line naming those sources, and
