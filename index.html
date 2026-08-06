@@ -15,6 +15,44 @@
       if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
     } catch (e) {}
   </script>
+  <script>
+    // Always-on error ring buffer. A bug report is only fixable if it carries what
+    // the tool was actually doing when it broke, and by the time the operator opens
+    // the report form the console has scrolled or was never open. So the last few
+    // uncaught errors are kept here for feedbackDiagnostics() to read.
+    //
+    // In the page head rather than in app.js on purpose: an error thrown while
+    // app.js is still parsing or initialising is exactly the kind that leaves the
+    // tool visibly broken, and a handler registered inside app.js would miss it.
+    //
+    // Message and location only, capped and bounded — never page content, never a
+    // report, never a key. What lands here is pasted into an email by the operator.
+    (function () {
+      var ring = (window.ESSErrors = []);
+      var LIMIT = 8;
+      function push(kind, msg, where) {
+        ring.push({ t: new Date().toISOString(), kind: kind,
+                    msg: String(msg == null ? "" : msg).slice(0, 300),
+                    where: String(where || "").slice(0, 160) });
+        if (ring.length > LIMIT) ring.shift();
+      }
+      // Capture phase, because a resource that fails to load (a missing data file,
+      // a blocked tile server) fires an error event that does not bubble.
+      window.addEventListener("error", function (e) {
+        if (e.target && e.target !== window && (e.target.src || e.target.href)) {
+          push("resource", "failed to load " + String(e.target.src || e.target.href).slice(0, 120), e.target.tagName);
+          return;
+        }
+        push("error", e.message || "Unknown error", (e.filename || "") + (e.lineno ? ":" + e.lineno : ""));
+      }, true);
+      window.addEventListener("unhandledrejection", function (e) {
+        var r = e && e.reason;
+        var at = "";
+        try { at = r && r.stack ? (String(r.stack).split("\n")[1] || "").trim() : ""; } catch (_) {}
+        push("promise", (r && r.message) || r || "Unhandled rejection", at);
+      });
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -47,6 +85,11 @@
           <button class="ghost-link" id="btn-theme" title="Switch between light and dark theme">Dark</button>
           <button class="ghost-link" id="btn-cache-blaster" title="Clear all cached ESS data & browser caches for a fresh test (keeps your saved API key)">Clear cache</button>
           <a href="docs/" class="ghost-link" id="docs-link" title="Documentation">Docs</a>
+          <!-- The only way feedback gets out of the tool. Rides in the same row as
+               the rest of the chrome so it joins the ⋯ popover below 981px without a
+               second copy — see the note above. -->
+          <button class="ghost-link" id="btn-feedback" type="button"
+                  title="Report a bug or suggest a feature — writes the email for you, with what the tool was doing attached">Report a bug</button>
         </div>
       </div>
     </div>
@@ -656,6 +699,80 @@
       <div class="bb-foot">
         <button class="btn tertiary" id="bb-cancel" type="button">Cancel</button>
         <button class="btn primary" id="bb-create" type="button" disabled>Start batch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report a bug / suggest a feature. Wears the batch builder's .bb-overlay /
+       .bb-dialog chrome deliberately: same scrim, same Escape, same Tab trap, and
+       the two places that ask "is a modal up?" (the Focus-mode Alt+arrow keys and
+       the page-level paste handler) already name .bb-overlay, so this is covered by
+       both without a third selector to keep in sync.
+
+       Where it goes: the operator's mail client, addressed to the maintainer, who
+       triages it into an issue by hand. The endpoint that would post straight to
+       GitHub — a Worker holding the token, since users have no GitHub account — is
+       issue #67 and is not built yet. Everything above the send button is written
+       so that swapping the last step for a POST changes nothing the operator sees. -->
+  <div id="feedback" class="bb-overlay" hidden>
+    <div class="bb-dialog fb-dialog" role="dialog" aria-modal="true" aria-labelledby="fb-title">
+      <div class="bb-head">
+        <h2 id="fb-title">Report a bug or suggest a feature</h2>
+        <button class="bb-close" id="fb-close" title="Close" aria-label="Close">✕</button>
+      </div>
+      <p class="bb-note" id="fb-note">This writes the email for you and attaches what the tool was doing — which is usually the difference between a report that can be fixed and one that can't. Nothing is sent until you press the button.</p>
+
+      <!-- The form and the confirmation are two states of one dialog. The form is
+           never destroyed when the mail client opens: if nothing happened, the
+           operator's words are still on screen behind the confirmation. -->
+      <div class="fb-form" id="fb-form">
+        <fieldset class="fb-kind">
+          <legend class="field-label">What is this?</legend>
+          <label class="fb-radio"><input type="radio" name="fb-kind" value="bug" checked /> <span>Something is broken</span></label>
+          <label class="fb-radio"><input type="radio" name="fb-kind" value="enhancement" /> <span>I'd like it to do something</span></label>
+        </fieldset>
+
+        <label class="field-label" for="fb-summary">One-line summary</label>
+        <input id="fb-summary" type="text" maxlength="120" autocomplete="off"
+               placeholder="e.g. The regional map never finishes loading" />
+
+        <label class="field-label" for="fb-detail" id="fb-detail-label">What happened</label>
+        <textarea id="fb-detail" rows="6" maxlength="4000" aria-describedby="fb-detail-hint"></textarea>
+        <p class="hint" id="fb-detail-hint"></p>
+
+        <label class="field-label" for="fb-contact">Your name or email <span class="fb-optional">— optional, so someone can come back to you</span></label>
+        <input id="fb-contact" type="text" maxlength="120" autocomplete="off" placeholder="Leave blank to report anonymously" />
+
+        <!-- Shown, not silently collected. Open it and every line that will be sent
+             is there to read. -->
+        <details class="fb-diag">
+          <summary>What gets attached <span class="fb-diag-count" id="fb-diag-count"></span></summary>
+          <pre class="fb-diag-text" id="fb-diag-text"></pre>
+          <p class="hint">Your report text, your notes and your photos are <b>not</b> attached — only the lines above.</p>
+        </details>
+
+        <p class="fb-warn" id="fb-warn">This is triaged into a <b>public</b> GitHub issue by hand. Don't include anything internal or sensitive.</p>
+        <!-- role="alert": the one thing in here that has to be heard rather than
+             found, since focus moves to the field it is about. -->
+        <p class="fb-err" id="fb-err" role="alert" hidden></p>
+
+        <div class="bb-foot">
+          <button class="btn tertiary" id="fb-copy" type="button" title="Put the whole report on the clipboard — paste it into an email, a chat, or a GitHub issue">Copy report</button>
+          <button class="btn primary" id="fb-send" type="button">Open email</button>
+        </div>
+        <p class="hint fb-gh">Have a GitHub account? <a id="fb-gh-link" href="https://github.com/cdomotor-g/ess/issues/new" target="_blank" rel="noopener">Open the issue yourself</a> — the form above is filled into it.</p>
+      </div>
+
+      <!-- After the send. Says what was attempted rather than claiming delivery:
+           the browser cannot tell us whether a mail client actually opened. -->
+      <div class="fb-done" id="fb-done" hidden>
+        <p class="fb-done-lede" id="fb-done-lede"></p>
+        <ul class="fb-done-list" id="fb-done-list"></ul>
+        <div class="bb-foot">
+          <button class="btn tertiary" id="fb-back" type="button">Back to the form</button>
+          <button class="btn secondary" id="fb-done-copy" type="button">Copy report</button>
+          <button class="btn primary" id="fb-done-close" type="button">Done</button>
+        </div>
       </div>
     </div>
   </div>

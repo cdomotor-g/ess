@@ -130,6 +130,22 @@ slice. Each backlog item names the files to touch and how to verify.
   That completes epic #68.
   See `docs/ARCHITECTURE.md` → *Focus mode*.
 
+- **Report a bug / suggest a feature** (#67) — an in-app form that reaches the
+  maintainer without the operator needing a GitHub account. **Landed:** the top-bar
+  button, the modal on the batch builder's dialog chrome, the always-on error ring
+  buffer (`window.ESSErrors`, registered in the page head so an error during
+  `app.js` load is still caught), the diagnostics collector shown to the operator
+  in full before anything is sent, trimming that puts the whole report on the
+  clipboard rather than letting a mail client truncate it, and the prefilled
+  `issues/new` link for the minority who do have an account. **Not yet:** the
+  Worker that would post the issue directly — until it exists the form hands the
+  formatted report to the operator's mail client and the maintainer raises the
+  issue by hand, which is the right trade at this volume and is the fallback path
+  the Worker needs anyway. Screenshot attachment is deferred with it (the Issues
+  API can't take a binary; the Worker would have to commit the image and link it).
+  See `docs/ARCHITECTURE.md` → *Feedback*, and the Phase 4 proxy below — one
+  Worker deployment story serves both.
+
 ## Deliberately manual (by nature, not backlog)
 
 - **EPBC PMST** has no public API — it's a draw-a-polygon report generator.

@@ -8702,6 +8702,272 @@
     search.addEventListener("blur", () => setTimeout(() => { $("#bb-results").hidden = true; }, 120));
   }
 
+  // ---------------------------------------- report a bug / suggest a feature
+  // Feedback had no path out of the tool. An operator who hit a bug mid-assessment
+  // had to remember it, find someone who knew what GitHub was, and describe it from
+  // memory — so most of it was never reported, and what was reported arrived without
+  // the one thing that makes it fixable: what the tool was doing at the time.
+  //
+  // The constraint (issue #67): operators do not have GitHub accounts, so a prefilled
+  // "new issue" link is dead on arrival — it still asks them to sign in to press
+  // Submit. A credential therefore has to live somewhere that isn't the browser, and
+  // the answer for that is a Worker holding a fine-grained token. That isn't stood up
+  // yet, so this ships the path that needs no backend at all: the app formats the
+  // whole report — description, diagnostics and label — and hands it to the operator's
+  // mail client, addressed to the maintainer, who triages it into an issue by hand.
+  //
+  // Everything except the last step is what the Worker would need anyway. When the
+  // endpoint exists, fbSend() posts feedbackReportText's parts instead of opening a
+  // mailto, and this stays as the fallback for a Worker that is unreachable or
+  // blocked by a proxy — which issue #67 wants regardless.
+  const FEEDBACK_TO = "cameron.domotor@bom.gov.au";
+  const FEEDBACK_REPO = "cdomotor-g/ess";
+  // Mail clients truncate a long mailto: without saying so, and a silently halved bug
+  // report is worse than a short one. Kept well under the ~2,000 characters that is
+  // the practical floor across Outlook, Gmail's handler and the macOS/iOS clients; a
+  // report that doesn't fit is trimmed deliberately, in a stated order, and the whole
+  // of it goes to the clipboard. See fbSend.
+  const MAILTO_MAX = 1800;
+  let fbRelease = null;     // trapFocus() teardown while the dialog is open
+  let fbLastReport = "";    // the last full report built — what Copy hands over
+
+  // What the tool was doing, in the operator's sight before it is sent. Public facts
+  // about the site (name, number, state — all already in data/stations.json) and the
+  // shape of the assessment; never the report free-text, the notes, the photos, or
+  // the API key. The operator's own words travel in the description they typed.
+  function feedbackDiagnostics() {
+    const rows = [];
+    const add = (k, v) => { if (v !== "" && v != null) rows.push([k, String(v)]); };
+    add("Page", location.origin + location.pathname);
+    add("Data", DATA.meta && DATA.meta.generated_utc
+      ? `built ${DATA.meta.generated_utc} · ${DATA.stations.length} sites · ${DATA.sources.length} sources`
+      : "not loaded — the data files failed to arrive");
+    add("Browser", navigator.userAgent);
+    add("Screen", `${window.innerWidth}×${window.innerHeight} · ${narrowLayout() ? "narrow" : "wide"} layout · ${themeIsDark() ? "dark" : "light"} theme`);
+    // Where they were standing. Focus mode's heading already reads "Step 14 of 41 —
+    // Queensland Globe", which is exactly the answer, so it is read rather than
+    // recomputed — the diagnostic can't drift from what was on screen.
+    if (focusLive()) {
+      const t = $("#fx-title");
+      add("View", "Focus mode" + (t ? " · " + t.textContent.replace(/\s+/g, " ").trim() : ""));
+    } else {
+      add("View", "Workbench" + (narrowLayout() ? ` · ${mTab === "report" ? "Report" : "Collect"} tab` : ""));
+    }
+    if (state.site) {
+      const s = state.site;
+      add("Site", [s.name, s.station_num ? "#" + s.station_num : "", s.state || "?"].filter(Boolean).join(" · ")
+        + (s.manual ? " (entered by coordinates)" : ""));
+      const counts = { found: 0, none: 0, failed: 0, manual: 0, unset: 0 };
+      let total = 0;
+      for (const src of applicableSources()) { counts[statusOf(state.findings[src.id])]++; total++; }
+      add("Progress", `${total} sources · ${counts.found} found · ${counts.none} nothing found · ` +
+        `${counts.failed} failed · ${counts.manual} manual · ${counts.unset} not checked`);
+    } else {
+      add("Site", "none loaded");
+    }
+    if (state.batch && state.batch.keys) add("Batch", `${state.batch.keys.length} sites loaded`);
+
+    const pad = Math.max(...rows.map((r) => r[0].length)) + 2;
+    const lines = rows.map(([k, v]) => (k + ":").padEnd(pad) + v);
+    // The error ring buffer, filled since page load by the handler in index.html.
+    const errs = feedbackErrors();
+    lines.push("", errs.length ? `Errors (${errs.length}, most recent last):` : "Errors: none since this page loaded");
+    for (const e of errs) lines.push(`  ${e.t} ${e.kind}: ${e.msg}${e.where ? "  [" + e.where + "]" : ""}`);
+    return lines.join("\n");
+  }
+  const feedbackErrors = () => (Array.isArray(window.ESSErrors) ? window.ESSErrors : []);
+
+  function fbRead() {
+    const kindEl = document.querySelector('input[name="fb-kind"]:checked');
+    return {
+      kind: kindEl && kindEl.value === "enhancement" ? "enhancement" : "bug",
+      summary: ($("#fb-summary").value || "").trim(),
+      detail: ($("#fb-detail").value || "").trim(),
+      contact: ($("#fb-contact").value || "").trim(),
+      diag: $("#fb-diag-text").textContent || "",
+    };
+  }
+
+  // The body of the report, without the summary — that is the email's subject and
+  // the issue's title, and repeating it in the body reads as a stutter in both.
+  // `diagnostics: false` is what the trimming path uses; the marker it leaves says
+  // where the missing block went, so a mail without it isn't mistaken for a mail
+  // that never had one.
+  function feedbackBody(f, opts) {
+    const o = opts || {};
+    return [
+      f.detail || "(nothing written)",
+      "",
+      `Kind: ${f.kind === "bug" ? "Something is broken" : "Feature request"}`,
+      f.contact ? `From: ${f.contact}` : "From: (not given)",
+      "",
+      "--- what the tool was doing ---",
+      o.diagnostics === false ? "(too long for this email — on the clipboard, paste it here)" : f.diag,
+    ].join("\n");
+  }
+  const feedbackReportText = (f) => `${f.summary}\n\n${feedbackBody(f)}`;
+  const feedbackSubject = (f) => `[ESS Workbench] ${f.summary}`;
+  const mailtoUrl = (subject, body) =>
+    `mailto:${FEEDBACK_TO}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  // The path for the minority who DO have a GitHub account: the same report, in the
+  // issue form, prefilled. Kept live as the form is typed rather than built on click,
+  // so the link is never one keystroke stale.
+  function fbSyncGhLink() {
+    const a = $("#fb-gh-link");
+    if (!a) return;
+    const f = fbRead();
+    a.href = `https://github.com/${FEEDBACK_REPO}/issues/new?labels=${f.kind}` +
+      `&title=${encodeURIComponent(f.summary || "")}&body=${encodeURIComponent(feedbackBody(f))}`;
+  }
+
+  // Bug and feature ask for different things, and a textarea labelled "What happened"
+  // is the wrong question for someone with an idea. The label, the prompt and the
+  // sensitivity warning all follow the choice.
+  function fbSyncKind() {
+    const bug = fbRead().kind === "bug";
+    $("#fb-detail-label").textContent = bug ? "What happened" : "What would help";
+    $("#fb-detail").placeholder = bug
+      ? "What you did:\nWhat you expected:\nWhat happened instead:"
+      : "What you're trying to do, and what would make it easier.";
+    $("#fb-detail-hint").textContent = bug
+      ? "Three lines is plenty — what you did, what you expected, what happened instead."
+      : "What you're trying to get done matters more than how you'd build it.";
+  }
+
+  // Unhidden BEFORE it is filled: a role="alert" only announces a change made
+  // while it is in the accessibility tree, so writing the text into a hidden node
+  // and revealing it afterwards says nothing at all.
+  function fbError(msg, focusSel) {
+    const p = $("#fb-err");
+    p.hidden = !msg;
+    p.textContent = msg || "";
+    if (msg && focusSel) { const n = $(focusSel); if (n) n.focus(); }
+  }
+
+  function openFeedback() {
+    const ov = $("#feedback");
+    if (!ov) return;
+    // Collected on open, not on send: it is the state the operator is reporting
+    // about, and it has to be the thing they were shown before they agreed to it.
+    const diag = feedbackDiagnostics();
+    $("#fb-diag-text").textContent = diag;
+    const errs = feedbackErrors().length;
+    $("#fb-diag-count").textContent =
+      `— ${diag.split("\n").length} lines` + (errs ? `, including ${errs} error${errs === 1 ? "" : "s"}` : "");
+    fbError("");
+    fbShowForm();
+    fbSyncKind();
+    fbSyncGhLink();
+    ov.hidden = false;
+    ov.classList.add("show");
+    fbRelease = trapFocus(ov.querySelector(".bb-dialog"));
+    setTimeout(() => { const s = $("#fb-summary"); if (s) s.focus(); }, 0);
+  }
+
+  // Closing does NOT clear the form. A report interrupted by a phone call, or by a
+  // mail client that never opened, is still on screen when the button is pressed
+  // again — losing three paragraphs to a dismissed dialog is the failure this whole
+  // feature exists to prevent.
+  function closeFeedback() {
+    const ov = $("#feedback");
+    if (!ov) return;
+    ov.classList.remove("show");
+    ov.hidden = true;
+    if (fbRelease) { fbRelease(); fbRelease = null; }
+  }
+
+  function fbSend() {
+    const f = fbRead();
+    if (!f.summary) { fbError("Give it a one-line summary — that becomes the subject of the email.", "#fb-summary"); return; }
+    fbError("");
+    fbLastReport = feedbackReportText(f);
+    const subject = feedbackSubject(f);
+
+    // Trimming, in the order things can be spared. The diagnostics go first: they
+    // are reconstructible and the operator's words are not. Only if the description
+    // itself is what won't fit does it get cut, and then the tail is on the clipboard
+    // either way — so the full report always exists somewhere the operator can reach.
+    let body = feedbackBody(f), trimmed = "";
+    if (mailtoUrl(subject, body).length > MAILTO_MAX) {
+      body = feedbackBody(f, { diagnostics: false });
+      trimmed = "diagnostics";
+    }
+    if (mailtoUrl(subject, body).length > MAILTO_MAX) {
+      body = feedbackBody({ ...f, detail: f.detail.slice(0, 600) + "\n\n…(cut here — the rest is on your clipboard)" },
+        { diagnostics: false });
+      trimmed = "both";
+    }
+
+    const open = () => {
+      // Opening the mail client cannot be observed: no event, no error, no way to
+      // tell a client that launched from one that isn't installed. So the
+      // confirmation says what was attempted and hands over the fallback, rather
+      // than claiming a delivery it can't see.
+      window.location.href = mailtoUrl(subject, body);
+      fbShowDone(trimmed);
+    };
+    if (trimmed) copy(fbLastReport, "Full report copied — paste it into the email").then(open, open);
+    else open();
+  }
+
+  // The two states of the dialog. The lede describes the form and reads as a lie
+  // once the mail client has been handed the report ("nothing is sent until you
+  // press the button", to someone who just pressed it), so it belongs to the form.
+  function fbShowForm() {
+    $("#fb-note").hidden = false;
+    $("#fb-done").hidden = true;
+    $("#fb-form").hidden = false;
+  }
+
+  function fbShowDone(trimmed) {
+    $("#fb-note").hidden = true;
+    $("#fb-form").hidden = true;
+    const done = $("#fb-done");
+    done.hidden = false;
+    $("#fb-done-lede").innerHTML =
+      `Your email app should be opening, addressed to <b>${esc(FEEDBACK_TO)}</b> with the report already written.`;
+    const list = $("#fb-done-list");
+    list.replaceChildren();
+    const li = (html) => list.append(el("li", { html }));
+    li("<b>Nothing has been sent yet</b> — press Send in your mail app.");
+    if (trimmed === "diagnostics") li("The email was long enough that some mail apps would cut it, so the diagnostics were left out of it. They're on your clipboard — paste them at the bottom.");
+    if (trimmed === "both") li("Your report was longer than a mailto: link can safely carry, so the email holds the start of it. The whole thing is on your clipboard — paste it over the top.");
+    li(`If no mail app opened, this browser has none set up: press <b>Copy report</b> and send it to <code>${esc(FEEDBACK_TO)}</code> from wherever you do email.`);
+    li("It gets triaged into a GitHub issue by hand, so it may be a day or two before you see it there.");
+    const btn = $("#fb-done-close");
+    if (btn) setTimeout(() => btn.focus(), 0);
+  }
+
+  function wireFeedback() {
+    const ov = $("#feedback");
+    if (!ov) return;
+    const openBtn = $("#btn-feedback");
+    if (openBtn) openBtn.addEventListener("click", openFeedback);
+    $("#fb-close").addEventListener("click", closeFeedback);
+    ov.addEventListener("click", (e) => { if (e.target === ov) closeFeedback(); }); // backdrop
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ov.classList.contains("show")) closeFeedback(); });
+
+    $("#fb-form").addEventListener("input", () => { fbError(""); fbSyncGhLink(); });
+    $$('input[name="fb-kind"]').forEach((r) => r.addEventListener("change", () => { fbSyncKind(); fbSyncGhLink(); }));
+    // Enter in the one-line summary sends, the way it does in every other single-line
+    // field in the app. The textarea keeps Enter for what it is there for.
+    $("#fb-summary").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fbSend(); } });
+    $("#fb-send").addEventListener("click", fbSend);
+    $("#fb-copy").addEventListener("click", () => {
+      const f = fbRead();
+      if (!f.summary && !f.detail) { fbError("There's nothing to copy yet.", "#fb-summary"); return; }
+      fbLastReport = feedbackReportText(f);
+      copy(fbLastReport, "Report copied");
+    });
+    $("#fb-done-copy").addEventListener("click", () => copy(fbLastReport, "Report copied"));
+    $("#fb-back").addEventListener("click", () => {
+      fbShowForm();
+      const s = $("#fb-summary"); if (s) s.focus();
+    });
+    $("#fb-done-close").addEventListener("click", closeFeedback);
+  }
+
   // The document header's "Export ▾" menu — every way this report leaves the app,
   // in one control, handover format first. Same pattern, and the same keyboard
   // behaviour, as every card's ⋯.
@@ -9452,6 +9718,9 @@
       if (state.batch && confirm("Clear the batch list? Each site's saved work is kept — this only removes the batch grouping.")) clearBatch(false);
     });
     wireBatchBuilder();
+    // The way out for anything that goes wrong in here — wired unconditionally, so
+    // it is reachable on a page where the data load failed and nothing else works.
+    wireFeedback();
 
     // The how-to guide: shown once as a welcome, then only on demand from the ?
     // in the collection header. "Got it" both closes it and settles the question

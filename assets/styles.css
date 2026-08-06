@@ -1034,6 +1034,41 @@ a.menu-item { display: block; text-decoration: none; }
 .bb-chip .bb-chip-x:hover { color: var(--failed); background: var(--failed-bg); }
 .bb-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-4); }
 
+/* ---------- report a bug / suggest a feature (modal) ----------
+   Wears .bb-overlay / .bb-dialog — the scrim, the Escape and the Tab trap are the
+   batch builder's, and so is the behaviour anything else in the app expects of a
+   modal. Only what this dialog has and that one doesn't lives here. */
+.fb-dialog { max-width: 620px; }
+.fb-form > .field-label { margin-top: var(--sp-3); }
+.fb-kind { border: 0; padding: 0; margin: 0 0 var(--sp-1); }
+.fb-kind legend { padding: 0; }
+/* Stacked, not side by side: the two answers are sentences, and at 13px a row of
+   them wraps into something that reads as four options rather than two. */
+.fb-radio { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0;
+  font-size: var(--fs-body); cursor: pointer; }
+.fb-radio input { width: auto; margin: 0; accent-color: var(--brand); }
+.fb-optional { font-weight: 400; opacity: .75; }
+.fb-diag { margin-top: var(--sp-4); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.fb-diag > summary { cursor: pointer; font-size: var(--fs-body); font-weight: 600; color: var(--brand); }
+.fb-diag-count { color: var(--ink-soft); font-weight: 600; font-size: var(--fs-micro); }
+/* The attachment, verbatim — what is shown here is the same string that goes into
+   the email, so there is nothing to reconcile between the two. */
+.fb-diag-text { margin: var(--sp-2) 0 0; padding: var(--sp-3); max-height: 34vh; overflow: auto;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-micro); line-height: 1.5; color: var(--ink-soft);
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The app cannot enforce this, so it says it — at the send button, not in a note
+   three fields up that has already scrolled past. */
+.fb-warn { margin: var(--sp-4) 0 0; padding: var(--sp-2) var(--sp-3); border-radius: 8px;
+  font-size: var(--fs-meta); line-height: 1.5; color: var(--manual); background: var(--manual-bg); }
+.fb-err { margin: var(--sp-2) 0 0; font-size: var(--fs-meta); font-weight: 600; color: var(--failed); }
+.fb-gh { text-align: right; }
+.fb-done-lede { margin: var(--sp-3) 0 0; font-size: var(--fs-body); line-height: 1.5; }
+.fb-done-list { margin: var(--sp-3) 0 0; padding-left: var(--sp-5); color: var(--ink-soft);
+  font-size: var(--fs-meta); line-height: 1.6; }
+.fb-done-list code { overflow-wrap: anywhere; }
+
 /* ---------- Queensland Globe site map modal ----------
    A full-height modal: a live ArcGIS map on the right, the capture card and the
    layer catalogue on the left. The map area is deliberately the largest thing
@@ -2421,6 +2456,8 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
   .g-toggle { width: 44px; }
   .guide-btn { width: 44px; border-radius: 50%; }
   .bb-close { min-width: 44px; }
+  /* The radio is 13px wherever it is drawn; the row it labels is the target. */
+  .fb-radio { min-height: 44px; }
   /* The thumbnail is the target, so it grows to fill the taller box rather than
      sitting letterboxed inside it. */
   .sd-thumb img { height: 42px; }
