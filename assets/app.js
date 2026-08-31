@@ -254,6 +254,9 @@
     // operator deleted.
     autoImagesSwept: false,
     batch: null,            // { generated, keys: [siteKey,…], active: siteKey|null } when a batch is loaded
+    // The optional stopwatch on THIS assessment — { ms, running, at, offered, record }.
+    // Per site, persisted with it, and entirely opt-in. See "the timer" below.
+    timer: { ms: 0, running: false, at: 0, offered: false, record: null },
   };
   const mapGenTokens = {}; // per-slot guard against a stale async render landing after a newer request
   const cardNumbers = {}; // sourceId -> position in the currently-rendered (filtered) dashboard list
@@ -834,6 +837,11 @@
             id: newImgId(), dataUrl, caption: found.title,
             credit: credit ? `Wikipedia · ${credit}` : "Source: Wikipedia",
             source_url: found.pageUrl, ts: Date.now(), auto: true,
+            // The word in the card's own text that fetched this photo. Kept so the
+            // operator can be SHOWN why an unasked-for picture arrived, and judge
+            // it (see renderImageTriggers). Screen only: exportImage() names the
+            // fields an export carries, and this is not one of them.
+            term,
           });
           have.add((found.title || "").toLowerCase()); have.add(term.toLowerCase());
           added++;
@@ -1344,6 +1352,9 @@
     state.groupOpen = {};  // …and its own collapse choices
     state.autoImagesSwept = false; // …and whether its reference photos were fetched
     state.flow = freshFlow(); // …and how far it got through step 3
+    state.timer = freshTimer(); // …and its own clock, offered again on a site never timed
+    stopTimerInterval();   // whatever was ticking belonged to the site being left
+    suggestUndo.clear();   // …as did any "undo that insert" still on offer
     resetFocusCursor();    // …and where Focus mode had got to (restore() brings this site's back)
     imagesDirty = false; // fresh state; restore() re-flags this if a legacy save needs migrating
     restore(); // pull any saved progress for this site
@@ -1397,6 +1408,7 @@
     syncFlowSteps();  // …and points at this site's next un-run sub-step
     syncGuide();      // first visit gets the how-to; everyone else gets the ?
     setSiteDetailsOpen(siteDetailsOpen()); // step 2's panel, as this browser left it
+    renderTimer();    // the offer, or this site's own clock as it was left
     renderSummary();
     renderSiteImages();
     renderMapsSections();
@@ -3191,7 +3203,7 @@
       "aria-label": `Your note on ${src.name}`,
       placeholder: notePlaceholder(src),
       oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
-      onchange: () => { renderReport(); },
+      onchange: () => { renderReport(); refreshImageTriggers(src.id); },
     });
     note.value = f.note || "";
     // Photos belong to the note — they are the operator's other evidence — so the
@@ -3531,16 +3543,115 @@
     // placeholder is where the photo will actually appear, so it reads as one
     // thing arriving rather than a message about it somewhere else.
     if (autoPending.has(src.id)) grid.append(autoPhotoPlaceholder());
+    // …and, under the photos it explains, why any of them that arrived unasked-for
+    // are here: the words in this card's own text that fetched them, marked in
+    // place. Screen only — see renderImageTriggers.
+    const triggers = renderImageTriggers(src, f);
     const tools = el("div", { class: "photo-tools", id: `photos-${src.id}`, hidden: true });
     const addBtn = el("button", {
       type: "button", class: "btn tiny photo-add", "aria-expanded": "false", "aria-controls": tools.id,
       onclick: () => setPhotoTools(src, addBtn, tools, tools.hidden, true),
     }, "＋ Add photo");
-    body.append(grid, tools);
+    body.append(grid);
+    if (triggers) body.append(triggers); // null on a card with no auto-fetched photo
+    body.append(tools);
     // Adding a photo re-renders the card; the zone stays open (and unfocused, so
     // the page doesn't jump) so a second paste doesn't need re-opening it.
     if (CARD_OPEN.photos.has(src.id)) setPhotoTools(src, addBtn, tools, true, false);
     return { addBtn, body };
+  }
+
+  /* --------------------------------- why an unasked-for photo turned up (#trigger)
+     Reference photos are fetched automatically from words the tool found in a
+     card's own text. That is the feature — and it is also the risk: the operator
+     is handed a picture nobody asked for, attached to a government report, and
+     the reasoning behind it was invisible. "Cane toad" in a note fetches a photo
+     of a cane toad, which is right; a stray binomial in a pasted result fetches a
+     photo of something nobody meant, which is wrong, and the two arrive looking
+     identical.
+
+     So the tool shows its working: for every auto-fetched photo, the words that
+     triggered it, marked in the text they were read out of, next to the article
+     they resolved to. Reading one line is enough to accept or delete the photo.
+
+     Two things it deliberately does NOT do:
+       · it never touches the text itself. The note is a live textarea the
+         operator is typing into; the highlight is a quotation of it, shown
+         alongside, so nothing can be marked up under a caret.
+       · it never reaches the report. Nothing here is in exportImage(), so it is
+         absent from Print/PDF, the HTML export, the JSON and the report pane —
+         this is the operator checking the tool's homework, not a finding.
+
+     A term that is no longer in the text at all is the most useful row of the
+     lot: it says the photo has outlived whatever prompted it. */
+  const TRIGGER_RADIUS = 55; // characters of context either side of the word
+
+  const escapeRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Find `term` in `text` and return the readable window around it, split so the
+  // hit can be marked. Word-boundary matched, so "IPA" doesn't light up "principal".
+  function triggerSnippet(text, term) {
+    if (!text || !term) return null;
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRe(term)})(?![\\p{L}\\p{N}])`, "iu");
+    const m = re.exec(text);
+    if (!m) return null;
+    const at = m.index + m[1].length;
+    const end = at + m[2].length;
+    // Trim back to whitespace so the quote starts and ends on whole words.
+    let a = Math.max(0, at - TRIGGER_RADIUS), b = Math.min(text.length, end + TRIGGER_RADIUS);
+    if (a > 0) { const sp = text.indexOf(" ", a); if (sp >= 0 && sp < at) a = sp + 1; }
+    if (b < text.length) { const sp = text.lastIndexOf(" ", b); if (sp > end) b = sp; }
+    const squash = (x) => x.replace(/\s+/g, " ");
+    return {
+      before: (a > 0 ? "…" : "") + squash(text.slice(a, at)),
+      hit: text.slice(at, end),
+      after: squash(text.slice(end, b)) + (b < text.length ? "…" : ""),
+    };
+  }
+
+  // The strip itself: one row per auto-fetched photo on this card. Returns null
+  // when nothing was auto-fetched — an operator's own uploads need no explaining.
+  function renderImageTriggers(src, f) {
+    const auto = (f.images || []).filter((im) => im.auto && im.term);
+    if (!auto.length) return null;
+    const text = findingText(f);
+    const rows = auto.map((im) => {
+      const snip = triggerSnippet(text, im.term);
+      const article = im.source_url
+        ? el("a", { class: "trg-page", href: safeHttpUrl(im.source_url), target: "_blank", rel: "noopener",
+          title: "Open the Wikipedia article this photo came from" }, im.caption || "the article", " ↗")
+        : el("span", { class: "trg-page" }, im.caption || "");
+      // The quotation, with the trigger word marked where it actually appears.
+      const quote = snip
+        ? el("q", { class: "trg-quote" }, snip.before, el("mark", {}, snip.hit), snip.after)
+        : el("span", { class: "trg-gone" },
+          "“", im.term, "” is no longer in this card's text — the photo has outlived what fetched it.");
+      return el("li", { class: "trg-row" + (snip ? "" : " is-stale") }, quote, el("span", { class: "trg-arrow" }, " → "), article);
+    });
+    return el("div", { class: "img-triggers", id: `triggers-${src.id}` },
+      el("p", { class: "trg-lead" },
+        `Why ${auto.length === 1 ? "this photo is" : "these photos are"} here — the ${auto.length === 1 ? "word" : "words"} in this card's text that fetched `,
+        auto.length === 1 ? "it" : "them", ". ",
+        el("span", { class: "trg-note" }, "On screen only; none of this reaches the report.")),
+      el("ul", { class: "trg-list" }, rows));
+  }
+
+  /* The strip quotes a note the operator is still typing, so it has to be re-read
+     when they stop. Just this node, replaced in place: rebuilding the card on
+     every keystroke is the typing lag the card densities exist to avoid, and the
+     report pane beside it repaints on the same event (blur) for the same reason.
+     Document-rooted, so it only ever touches the mode that is actually on screen —
+     the other one's DOM is stashed and will be rebuilt from state anyway. */
+  function refreshImageTriggers(sourceId) {
+    const src = DATA.sources.find((x) => x.id === sourceId);
+    const f = state.findings[sourceId];
+    const old = document.getElementById(`triggers-${sourceId}`);
+    if (!src || !f) return;
+    const fresh = renderImageTriggers(src, f);
+    if (old) { fresh ? old.replaceWith(fresh) : old.remove(); return; }
+    // Not on screen yet (the first auto photo has just landed) — back where
+    // renderPhotoBlock puts it, immediately above the add-photo tools.
+    const tools = fresh && document.getElementById(`photos-${sourceId}`);
+    if (tools && tools.parentNode) tools.parentNode.insertBefore(fresh, tools);
   }
 
   // The thumbnail-shaped "one is on its way". role=status so a screen reader is
@@ -4293,6 +4404,255 @@
     renderDashboard();
   }
 
+  /* ---------------------------------------------------------------- the timer
+     An optional stopwatch on one assessment, and the reason it exists is a
+     comparison: this tool is meant to be faster than the spreadsheet-and-tabs
+     method it replaces, and until now nobody could say by how much. A number
+     nobody records is a claim nobody can check.
+
+     Everything about it is the operator's choice, in three separate decisions,
+     each asked at the moment it can be answered and never assumed:
+
+       1  START     offered once per site, as an offer they can wave away. An
+                    assessment is not a test, and a clock nobody asked for running
+                    in the corner of a government tool is pressure, not data.
+       2  PAUSE     at any point, as many times as they like. Real work has phone
+                    calls in it, and a benchmark that counts a lunch break as
+                    assessment time is worse than no benchmark.
+       3  RECORD    asked separately, at export, because "I timed myself" and "put
+                    my time in the deliverable" are not the same consent. Answer
+                    it either way and it can still be changed from the report's
+                    front page (see timerRecordRow) — nothing here is one-way.
+
+     The clock is per site and lives with that site's saved state, so it survives
+     a reload and does not follow the operator to the next station.
+
+     What it must never do is claim time nobody worked. `ms` is banked as it is
+     earned — folded on every tick, on every pause, and before every save — so a
+     closed tab loses at most the last few seconds rather than counting the night.
+     A reload is the one gap that is credited (RESUME_GRACE below), because a
+     refresh mid-assessment is a refresh, not a break. */
+  const TIMER_TICK_MS = 1000;
+  const TIMER_SAVE_EVERY = 15;   // ticks between banking the clock to storage
+  const TIMER_RESUME_GRACE = 90000; // a gap this short is a page reload, so the clock resumes
+  const TIMER_CREDIT_CAP = TIMER_TICK_MS * TIMER_SAVE_EVERY * 2; // …but only this much of it is credited
+
+  const freshTimer = () => ({ ms: 0, running: false, at: 0, offered: false, record: null });
+  let timerInterval = null, timerTicks = 0;
+
+  const timerState = () => state.timer || (state.timer = freshTimer());
+  // Everything the clock has actually earned, including the part of the current
+  // run that has not been folded yet.
+  function timerElapsed() {
+    const t = timerState();
+    return t.ms + (t.running && t.at ? Math.max(0, Date.now() - t.at) : 0);
+  }
+  // Bank the running part into `ms`, so what is stored is always time already
+  // worked rather than a promise about a clock that may never be read again.
+  function timerFold() {
+    const t = timerState();
+    if (!t.running) return t;
+    const now = Date.now();
+    if (t.at) t.ms += Math.max(0, now - t.at);
+    t.at = now;
+    return t;
+  }
+
+  // mm:ss up to an hour, then h:mm:ss — the readout, where the seconds moving is
+  // what says the thing is running.
+  function fmtClock(ms) {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+  }
+  // Prose, for the report and for anything a person reads rather than watches.
+  // Seconds are dropped: the claim is "about this long", and "1 h 12 m 43 s" in a
+  // government report reads as a precision the measurement does not have.
+  function fmtDuration(ms) {
+    const mins = Math.round(ms / 60000);
+    if (mins < 1) return "under a minute";
+    const h = Math.floor(mins / 60), m = mins % 60;
+    if (!h) return `${m} min`;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+
+  function timerTick() {
+    const t = timerState();
+    if (!t.running) { stopTimerInterval(); return; }
+    timerFold();
+    renderTimer();
+    if (++timerTicks % TIMER_SAVE_EVERY === 0) save();
+  }
+  function startTimerInterval() {
+    if (timerInterval) return;
+    timerTicks = 0;
+    timerInterval = setInterval(timerTick, TIMER_TICK_MS);
+  }
+  function stopTimerInterval() {
+    if (!timerInterval) return;
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+
+  /* The three things the operator can do to the clock. Each folds first, so no
+     transition can lose or invent the seconds either side of it. */
+  // repaintTimerSurfaces rather than renderTimer: starting the clock is also what
+  // brings the "record this on the report" control into existence on the report's
+  // front page, and stopping it is what updates the duration that control names.
+  // The tick does NOT go through here — re-rendering the report once a second is
+  // exactly the cost this app's render splits exist to avoid.
+  function startTimer() {
+    const t = timerFold();
+    t.running = true; t.at = Date.now(); t.offered = true;
+    startTimerInterval(); save(); repaintTimerSurfaces();
+  }
+  function pauseTimer() {
+    const t = timerFold();
+    t.running = false; t.at = 0;
+    stopTimerInterval(); save(); repaintTimerSurfaces();
+  }
+  function toggleTimer() { timerState().running ? pauseTimer() : startTimer(); }
+  // "No thanks" — the offer is answered, and the ⏱ button stays for later. It is
+  // never a refusal the tool holds them to.
+  function declineTimer() {
+    timerState().offered = true;
+    renderTimer(); save();
+  }
+
+  /* The chip in the top bar. It rides in the chrome rather than in either pane
+     because the offer, the clock and the pause have to be reachable from every
+     screen in both modes, and because a stopwatch is emphatically not the work.
+
+     Four states, one node:
+       no site      hidden — there is nothing to time yet
+       not offered  the offer, which is the prompt this feature owes the operator
+       running      the readout, and Pause
+       paused/idle  the readout (or a bare ⏱), and Start
+
+     The readout is role="timer" with aria-live off: a live region on a number
+     that changes every second would talk over everything else a screen-reader
+     user is doing. The buttons say what they do, which is what is worth hearing. */
+  function renderTimer() {
+    const box = $("#timer");
+    if (!box) return;
+    const t = timerState();
+    box.hidden = !state.site;
+    if (!state.site) { stopTimerInterval(); box.replaceChildren(); return; }
+    box.replaceChildren();
+
+    if (!t.offered) {
+      box.append(
+        el("span", { class: "tmr-ask", id: "tmr-ask" }, "Time this assessment?"),
+        el("button", { type: "button", class: "ghost-link tmr-go", onclick: startTimer,
+          title: "Start a stopwatch on this assessment — pause it whenever you like, and choose later whether it goes on the report" },
+          "Start timer"),
+        el("button", { type: "button", class: "ghost-link tmr-no", onclick: declineTimer,
+          title: "Don't time this one. The ⏱ button stays in the top bar if you change your mind." },
+          "No thanks"));
+      return;
+    }
+    const ms = timerElapsed();
+    // Never started, and the offer is answered: one quiet button, so starting late
+    // is as available as starting on time.
+    if (!t.running && !ms) {
+      box.append(el("button", { type: "button", class: "ghost-link tmr-chip", onclick: startTimer,
+        title: "Start timing this assessment" }, "⏱ Time this"));
+      return;
+    }
+    box.append(
+      el("span", { class: "tmr-read" + (t.running ? " is-running" : ""), role: "timer",
+        "aria-live": "off", title: `Time on this assessment so far: ${fmtDuration(ms)}` },
+        el("span", { class: "tmr-glyph", "aria-hidden": "true" }, t.running ? "⏱" : "⏸"),
+        el("span", { class: "tmr-time" }, fmtClock(ms)),
+        el("span", { class: "sr-only" }, ` — ${fmtDuration(ms)} on this assessment${t.running ? ", running" : ", paused"}`)),
+      el("button", { type: "button", class: "ghost-link tmr-toggle", onclick: toggleTimer,
+        title: t.running ? "Pause the clock — nothing is lost, and you can start it again at any point"
+          : "Start the clock again from where it stopped" },
+        t.running ? "Pause" : "Resume"));
+    if (t.running) startTimerInterval();
+  }
+
+  // The decision shows in three places — the chip, the report's front page and
+  // Focus's finish step — and only one of the last two is ever in the document.
+  function repaintTimerSurfaces() {
+    renderTimer();
+    renderReport();                                 // no-op unless the workbench is live
+    if (focusLive()) renderFocus({ focus: false }); // …and this is the other half
+  }
+
+  /* Does the operator want the time in the deliverable? Asked once, at export —
+     the moment the report becomes something somebody else reads — and answerable
+     either way without leaving the export. Kept as a tri-state (null = not yet
+     asked) so a "no" is a decision the tool remembers rather than a question it
+     keeps re-asking. */
+  function timerExportPrompt() {
+    const t = timerState();
+    if (t.record != null || timerElapsed() < 60000) return; // nothing worth recording yet
+    t.record = confirm(
+      `This assessment took ${fmtDuration(timerElapsed())}.\n\n`
+      + "Record that at the head of the report?\n\n"
+      + "It appears as one phrase on the report's first line, with the assessment date."
+      + " You can change this any time from the report's front page.");
+    save();
+    // Deferred on purpose. This runs inside the export button's own click
+    // handler, and Focus's finish step ADOPTS that button — repainting now would
+    // re-parent the node mid-handler. The export itself reads state, never the
+    // DOM, so the repaint is free to wait for the handler to finish.
+    setTimeout(repaintTimerSurfaces, 0);
+  }
+
+  // The same decision, as a control that stays put: on the report's front page in
+  // the workbench, and on the finish step in Focus. One implementation, so the two
+  // can never disagree about what the report is going to say.
+  function timerRecordRow() {
+    const t = timerState();
+    const ms = timerElapsed();
+    if (!ms) return null;
+    const cb = el("input", { type: "checkbox", id: "tmr-record",
+      onchange: (e) => { t.record = e.target.checked; save(); repaintTimerSurfaces(); } });
+    cb.checked = t.record === true;
+    return el("p", { class: "tmr-record" },
+      el("label", { for: "tmr-record" }, cb,
+        el("span", {}, `Record the time taken (${fmtDuration(ms)}) at the head of the report`)),
+      el("span", { class: "tmr-record-note" },
+        t.record === true ? "It appears with the assessment date on the first line." : "Off — the report says nothing about how long it took."));
+  }
+
+  // The phrase itself, or "" when it isn't wanted. One definition, read by the
+  // report pane, the print view, the HTML export and the JSON.
+  function timerReportPhrase() {
+    const t = timerState();
+    const ms = timerElapsed();
+    return (t.record === true && ms) ? `compiled in ${fmtDuration(ms)}` : "";
+  }
+
+  // What rides in the saved payload: time already earned, plus enough to tell a
+  // page reload from a tab that was shut for the night.
+  function timerSaveState() {
+    const t = timerFold();
+    return { ms: t.ms, running: !!t.running, at: t.running ? t.at : 0, offered: !!t.offered, record: t.record };
+  }
+  // …and back. A clock that was running when the tab went away resumes only if the
+  // gap is short enough to be a reload; otherwise the banked time is kept and the
+  // clock comes back paused, because nobody was working in between.
+  function timerRestore(saved) {
+    const t = freshTimer();
+    if (!saved || typeof saved !== "object") return t;
+    t.ms = Math.max(0, +saved.ms || 0);
+    t.offered = !!saved.offered;
+    t.record = saved.record === true ? true : (saved.record === false ? false : null);
+    const gap = saved.at ? Date.now() - saved.at : Infinity;
+    if (saved.running && gap >= 0 && gap < TIMER_RESUME_GRACE) {
+      // The grace window decides whether this was a reload; TIMER_CREDIT_CAP
+      // decides how much of the gap is credited. They are different questions —
+      // a save lands every TIMER_SAVE_EVERY ticks, so a real reload's unbanked
+      // gap is that plus the page load, and anything beyond it was not worked.
+      t.ms += Math.min(gap, TIMER_CREDIT_CAP);
+      t.running = true; t.at = Date.now();
+    }
+    return t;
+  }
+
   // ---------------------------------------------------------------- report
   // Report sections mirror the ESS proforma. The definition is the single
   // source of truth in data/sources.json (`report_sections`) so the browser
@@ -4859,27 +5219,109 @@
     return !!opts && opts.indexOf((rstate && rstate.choice) || "") >= 1;
   }
 
-  // Flag the mistakes the human sheets are full of: a standardized statement that
-  // contradicts the section's evidence, or a "matters present" statement left with
-  // no supporting detail. Only applies to the none/known-scale dropdowns (their
-  // first option starts "There are no…"); skips the biosecurity treatment scale.
-  // `ev` (the section's included cards) is passed in by the roll-up, which groups
-  // every card by section in one pass rather than re-filtering the source list
-  // eleven times per keystroke; on its own it falls back to the per-section query.
-  function sectionWarnings(section, rstate, ev) {
+  /* ------------------------------------------ does the NOTE describe a matter?
+     The consistency checker's second signal, and the one that used to be
+     un-clearable. It scanned every note with one generic keyword list —
+     critically|endangered|…|declared|heritage|… — so a note that said the honest
+     thing tripped it:
+
+       Permits            "…the Aboriginal Cultural Heritage Act 2003 duty of care
+                           applies…"                                   → "heritage"
+       Indigenous areas   "No declared Indigenous Protected Area at or near the
+                           site…"                                      → "declared"
+
+     Both notes say a matter is ABSENT, and both raised "the notes indicate matters
+     were found" against a "there are no known…" statement. Nothing the operator
+     could do cleared it: the statement was right, the note was right, and the only
+     way to silence the check was to delete true words from a government report.
+
+     Two rules fix the class, rather than these two sentences:
+
+       SCOPED   each section asks about ITS OWN kind of matter. A heritage word in
+                the Permits note is not a permits matter, and the statute's name is
+                not a heritage place. The generic list could not tell the
+                difference because it never knew which section it was reading.
+
+       NEGATED  a clause that DENIES its matter word doesn't assert one. "No
+                declared…", "not within…", "nearest … 50 km away", "outside…" are
+                how these reports say "not here", and they are the commonest
+                sentences in the whole proforma.
+
+     It stays a heuristic over free prose, so it can still be wrong — which is why
+     every check it raises can be dismissed (see sectionChecks). Precision first:
+     a warning that cries wolf on honest wording is worse than one that misses,
+     because the operator learns to scroll past all of them. */
+  const SECTION_MATTER_RE = {
+    permits: /\b(permit|permits|permission|permissions|licence|license|approval|consent|authorisation|authorization|access agreement)\b/i,
+    threatened_habitat: /\b(critically endangered|endangered|vulnerable|threatened|listed|ramsar|ecological communit\w*|remnant|of concern)\b/i,
+    threatened_flora: /\b(critically endangered|endangered|vulnerable|threatened|listed)\b/i,
+    threatened_fauna: /\b(critically endangered|endangered|vulnerable|threatened|listed|migratory)\b/i,
+    indigenous_areas: /\b(indigenous protected area\w*|ipas?|native title|aboriginal freehold|dogit|land trust)\b/i,
+    heritage: /\b(heritage|ramsar|listed place\w*|registered place\w*|world heritage|national heritage)\b/i,
+    invasive_plants: /\b(weed|weeds|invasive|declared|restricted|prohibited|infestation\w*)\b/i,
+    invasive_animals: /\b(pest|pests|feral|invasive|declared|restricted|prohibited|infestation\w*)\b/i,
+    diseases: /\b(disease\w*|pathogen\w*|outbreak\w*|infect\w*|infestation\w*|rust|chytrid|dieback|virus\w*|blight\w*)\b/i,
+  };
+  // The words a clause uses to deny, or to distance, whatever it goes on to name.
+  // "nearest / closest / beyond / outside" earn their place beside the plain
+  // negators: "the nearest IPA is Guanaba, ~50 km east-north-east" is this
+  // proforma's standard way of writing "there isn't one here".
+  const NEGATED_CLAUSE_RE = new RegExp("\\b(no|not|none|nil|never|nothing|neither|nor|without|" +
+    "absent|excluded?|nearest|closest|beyond|outside|unlikely|free of|clear of)\\b", "i");
+  // Clause, not sentence: these notes are one long sentence joined by dashes,
+  // semicolons and parentheses, and a negation only governs its own clause.
+  function noteAssertsMatter(section, note) {
+    const re = section && SECTION_MATTER_RE[section.id];
+    if (!re || !note) return false;
+    return note.split(/[.;:\n]|\s[-–—]\s|[()]/)
+      .some((clause) => re.test(clause) && !NEGATED_CLAUSE_RE.test(clause));
+  }
+
+  /* --------------------------------------------- the section's own consistency
+     Flag the mistakes the human sheets are full of: a standardized statement that
+     contradicts the section's evidence, or a "matters present" statement left with
+     no supporting detail. Only applies to the none/known-scale dropdowns (their
+     first option starts "There are no…"); skips the biosecurity treatment scale.
+     `ev` (the section's included cards) is passed in by the roll-up, which groups
+     every card by section in one pass rather than re-filtering the source list
+     eleven times per keystroke; on its own it falls back to the per-section query.
+
+     Returns EVERY check that fires, each with a stable `key` and whether the
+     operator has already dismissed it. sectionWarnings() below is the open ones,
+     which is what every existing caller — the roll-up, the header count, the
+     export guard, the JSON — means by "warnings".
+
+     A dismissal is judgement about the state that was reviewed, not a permanent
+     mute: the key carries WHAT fired the check, so the same check comes back the
+     moment its grounds change (a new Found source lands in the section, another
+     source goes unchecked). That is the difference between "I've looked at this
+     and it's fine" and switching the checker off. */
+  function sectionChecks(section, rstate, ev) {
     const opts = statementScale(section);
     if (!opts) return [];
     const idx = opts.indexOf(rstate.choice || "");
     if (idx < 0) return [];
     ev = ev || includedCardsForSection(section.id);
-    const anyFound = ev.some((x) => x.f.status === "found");
-    const note = rstate.note || "";
-    const noteHasMatter = /\b(critically|endangered|vulnerable|threatened|listed|weed|weeds|pest|pests|declared|heritage|ramsar|world heritage)\b/i.test(note);
-    const w = [];
-    if (idx === 0 && (anyFound || noteHasMatter))
-      w.push('Statement says "no known…" but the evidence or notes indicate matters were found — reconsider the statement or the note.');
-    if (idx >= 1 && !anyFound && !note.trim())
-      w.push("Statement indicates matters are present, but no supporting detail is recorded — add the specifics.");
+    const found = ev.filter((x) => x.f.status === "found");
+    const noteMatter = noteAssertsMatter(section, rstate.note || "");
+    const dismissed = Array.isArray(rstate.dismissed) ? rstate.dismissed : [];
+    const out = [];
+    const add = (key, msg) => out.push({ key, msg, dismissed: dismissed.includes(key) });
+
+    // Two different mistakes wore one sentence, so the operator could not tell
+    // which half to go and look at. They are separate checks now, and each names
+    // the thing it read.
+    if (idx === 0 && found.length)
+      add(`contradiction:evidence:${found.map((x) => x.src.id).sort().join(",")}`,
+        `Statement says "no known…", but ${found.length} included source${found.length === 1 ? "" : "s"} came back Found`
+        + ` (${found.slice(0, 2).map((x) => x.src.name).join(", ")}${found.length > 2 ? ` and ${found.length - 2} more` : ""})`
+        + " — reconsider the statement, or re-route those sources.");
+    if (idx === 0 && noteMatter)
+      add("contradiction:note",
+        'Statement says "no known…", but this section\'s note reads as describing a matter that IS present'
+        + " — reconsider the statement, or the wording of the note.");
+    if (idx >= 1 && !found.length && !(rstate.note || "").trim())
+      add("unsupported", "Statement indicates matters are present, but no supporting detail is recorded — add the specifics.");
     // The section states a conclusion while some of the sources behind it were
     // never opened — an interactive-only portal still to be queried, or a search
     // that failed. That is precisely the class of error this checker exists to
@@ -4891,10 +5333,91 @@
       // paragraph, and the caveat strip below it already lists every one.
       const names = unchecked.slice(0, 2).map((x) => x.src.name).join(", ");
       const rest = unchecked.length - 2;
-      w.push(`This section's statement asserts a conclusion, but ${unchecked.length} of its sources ${unchecked.length === 1 ? "has" : "have"} not been checked: `
+      add(`unchecked:${unchecked.map((x) => x.src.id).sort().join(",")}`,
+        `This section's statement asserts a conclusion, but ${unchecked.length} of its sources ${unchecked.length === 1 ? "has" : "have"} not been checked: `
         + `${names}${rest > 0 ? ` and ${rest} more` : ""}.`);
     }
-    return w;
+    return out;
+  }
+
+  // The open ones, as plain strings — the shape every caller of this has always
+  // taken (the header count, the export guard, `sections[].warnings` in the JSON).
+  function sectionWarnings(section, rstate, ev) {
+    return sectionChecks(section, rstate, ev).filter((c) => !c.dismissed).map((c) => c.msg);
+  }
+
+  // Record (or undo) the operator's "I've looked at this and it's fine". Kept on
+  // the section's own state, so it persists with the report and travels with it
+  // between the two modes.
+  function setCheckDismissed(sectionId, key, dismissed) {
+    const rstate = state.report[sectionId] || (state.report[sectionId] = newReportState(sectionId));
+    const list = Array.isArray(rstate.dismissed) ? rstate.dismissed : (rstate.dismissed = []);
+    const at = list.indexOf(key);
+    if (dismissed && at < 0) list.push(key);
+    else if (!dismissed && at >= 0) list.splice(at, 1);
+    save();
+  }
+
+  /* ------------------------------------ "Insert suggested detail", and undoing it
+     The draft button appends a paragraph assembled from the section's evidence and
+     the standard wording. It is one click, it can add several hundred words, and
+     until now the only way back was to select them and delete — over a note the
+     operator may have spent ten minutes on, with nothing to say where the inserted
+     text began.
+
+     So the button becomes its own undo. One control, in one place: press it and it
+     is "Undo insert" until the inserted text is disturbed, then it is the draft
+     button again. That last part is the whole safety of it — an undo that fires
+     after the operator has edited the draft would silently throw their edit away,
+     so the offer stands only while the note is still EXACTLY what the insert left
+     behind. Anything else typed into it, and there is nothing safe left to undo.
+
+     The record is module-level rather than on the section state: it is about the
+     last few seconds of typing, not about the report, and it has no business
+     surviving a reload or travelling into an export. */
+  const suggestUndo = new Map(); // sectionId -> { before, after }
+  const suggestPainters = new WeakMap(); // the action row -> how to repaint it
+
+  function suggestionAction(section, rstate, ta, opts) {
+    const o = opts || {};
+    const row = el("div", { class: o.class || "r-actions" });
+    const paint = () => {
+      const undo = suggestUndo.get(section.id);
+      // Still untouched since the insert? Then, and only then, there is an undo.
+      const live = undo && undo.after === (rstate.note || "");
+      if (undo && !live) suggestUndo.delete(section.id);
+      const write = (text) => {
+        ta.value = text;
+        rstate.note = text;
+        paint();
+        if (o.after) o.after();
+      };
+      row.replaceChildren(live
+        ? el("button", { type: "button", class: "btn-mini btn-undo",
+          title: "Take the suggested paragraph back out and restore the note exactly as it was",
+          onclick: () => { const u = suggestUndo.get(section.id); suggestUndo.delete(section.id); write(u.before); } },
+          "↶ Undo insert")
+        : el("button", { type: "button", class: "btn-mini",
+          title: "Draft this section from the collected evidence and standard wording (appends; never overwrites)",
+          onclick: () => {
+            const before = ta.value || "";
+            const cur = before.trim();
+            const after = cur ? cur + "\n\n" + o.suggestion : o.suggestion;
+            suggestUndo.set(section.id, { before, after });
+            write(after);
+          } }, "Insert suggested detail"));
+    };
+    suggestPainters.set(row, paint);
+    paint();
+    return row;
+  }
+
+  // The offer has to be re-read on every keystroke — typing into the note is what
+  // retires it. refreshSection already runs there, for the warnings.
+  function refreshSuggestAction(box) {
+    const row = box && box.querySelector(".r-suggest");
+    const paint = row && suggestPainters.get(row);
+    if (paint) paint();
   }
 
   // Rendering the report has always been where a section's state is first created
@@ -4960,6 +5483,10 @@
       id: `rsec-${IDENTITY_SECTION}` });
     box.append(el("div", { class: "rsec-head" }, el("h3", {}, "Site and location"),
       identityReviewToggle(box)));
+    // The optional timing line, where it will actually print — the report's first
+    // page — and switchable from here whichever way it was answered at export.
+    const timing = timerRecordRow();
+    if (timing) box.append(timing);
     const maps = reportMapsBlock(), photos = reportPhotosBlock();
     if (maps) box.append(maps);
     if (photos) box.append(photos);
@@ -5064,18 +5591,13 @@
       box.append(el("div", { class: "r-field" }, ta));
 
       // Draft a standardized paragraph from the evidence + standard wording. Fills
-      // an empty note, or appends below existing text — never overwrites.
+      // an empty note, or appends below existing text — never overwrites. And,
+      // once pressed, becomes the way back out of it (see suggestionAction).
       const suggestion = sectionNarrative(section);
-      if (suggestion) {
-        const btn = el("button", { class: "btn-mini", type: "button",
-          title: "Draft this section from the collected evidence and standard wording (appends; never overwrites)",
-          onclick: () => {
-            const cur = (ta.value || "").trim();
-            ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
-            rstate.note = ta.value; refreshSection(section, box, rstate); save();
-          } }, "Insert suggested detail");
-        box.append(el("div", { class: "r-actions" }, btn));
-      }
+      if (suggestion) box.append(suggestionAction(section, rstate, ta, {
+        suggestion, class: "r-actions r-suggest",
+        after: () => { refreshSection(section, box, rstate); save(); },
+      }));
 
       // Included sources: each card the operator added to THIS section contributes
       // its status, notes and photos — split by what the entry actually is (see
@@ -5799,14 +6321,40 @@
     if (detail) detail.textContent = map[rstate.choice] || "";
   }
 
-  // Repaint just this section's consistency warnings (called live as the note or
-  // the dropdown changes, without re-rendering the whole report).
+  /* Repaint just this section's consistency warnings (called live as the note or
+     the dropdown changes, without re-rendering the whole report).
+
+     Every warning carries its own way out. These are heuristics reading free
+     prose: they will sometimes be wrong, and a wrong one used to be a dead end —
+     the statement was right, the note was right, and the only thing that silenced
+     the check was deleting true words from the report. "Not an issue" is what the
+     operator can now say instead, and saying it is recorded rather than lost, so
+     the count in the header and the export guard agree with what they decided.
+
+     Dismissed checks stay listed, greyed and restorable: a dismissal has to be
+     visible to be trusted, and one made in the wrong section has to be undoable.
+     They come back on their own the moment their grounds change — see
+     sectionChecks for what each key carries. */
   function renderReportWarnings(section, box, rstate) {
     const holder = box.querySelector(".r-warns");
     if (!holder) return;
     holder.innerHTML = "";
-    sectionWarnings(section, rstate).forEach((msg) =>
-      holder.append(el("p", { class: "r-warn" }, "⚠ ", msg)));
+    const checks = sectionChecks(section, rstate, undefined);
+    checks.forEach((c) => {
+      const row = el("p", { class: "r-warn" + (c.dismissed ? " is-dismissed" : "") },
+        el("span", { class: "r-warn-msg" }, c.dismissed ? "✓ " : "⚠ ", c.msg));
+      row.append(el("button", {
+        type: "button", class: "r-warn-act",
+        title: c.dismissed
+          ? "Put this check back — it will be counted again on the report header and at export"
+          : "You've looked at this and the section is right as written. It stops being counted, and comes back if the evidence changes.",
+        onclick: () => {
+          setCheckDismissed(section.id, c.key, !c.dismissed);
+          refreshSection(section, box, rstate);
+        },
+      }, c.dismissed ? "Restore" : "Not an issue"));
+      holder.append(row);
+    });
   }
 
   // One section was edited: repaint its warnings, then the header's roll-ups —
@@ -5814,6 +6362,7 @@
   // for a keystroke; nothing here re-renders the report.
   function refreshSection(section, box, rstate) {
     renderReportWarnings(section, box, rstate);
+    refreshSuggestAction(box); // typing into the note is what retires the undo
     renderReportHeader();
     refreshSummaryCard(); // a statement change can move a marker on the summary card
   }
@@ -7007,7 +7556,7 @@
       "aria-label": `Your note on ${src.name}`,
       placeholder: notePlaceholder(src),
       oninput: (e) => { f.note = e.target.value; save(); autoGrow(e.target); },
-      onchange: () => { renderReport(); },
+      onchange: () => { renderReport(); refreshImageTriggers(src.id); },
     });
     note.value = f.note || "";
 
@@ -7252,15 +7801,10 @@
     // Drafts from THIS section's evidence plus the standard wording. Appends below
     // whatever is already written; it has never overwritten and must not start.
     const suggestion = sectionNarrative(section);
-    if (suggestion) detail.append(el("div", { class: "fx-actions" },
-      el("button", { type: "button", class: "btn-mini",
-        title: "Draft this section from the collected evidence and standard wording (appends; never overwrites)",
-        onclick: () => {
-          const cur = (ta.value || "").trim();
-          ta.value = cur ? cur + "\n\n" + suggestion : suggestion;
-          rstate.note = ta.value;
-          refreshSection(section, body, rstate); save(); autoGrow(ta);
-        } }, "Insert suggested detail")));
+    if (suggestion) detail.append(suggestionAction(section, rstate, ta, {
+      suggestion, class: "fx-actions r-suggest",
+      after: () => { refreshSection(section, body, rstate); save(); autoGrow(ta); },
+    }));
     // The proforma's own hyperlink for the invasive / disease sections.
     const ref = section.ref && state.site && state.site.refs && state.site.refs[section.ref];
     if (ref) detail.append(el("p", { class: "fx-sec-ref" }, "Reference: ",
@@ -7392,6 +7936,14 @@
           + "Once the report leaves the app nobody can act on them, so this is the moment to.")));
     }
 
+    // ---- 4b. the timing line, if this one was timed ---------------------------
+    // The same control the report's front page carries, from the same helper, so
+    // the decision is reachable in the mode that has no report pane — and answered
+    // before the export rather than in a dialog on top of it.
+    const timing = timerRecordRow();
+    if (timing) body.append(el("div", { class: "fx-zone" },
+      el("span", { class: "zone-label" }, "Time taken"), timing));
+
     // ---- 5, 6 and 7 — everything that takes the report out of the app --------
     const tools = el("div", { class: "fx-actions fx-finish-out" });
     // Export first, because it is what this step is for. The menu is the report
@@ -7490,6 +8042,9 @@
       qldMap: qldMapTextState(),
       date: state.date,
       maintenance: state.maintenance,
+      // Time already earned on this assessment (see timerSaveState — it folds the
+      // running part in first, so a shut tab loses seconds rather than hours).
+      timer: timerSaveState(),
       // Presentation state that belongs to this site rather than the browser: which
       // categories the operator has explicitly folded away or kept open, and which
       // slice of the list they were working — so reopening a site keeps their place.
@@ -7595,6 +8150,7 @@
         : { selection: null, capture: null };
       state.date = d.date || state.date;
       state.maintenance = d.maintenance || "";
+      state.timer = timerRestore(d.timer);
       state.groupOpen = (d.ui && d.ui.groups && typeof d.ui.groups === "object") ? { ...d.ui.groups } : {};
       state.filter = (d.ui && FILTERS[d.ui.filter]) ? d.ui.filter : "all";
       state.flow = normalizeFlow(d.ui && d.ui.flow);
@@ -7720,6 +8276,11 @@
         };
       }),
       collection_log: buildFindings(),
+      // Only present when the operator chose to record it (see timerReportPhrase).
+      // `minutes` is the number a benchmark is actually computed from; `phrase` is
+      // the wording the printed report carries, so the two can't drift.
+      time_taken: timerReportPhrase()
+        ? { minutes: Math.round(timerElapsed() / 60000), phrase: timerReportPhrase() } : null,
       // Queensland Globe map provenance. Top-level (not nested under `site`) so
       // a consumer can find the layer list without walking the site block, and
       // so a re-import can rebuild the appendix even without the picture.
@@ -7851,7 +8412,7 @@
     const appendixBlock = appendixHtml();
     return `<div class="pr">
       <h1>Environmental Site Summary — ${esc(s.name)}</h1>
-      <p>Assessment date: ${esc(s.assessment_date || "")} · Generated ${esc(r.generated.slice(0, 10))}${r.data_version ? " · station data " + esc(r.data_version.slice(0, 10)) : ""}</p>
+      <p>Assessment date: ${esc(s.assessment_date || "")} · Generated ${esc(r.generated.slice(0, 10))}${r.data_version ? " · station data " + esc(r.data_version.slice(0, 10)) : ""}${r.time_taken ? " · " + esc(r.time_taken.phrase) : ""}</p>
       <div class="pr-sec"><h2>Site</h2>
         <table>
           <tr><td class="k">Station Number</td><td>${esc(s.station_num || "—")}</td><td class="k">WMO</td><td>${esc(s.wmo || "—")}</td></tr>
@@ -8108,6 +8669,10 @@
         if (!ok) { showReportSection(first.id); return; }
         exportWarned.add(key);
       }
+      // …and, once the export is actually going ahead, the second question: if the
+      // operator timed themselves, does that time go in the deliverable? Asked here
+      // rather than above so an export they back out of never asks it.
+      if (state.site) timerExportPrompt();
       run(e);
     };
   }
@@ -9785,6 +10350,16 @@
     // The way out for anything that goes wrong in here — wired unconditionally, so
     // it is reachable on a page where the data load failed and nothing else works.
     wireFeedback();
+
+    /* Bank the page's state on the way out. save() is debounced, and the running
+       clock is banked on a 15-second cadence, so a tab closed mid-sentence could
+       otherwise lose the last few seconds of both. pagehide fires on a close, a
+       navigation and a mobile app switch, where beforeunload does not. */
+    window.addEventListener("pagehide", () => {
+      if (!state.site) return;
+      save();      // arms the debounce with the clock folded in (see timerSaveState)
+      flushSave(); // …and writes it before the page goes
+    });
 
     // The how-to guide: shown once as a welcome, then only on demand from the ?
     // in the collection header. "Got it" both closes it and settles the question

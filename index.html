@@ -74,6 +74,12 @@
            (destructive, no undo) is not one mis-tap away from a half-finished
            assessment. The same nodes move rather than being duplicated, so there
            is still only one theme button — and one mode button — to keep in sync. -->
+      <!-- The optional stopwatch. It rides in the chrome, between the brand and
+           the preferences, because the offer to start it, the clock and the pause
+           all have to be reachable from every screen in BOTH modes — and because
+           a stopwatch is emphatically not the work. Empty and hidden until a site
+           is loaded; everything in it is built by renderTimer() in assets/app.js. -->
+      <div class="topbar-timer" id="timer" hidden></div>
       <div class="topbar-meta-wrap">
         <button class="ghost-link topbar-more" id="btn-topbar-more" type="button"
                 aria-expanded="false" aria-controls="topbar-meta"

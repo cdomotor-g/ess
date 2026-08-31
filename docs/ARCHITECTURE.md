@@ -378,6 +378,11 @@ Vanilla JS, no dependencies, no build. It:
   text key's `ui` block carries the per-site presentation state: `ui.groups`
   (category collapses), `ui.filter`, `ui.flow` (how far step 3 got) and
   `ui.focus.step` (Focus mode's cursor — see below);
+- offers an **optional per-site stopwatch** (`state.timer`, banked into the text
+  key on the same cadence as everything else) — three separate opt-ins: start,
+  pause/resume, and whether the elapsed time goes in the deliverable. Only the
+  third reaches an export, as one phrase on the report's meta line and
+  `time_taken` in the JSON;
 - exports Print/PDF, self-contained HTML, and a JSON findings object — photos
   are embedded inline in all three. The consistency warnings are **not** written
   into the handover artefacts (Print/PDF, HTML): they address the operator about
@@ -386,6 +391,88 @@ Vanilla JS, no dependencies, no build. It:
   in the *Check report* prompt and in `sections[].warnings` in the JSON (working
   state that round-trips back into the tool, not a document); `guardExport` is
   what stops unresolved ones leaving unnoticed.
+
+#### The optional timer
+The claim this tool exists to make is that it beats the spreadsheet-and-tabs
+method, and a number nobody records is a claim nobody can check. So there is an
+opt-in stopwatch, and it is three *separate* decisions rather than one: offered
+once per site (a clock nobody asked for running in the corner of a government tool
+is pressure, not data), paused and resumed at any point (a benchmark that counts a
+lunch break as assessment time is worse than none), and — asked separately, at
+export — whether the elapsed time goes in the deliverable, because *"I timed
+myself"* and *"put my time in the handover document"* are not the same consent.
+That last decision is a tickbox on the report's front page and on Focus's finish
+step (one `timerRecordRow`, so the two cannot disagree), changeable whichever way
+it was first answered.
+
+State is `state.timer = { ms, running, at, offered, record }`, per site, in the
+text key. The invariant is that it must never claim time nobody worked: `ms` is
+*banked as it is earned* (`timerFold` on every tick, every pause and every save),
+so a tab closed for the night loses seconds rather than counting the night.
+`timerRestore` credits the one gap that is real work interrupted — a page reload,
+bounded by `TIMER_RESUME_GRACE` — and otherwise comes back paused. The chip lives
+in the top bar because the offer, the clock and the pause must be reachable from
+every screen in both modes, and because a stopwatch is emphatically not the work;
+the tick never re-renders the report (that is a once-a-second full render), only
+the readout.
+
+#### A heuristic that cannot be cleared is a defect
+The consistency checker reads free prose, so it will sometimes be wrong. What made
+that a bug rather than a limitation was that a wrong warning had **no exit**: the
+statement was right, the note was right, and the only thing that silenced the
+check was deleting true words from a government report. Two halves of a fix:
+
+- **Fewer false positives.** The note scan was one generic keyword list —
+  `critically|endangered|…|declared|heritage|…` — applied to all eleven sections,
+  which fired *"the notes indicate matters were found"* against notes saying the
+  exact opposite: *"No **declared** Indigenous Protected Area at or near the
+  site"*, *"the Aboriginal Cultural **Heritage** Act 2003 duty of care applies"*
+  under **Permits**. It is now **section-scoped** (`SECTION_MATTER_RE` — each
+  section asks about its own kind of matter, so a statute's name is not a heritage
+  place) and **negation-aware** (`NEGATED_CLAUSE_RE`, per clause rather than per
+  note, and counting *"nearest / outside / beyond"* as distancing, because that is
+  how this proforma says "not here").
+- **An exit that is always there.** `sectionChecks` returns every check that fires
+  with a stable `key`; **Not an issue** records it on `state.report[id].dismissed`
+  and the check stops being counted by `sectionWarnings` — and therefore by
+  `reportRollup`, the header count, `guardExport` and `sections[].warnings`.
+  Dismissed checks stay rendered (greyed, with **Restore**): a dismissal nobody can
+  see is a dismissal nobody can trust. The key carries *what fired the check* (the
+  Found source ids, the unchecked source ids), so a dismissal is judgement about
+  the state that was reviewed, not a permanent mute — the same check returns the
+  moment its grounds change. An import never carries dismissals in: a fresh import
+  is a fresh review.
+
+Splitting the old single "contradicts its evidence **or** its note" sentence into
+two checks is part of the same fix — one sentence for two different mistakes left
+the operator unable to tell which half to go and look at.
+
+#### Why an unasked-for photo is here
+Auto-fetching is the feature and also the risk: the operator is handed a picture
+nobody asked for, attached to a government report, and the reasoning behind it was
+invisible. *"Cane toad"* in a note fetching a photo of a cane toad is right; a
+stray binomial in a pasted result fetching a photo of something nobody meant is
+wrong, and the two arrive looking identical.
+
+So `autoFetchImages` records the `term` that fetched each photo, and
+`renderImageTriggers` shows the working under the photo strip: the triggering word
+`<mark>`ed inside a short quotation of the text it was read out of
+(`triggerSnippet`, word-boundary matched over `findingText`), next to the article
+it resolved to. One line per photo is enough to accept it or delete it. A term no
+longer present in the text gets its own `--caution`-marked row — a photo that has
+outlived what fetched it is the one most worth a second look.
+
+Two constraints on it:
+
+- **It never touches the text.** The note is a live `<textarea>`; the highlight is
+  a *quotation* rendered beside it, so nothing is ever marked up under a caret.
+  It is re-read on the note's `change` (blur) via `refreshImageTriggers`, which
+  replaces just that node — re-rendering the card per keystroke is the typing lag
+  the card densities exist to avoid.
+- **It never reaches the report.** `term` is absent from `exportImage()`, so it is
+  in no artefact; the strip is rendered only by `renderPhotoBlock` (the collection
+  card and Focus's source step), never by the report pane or `photosHtml`. It is
+  the operator checking the tool's homework, not a finding.
 
 #### The auto-fetch queue
 Reference photos are now fetched **without being asked**, so the cost of fetching
@@ -607,16 +694,21 @@ right?* — in five parts, in the order a person answers them:
    pre-suggests it from the evidence), and for Biosecurity the derived declaration
    text (`syncBioDetail`, painted into the same `#bio-detail` id the report pane
    uses; only one mode's copy is ever in the document).
-2. **⚠ Anything inconsistent** — `sectionWarnings`, inline, live on every keystroke
-   and every change of the statement (`refreshSection`). **This is the step those
-   warnings were written for.** In the workbench they sit in the right pane, where
-   an operator concentrating on collection may never look; here they are on screen
-   at the moment the operator is deciding, which is the only moment they can act on
-   them. They remain screen-only and never reach the exported artefact.
+2. **⚠ Anything inconsistent** — `sectionChecks` / `sectionWarnings`, inline, live
+   on every keystroke and every change of the statement (`refreshSection`). **This
+   is the step those warnings were written for.** In the workbench they sit in the
+   right pane, where an operator concentrating on collection may never look; here
+   they are on screen at the moment the operator is deciding, which is the only
+   moment they can act on them. They remain screen-only and never reach the
+   exported artefact. Each row carries **Not an issue** / **Restore** — the same
+   control, the same state and the same tally as the report pane's copy.
 3. **The detail** — the free-text note, with **Insert suggested detail**
-   (`sectionNarrative`) drafting from this section's evidence plus
-   `statements.json`. It appends below whatever is written; it has never
-   overwritten and must not start.
+   (`suggestionAction` / `sectionNarrative`) drafting from this section's evidence
+   plus `statements.json`. It appends below whatever is written; it has never
+   overwritten and must not start. Once pressed it becomes **↶ Undo insert**, and
+   stays that only while the note is still *exactly* what the insert left behind —
+   an undo that fired after the operator edited the draft would silently throw
+   their edit away.
 4. **What it rests on** — `renderSectionEvidence`, unchanged: *Findings* at full
    weight, *Checked, nothing found* on one line, *⚠ Not yet checked* as a caveat
    strip. A collapsed entry's photographs are not collapsed with it.
