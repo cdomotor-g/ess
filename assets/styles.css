@@ -2305,6 +2305,16 @@ button.glance-hit:hover { background: var(--surface); border-color: var(--line);
 /* A section with no applicable source is still listed — "we considered permits and
    none apply here" is information — but it is the quietest row on the card. */
 .r-sum-row[data-sum="na"] .r-sum-hit { color: var(--ink-soft); }
+/* What is actually holding this row at "not fully checked", and the way to it.
+   Indented to the marker column so it reads as a footnote to its own row, not as
+   another row. Screen only — the exported card carries the marker and the words
+   alone (see summaryHtml). */
+.r-sum-open { margin: var(--sp-0) 0 var(--sp-1); padding-left: calc(1.1em + var(--sp-3));
+  font-size: var(--fs-micro); color: var(--ink-soft); line-height: 1.5; }
+.r-sum-open-src { font: inherit; font-weight: 700; color: var(--brand); background: transparent;
+  border: 0; border-bottom: 1px dashed currentColor; padding: 0; cursor: pointer; text-align: left; }
+.r-sum-open-src:hover { border-bottom-style: solid; }
+.r-sum-open-note { font-style: italic; }
 /* Three columns stop fitting long before the words do; the section name drops to a
    second line under them rather than the state losing its wording. */
 @media (max-width: 620px) {

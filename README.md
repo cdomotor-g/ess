@@ -277,7 +277,13 @@ that pane, so the four steps are all you see until you go looking.
    report section — *Found — read this section*, *Not fully checked*, *Checked,
    nothing found*, *No sources apply* — marker **and** words, each row a jump to
    that section. It counts every applicable source, including ones not included
-   into the section they feed. In Focus mode the same card is held back to the
+   into the section they feed. On screen, a row that is **not fully checked** names
+   the sources still to answer and takes you to the first one — which matters most
+   on **Permits** and **Biosecurity**, each fed by a single *internal* source whose
+   notes never reach the report, so the section itself cannot show it and the marker
+   would otherwise look stuck. The marker reads each source's **result**, never your
+   review: ticking *Mark section reviewed*, or signing a card off, will not move it
+   and shouldn't. In Focus mode the same card is held back to the
    **finish step**: at the front-page step no source has been answered yet, so a
    summary there would only be an alarm about work you are on your way to do.
    Each section's evidence is grouped by what it actually is: **Findings** at full

@@ -4712,8 +4712,15 @@
   // silence was.
   function noteBlockedReason(src, f) {
     if (!src) return null;
+    // Notes, not the whole card. Saying "never reach the report" flat was true of
+    // the NOTES and false of the RESULT, and an operator who read it as "this card
+    // doesn't matter" signed it off and left the result Not checked — which on
+    // Permits and Biosecurity (each fed solely by an internal source) is the one
+    // thing holding their Findings at a glance row at "not fully checked", with
+    // nothing on either card or section saying so.
     if (src.internal)
-      return "Internal working item — notes here stay in the workbench. They never reach the report or any export.";
+      return "Internal working item — your notes here stay in the workbench and never reach the report or any export. "
+        + "Its result does count: it is what Findings at a glance says about this section, so record one.";
     if (!targetSectionOf(src, f))
       return `No report section covers this source's category (${src.category}), so notes here can't be placed in the report. Pick a section below to send them somewhere.`;
     return null;
@@ -5952,12 +5959,21 @@
     applicableSources().forEach((src) => {
       const f = state.findings[src.id] || {};
       const target = targetSectionOf(src, f);
-      if (target) (bySection[target] || (bySection[target] = [])).push(f);
+      if (target) (bySection[target] || (bySection[target] = [])).push({ src, f });
     });
     return REPORT_SECTIONS.map((sec) => {
-      const list = bySection[sec.id] || [];
+      const list = (bySection[sec.id] || []).map((x) => x.f);
       const foundCount = list.filter((f) => statusOf(f) === STATUS.FOUND).length;
-      const openCount = list.filter(isOutstanding).length;
+      // WHICH sources are outstanding, not just how many. A marker that says a
+      // section is unfinished without naming what is unfinished sends the operator
+      // to the section — where, for Permits and Biosecurity, there is nothing to
+      // find: both are fed solely by an INTERNAL source, and a section's own
+      // evidence view excludes those by design (see includedCardsForSection), so
+      // the one place that could explain the marker is blind to the source causing
+      // it. Naming them here is what closes that loop.
+      const open = (bySection[sec.id] || []).filter((x) => isOutstanding(x.f))
+        .map((x) => ({ id: x.src.id, name: x.src.name, internal: !!x.src.internal }));
+      const openCount = open.length;
       const rstate = state.report[sec.id] || {};
       // A "matters present" statement reads as a finding even with no found source
       // behind it: the operator has asserted it in the section's own words, and the
@@ -5967,7 +5983,7 @@
       else if (!list.length) st = "na";
       else if (openCount) st = "partial";
       else st = "clear";
-      return { section: sec.id, title: sec.title, state: st, foundCount, openCount };
+      return { section: sec.id, title: sec.title, state: st, foundCount, openCount, open };
     });
   }
 
@@ -6007,8 +6023,7 @@
     const list = el("ul", { class: "r-sum" });
     rows.forEach((r) => {
       const s = SUM_STATES[r.state];
-      list.append(el("li", { class: "r-sum-row", "data-sum": r.state, "data-section": r.section },
-        el("button", { type: "button", class: "r-sum-hit",
+      const hit = el("button", { type: "button", class: "r-sum-hit",
           title: `Go to ${r.title}`,
           "aria-label": `${s.label} — ${r.title}. Go to this section.`,
           onclick: () => showReportSection(r.section) },
@@ -6016,7 +6031,36 @@
           // the row's own label. The glyph is for eyes and for photocopiers.
           el("span", { class: "r-sum-mark", "aria-hidden": "true" }, s.glyph),
           el("span", { class: "r-sum-state" }, s.label),
-          el("span", { class: "r-sum-name" }, r.title))));
+          el("span", { class: "r-sum-name" }, r.title));
+      // A ◐ used to be a dead end. The row said a section was not fully checked and
+      // took you to that section — where the answer is not, because the outstanding
+      // source is a card in the OTHER pane, and for Permits and Biosecurity it is an
+      // internal one the section can never show. Ticking "Mark section reviewed"
+      // there does nothing to this marker (it reads the source's RESULT, never the
+      // operator's review), so the honest reading of the old row was "this will not
+      // clear and I cannot see why".
+      //
+      // So the row now names what is outstanding and hands over the route to it.
+      // Screen only: the exported card still carries the marker and the words alone
+      // (see summaryHtml) — naming unchecked sources is an instruction to the
+      // operator, and the reader of the artefact cannot act on it.
+      const li = el("li", { class: "r-sum-row", "data-sum": r.state, "data-section": r.section }, hit);
+      if (r.open && r.open.length) {
+        const first = r.open[0], rest = r.open.length - 1;
+        li.append(el("p", { class: "r-sum-open" },
+          el("span", { class: "r-sum-open-lead" },
+            `${r.open.length} source${r.open.length === 1 ? "" : "s"} still to answer: `),
+          el("button", { type: "button", class: "r-sum-open-src",
+            title: `Go to ${first.name} and record its result — that is what clears this marker`,
+            onclick: () => showSourceCard(first.id) }, first.name),
+          rest > 0 ? el("span", { class: "r-sum-open-rest" }, ` and ${rest} more`) : null,
+          // The trap this whole block exists for, said where it is being fallen into.
+          first.internal
+            ? el("span", { class: "r-sum-open-note" },
+              " — an internal working item. Its notes stay in the workbench, but its result still counts here.")
+            : null));
+      }
+      list.append(li);
     });
     return el("div", { class: "r-summary", role: "group", "aria-label": "Findings at a glance" },
       el("p", { class: "r-sum-verdict" }, summaryVerdict(rows)),
