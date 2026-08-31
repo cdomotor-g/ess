@@ -392,6 +392,34 @@ Vanilla JS, no dependencies, no build. It:
   state that round-trips back into the tool, not a document); `guardExport` is
   what stops unresolved ones leaving unnoticed.
 
+#### A marker has to name what is holding it
+The traffic-light card's **◐ Not fully checked** was a dead end of the same shape as
+the un-clearable warning above. `summaryRollup()` reads each source's **result**
+(`isOutstanding` — manual/failed/unset), never the operator's review, so ticking
+*Mark section reviewed* or signing a card off correctly does nothing to it — and
+the row said neither what was outstanding nor that review was the wrong lever.
+Pressing the row went to the report **section**, where the answer is not: the
+outstanding source is a card in the other pane.
+
+**Permits** and **Biosecurity** make it airtight. Each is fed by exactly one source
+(`permits-register`, `pope-leasing`), and both are `internal` — so the summary
+counts them (it reads `applicableSources()`) while the section's own evidence and
+its "N of its sources have not been checked" warning cannot even see them
+(`includedCardsForSection` excludes internal sources by design). The one surface
+that could have explained the marker was blind to the source causing it.
+
+So the rollup now carries `open: [{id, name, internal}]`, not just a count, and the
+row renders a footnote naming the first outstanding source as a button to its card
+— plus, for an internal one, the sentence that resolves the contradiction: *its
+notes stay in the workbench, but its result still counts here*. The card's own
+notice says the same thing from the other end (`noteBlockedReason`), because
+"notes never reach the report" was true of the notes and false of the result, and
+an operator who read it as "this card doesn't matter" left the result unset.
+
+Screen only: `summaryHtml` still carries the marker and the words alone. Naming
+unchecked sources is an instruction to the operator, and the reader of the artefact
+cannot act on it.
+
 #### The optional timer
 The claim this tool exists to make is that it beats the spreadsheet-and-tabs
 method, and a number nobody records is a claim nobody can check. So there is an
