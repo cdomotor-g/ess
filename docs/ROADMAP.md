@@ -70,6 +70,34 @@ slice. Each backlog item names the files to touch and how to verify.
   warnings still open names the count and offers to go to the first one.
   The **⚠ Not yet checked** caveat is the opposite case (a fact addressed to the
   reader) and stays in every export.
+- **A consistency warning always has a way out** — the note half of the
+  contradiction check used one generic keyword list for all eleven sections and
+  ignored negation, so honest wording tripped it (*"**No declared** Indigenous
+  Protected Area at or near the site"*; *"the Aboriginal Cultural **Heritage** Act
+  2003 duty of care applies"* filed under **Permits**) — and nothing the operator
+  could do cleared it. The scan is now section-scoped (`SECTION_MATTER_RE`) and
+  negation-aware per clause (`NEGATED_CLAUSE_RE`), evidence and note are separate
+  checks so each names what it read, and **every** check carries **Not an issue** /
+  **Restore** (`sectionChecks`, `state.report[id].dismissed`). A dismissal is
+  judgement about the state that was reviewed — its key carries what fired the
+  check, so it returns when the evidence behind it changes — and dismissed checks
+  stay visible rather than vanishing.
+- **Undo for Insert suggested detail** — the draft button becomes **↶ Undo
+  insert** once pressed, restoring the note exactly, and retires itself the moment
+  anything is typed into the note (an undo that fired after an edit would throw the
+  edit away). Both modes, one implementation (`suggestionAction`).
+- **Why an unasked-for photo is here** — every auto-fetched reference photo now
+  records the `term` that fetched it, and the card shows the triggering word
+  `<mark>`ed in a quotation of the text it was read out of, next to the article it
+  resolved to; a word since edited out of the note gets its own caution row. Screen
+  only — absent from `exportImage()`, so it reaches no artefact and no report pane.
+- **Optional assessment timer** — a per-site stopwatch in the header, for
+  benchmarking this tool against the old method. Three separate opt-ins: offered
+  once per site, paused/resumed at any point, and (asked separately, at export)
+  whether the elapsed time goes in the deliverable — one phrase on the report's
+  meta line, plus `time_taken: {minutes, phrase}` in the JSON for whoever computes
+  the comparison. Time is banked as it is earned, so a closed tab cannot claim
+  hours nobody worked; a reload inside 90 s resumes rather than paused.
 - **Report self-check prompt** — a **Check report** button (report toolbar)
   builds a self-contained fact-and-consistency-check prompt for the finished
   report and copies it for any assistant. The output contract is deliberately

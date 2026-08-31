@@ -143,12 +143,18 @@ See `CHANGELOG` in the commit, but in summary:
    Conservation Plan note + link when a koala is among the fauna, the General
    Biosecurity Obligation paragraph (per state) and acid-sulfate note under
    Additional Information, and the cultural-heritage duty-of-care sentence. It is
-   non-destructive — it fills an empty note or appends below existing text.
+   non-destructive — it fills an empty note or appends below existing text, and
+   once pressed it becomes **↶ Undo insert** so a several-hundred-word draft is not
+   a one-way door.
 3. **Consistency warnings — catching the humans' #1 mistake.** The report flags a
-   section whose chosen statement contradicts its evidence (e.g. verdict says
-   "no known…" while sources came back *Found* or the note lists species), and a
-   "found/known" section left with no supporting detail. These are surfaced in the
-   tool and noted in the export.
+   section whose chosen statement contradicts its evidence (verdict says "no
+   known…" while sources came back *Found*), a statement contradicted by its own
+   note, and a "found/known" section left with no supporting detail. Reading the
+   note is scoped to the section's own kind of matter and aware of negation, so an
+   honest *"No declared Indigenous Protected Area…"* is not read as a matter found.
+   It is still a heuristic over prose, so every warning carries **Not an issue** —
+   the operator's judgement, recorded, reversible, and re-raised if the evidence
+   behind it changes. These are surfaced in the tool and noted in the export.
 4. **`data/statements.json`** — a new, durable (not build-generated) home for the
    standardized narrative templates: GBO text per state, duty-of-care, the
    impact-assessment boilerplate, the migratory note, the acid-sulfate note, and

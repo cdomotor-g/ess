@@ -83,9 +83,33 @@ drafts those paragraphs:
 ### Consistency warnings (QA)
 The report flags the mistakes the human sheets are full of: a standardized
 statement that **contradicts its evidence** (says "no known…" while sources came
-back *Found* or the note lists species), and a "matters present" statement left
-with **no supporting detail**, and a statement asserting a conclusion while some
-of its sources have **not been checked**.
+back *Found*), a statement that **contradicts its own note**, a "matters present"
+statement left with **no supporting detail**, and a statement asserting a
+conclusion while some of its sources have **not been checked**. The first two used
+to be one warning wearing one sentence, which left the operator unable to tell
+which half to go and look at; they are separate checks now, and each names what it
+read.
+
+**Reading the note is section-scoped and negation-aware.** Every section asks
+about *its own* kind of matter — a heritage word in the Permits note is not a
+permits matter, and the *Aboriginal Cultural Heritage Act 2003* is a statute, not
+a heritage place — and a clause that denies or distances its matter word ("No
+declared…", "not within…", "the nearest IPA is ~50 km away") is not read as
+asserting one. One generic keyword list for all eleven sections is what used to
+fire "the notes indicate matters were found" against notes saying the exact
+opposite (`SECTION_MATTER_RE` / `NEGATED_CLAUSE_RE` in `assets/app.js`).
+
+**Every warning carries a way out.** These are heuristics over free prose, so they
+will sometimes still be wrong, and a wrong one used to be a dead end: the
+statement was right, the note was right, and the only thing that silenced the
+check was deleting true words from a government report. **Not an issue** records
+the operator's judgement on `state.report[section].dismissed`; the check stops
+being counted by the header, the roll-up, the export guard and
+`sections[].warnings`, but stays listed (greyed, with **Restore**) — a dismissal
+nobody can see is a dismissal nobody can trust. A dismissal is about the state
+that was reviewed, not a permanent mute: each key carries what fired the check
+(the Found source ids, the unchecked source ids), so the same check returns the
+moment its grounds change.
 
 Warnings are scaffolding for the person *building* the ESS, so they stay where
 they face that person: the on-screen strip under each section, the report

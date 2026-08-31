@@ -142,3 +142,10 @@ back to extracting subjects from `note`/`result_text`. Either way a name is only
 illustrated if it resolves to something biological, so a subject like a lot/plan
 number or a region name is dropped rather than given whatever photo the search
 returned. Backward compatible — older files simply have no `image_subjects`.
+
+An export may also carry an optional top-level **`time_taken:
+{ minutes, phrase }`** — how long the assessment took, present only when the
+operator both timed themselves and chose to record it (see the optional timer in
+the README). Agents never produce it; it is a benchmark of the tool against the
+old ESS method, and `minutes` is the number to compute that from. `null` or
+absent means "not recorded", which is not the same as "instant".

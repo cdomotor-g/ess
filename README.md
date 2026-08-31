@@ -97,6 +97,32 @@ file, so the choice is only about how you like to work.
 - **Workbench** — the two-pane view described in the rest of this README:
   everything reachable at once, and you choose what to look at next.
 
+### Timing an assessment (optional)
+
+The point of this tool is that it should be faster than the spreadsheet-and-tabs
+method it replaces, and until now nobody could say by how much. So there is a
+stopwatch in the header — entirely optional, and asked for rather than assumed.
+
+Open a site and it offers once: **Time this assessment? Start timer / No thanks.**
+Say no and the offer stands down to a quiet **⏱ Time this** button, so starting
+late is as easy as starting on time. Once running, the clock sits in the header in
+both views, and **Pause** / **Resume** are one click, as often as you like — real
+work has phone calls in it, and a benchmark that counts a lunch break as
+assessment time is worse than none. The clock belongs to that site: it is saved
+with the rest of its state, survives a reload, and does not follow you to the next
+station. Time is banked as it is earned, so a tab closed for the night comes back
+with what you actually worked, not the night.
+
+Whether the time goes in the **deliverable** is a separate question, asked
+separately — the first time you export, and answerable either way. If you say yes
+it prints as one phrase on the report's first line, with the assessment date:
+*Assessment date: 2026-08-31 · Generated 2026-08-31 · compiled in 1 h 12 min* —
+and rides in the JSON export as `time_taken` (`minutes` and `phrase`) for anyone
+actually computing the comparison. The decision is a tickbox on the report's front
+page (and on Focus's finish step), so it can be changed at any point, whichever
+way it was first answered. Say no and the report says nothing about how long it
+took.
+
 The walkthrough below describes the **workbench**.
 
 The left pane is the workflow, numbered in the order you work it. Everything
@@ -184,6 +210,17 @@ that pane, so the four steps are all you see until you go looking.
      diagrams are rejected outright, which is what keeps a map of Queensland or a
      diagram of HTML tags out of a report. If none of the top few search results
      qualifies, the card simply gets no photo, and the status line says so.
+   * **The tool shows its working.** Under the photos it fetched for you, the card
+     says *why* — the words in that card's own text that triggered each one,
+     highlighted in a short quotation of the sentence they came out of, next to the
+     Wikipedia article each resolved to. Reading one line is enough to accept a
+     photo or delete it. A word that has since been edited out of the note gets its
+     own marked row — *"…" is no longer in this card's text* — because a photo that
+     has outlived what fetched it is the one most worth a second look. None of this
+     touches the note itself (it is a live field you are typing into) and **none of
+     it reaches the report**: it is absent from Print/PDF, the HTML export, the JSON
+     and the report pane. Your own uploads and anything you fetched by typing a name
+     need no explaining, so they get no row.
    * **Auto-fetch reference images during agent runs** (Advanced options → Display
      options) governs the *other* automatic path — a live agent run, which answers
      one source at a time. It doesn't affect **Apply**: that's an explicit request.
@@ -251,14 +288,25 @@ that pane, so the four steps are all you see until you go looking.
    with one real result and four tools nobody has opened yet now says so.
    Each section has an
    **Insert suggested detail** button that drafts a paragraph from that
-   section's evidence plus standard wording (`data/statements.json`), and the tool
-   **flags contradictions** — a statement that says "no known…" while the evidence
-   came back *Found*, a "matters present" statement with no supporting detail, or
-   a section asserting a conclusion while some of its sources have not been
-   checked. Those flags are scaffolding for **you**, so they stay in the app: they
-   are not written into the handover document, and exporting with any of them still
-   open says so first — once per site — naming the count and offering to go to the
-   first one.
+   section's evidence plus standard wording (`data/statements.json`). It is one
+   click and it can add several hundred words, so once pressed it becomes
+   **↶ Undo insert** — which puts the note back exactly as it was — until you type
+   into the note, at which point there is nothing safe left to undo and the draft
+   button returns.
+   The tool also **flags contradictions** — a statement that says "no known…"
+   while the evidence came back *Found*, a statement contradicted by its own note,
+   a "matters present" statement with no supporting detail, or a section asserting
+   a conclusion while some of its sources have not been checked. Reading the note
+   is scoped to the section's own kind of matter and aware of negation, so "No
+   declared Indigenous Protected Area…" and "the *Aboriginal Cultural Heritage Act
+   2003* applies" are not read as matters found. It is still a heuristic over free
+   prose, so **every warning carries a way out**: **Not an issue** records that you
+   have looked and the section is right as written, and it stops being counted —
+   but stays listed, greyed, with **Restore**, and comes back on its own if the
+   evidence behind it changes. Those flags are scaffolding for **you**, so they
+   stay in the app: they are not written into the handover document, and exporting
+   with any of them still open says so first — once per site — naming the count and
+   offering to go to the first one.
    One **Export ▾** menu takes the report out of the app — **Print/PDF** (the
    handover format) first, then **HTML file**, **JSON export**, **Copy summary**;
    photos travel with the export (embedded, so the HTML/JSON stay

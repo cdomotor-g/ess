@@ -185,6 +185,28 @@ a { color: var(--brand); }
    coloured band, so the ring borrows the chrome's own ink (8.5:1 on it). */
 .ghost-link:focus-visible { --focus: var(--brand-chrome-ink); }
 
+/* ---------- the optional timer ----------
+   A stopwatch in the chrome, sized and coloured as chrome: it must be reachable
+   from every screen without ever competing with the work. The readout uses
+   tabular figures so the chip doesn't twitch a pixel wider on every second. */
+.topbar-timer { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: nowrap; min-width: 0; }
+.topbar-timer[hidden] { display: none; }
+.tmr-ask { font-size: var(--fs-meta); opacity: .9; white-space: nowrap; }
+.tmr-read { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-3);
+  border: 1px solid rgba(255,255,255,.35); border-radius: 999px; line-height: 1.2; white-space: nowrap; }
+.tmr-time { font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: .01em; }
+/* Paused reads as paused without relying on the glyph alone. */
+.tmr-read:not(.is-running) { opacity: .7; }
+.topbar-timer .ghost-link { white-space: nowrap; }
+
+/* ---- the record decision, on the report's front page ----
+   Deliberately the quietest row on the page: it governs one phrase in the meta
+   line, not a finding. */
+.tmr-record { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); color: var(--ink-soft);
+  display: flex; align-items: baseline; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
+.tmr-record label { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; color: var(--ink); }
+.tmr-record-note { opacity: .85; }
+
 /* ---------- layout ---------- */
 /* Use the full window width (no centred max-width) so the two columns get all the
    available real estate. */
@@ -476,6 +498,8 @@ main { max-width: none; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--s
 .fx-warns:empty { display: none; }
 .fx-warns .r-warn { margin: 0; font-size: var(--fs-body); line-height: 1.5;
   border-left: 4px solid var(--failed); padding: var(--sp-2) var(--sp-3); border-radius: 8px; }
+.fx-warns .r-warn.is-dismissed { border-left-color: var(--line); }
+.fx-warns .r-warn-act { font-size: var(--fs-meta); }
 /* A note the section's whole detail goes into starts at a size that invites a
    paragraph, and still grows to whatever is typed (autoGrow / syncCardMetrics). */
 .fx-sec-note { min-height: 96px; font-size: var(--fs-body); line-height: 1.55; }
@@ -1987,6 +2011,27 @@ a.photo-credit:hover { text-decoration: underline; }
 /* ---------- reference-image (Wikipedia) row on species cards ---------- */
 /* Collapsed by default (progressive disclosure) so the card shows a single text
    field — the Notes textarea — at rest; the reference-image search reveals on demand. */
+/* ---- why an unasked-for photo is here ----
+   The tool's working, shown under the photos it explains: the words in the card's
+   own text that fetched them. Quiet by construction — meta size, soft ink, no
+   border — because it is a check the operator makes in passing, not a finding.
+   The one thing that is loud is the marked word itself, which is what they are
+   actually reading the row for. Never rendered into the report (see
+   renderImageTriggers). */
+.img-triggers { margin-top: var(--sp-2); font-size: var(--fs-micro); color: var(--ink-soft); }
+.trg-lead { margin: 0 0 var(--sp-1); line-height: 1.4; }
+.trg-note { opacity: .8; }
+.trg-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-1); }
+.trg-row { line-height: 1.5; padding-left: var(--sp-2); border-left: 2px solid var(--line); }
+.trg-quote { quotes: "“" "”"; font-style: italic; }
+.trg-quote mark { background: var(--none-bg); color: var(--ink); font-style: normal; font-weight: 700;
+  border-radius: 3px; padding: 0 var(--sp-0); }
+.trg-arrow { opacity: .7; }
+.trg-page { font-weight: 600; font-style: normal; }
+/* The word has gone from the text since the photo was fetched — the most useful
+   row in the list, so it is the one that is marked as needing a decision. */
+.trg-row.is-stale { border-left-color: var(--caution); }
+.trg-gone { color: var(--caution); }
 .wiki-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-2); }
 .wiki-row.collapsed { display: none; }
 .wiki-row .wiki-lead { font-size: var(--fs-meta); color: var(--ink-soft); white-space: nowrap; }
@@ -2113,6 +2158,11 @@ a.photo-credit:hover { text-decoration: underline; }
 .rsection .r-actions { margin: calc(-1 * var(--sp-1)) 0 var(--sp-2); }
 .btn-mini { font: inherit; font-size: var(--fs-meta); font-weight: 600; border-radius: 7px; padding: var(--sp-1) var(--sp-2); border: 1px dashed var(--line); background: var(--surface-2); color: var(--ink-soft); cursor: pointer; }
 .btn-mini:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+/* The same button, standing in for itself after an insert. Solid rather than
+   dashed: the dashed edge says "there is something on offer here", and this one
+   is a live change to undo, not an offer. */
+.btn-mini.btn-undo { border-style: solid; border-color: var(--brand); color: var(--brand); }
+.btn-mini.btn-undo:hover { background: var(--link-bg); border-color: var(--brand); color: var(--brand); }
 /* The report's own review controls are the per-section "Mark section reviewed"
    ticks; "Check report" is the last of them — it copies a review prompt, so it
    belongs at the end of the reviewing, not in the export cluster at the top.
@@ -2177,6 +2227,18 @@ button.glance-hit:hover { background: var(--surface); border-color: var(--line);
 }
 .rsection .r-warns:empty { display: none; }
 .rsection .r-warn { font-size: var(--fs-meta); font-weight: 600; color: var(--failed); background: var(--failed-bg); border-radius: 7px; padding: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); }
+/* Every consistency warning carries its own way out: the message takes the room
+   it needs and the action sits at the end of the row, never wrapping mid-word. */
+.r-warn { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.r-warn-msg { flex: 1; min-width: 0; }
+.r-warn-act { flex: none; font: inherit; font-size: var(--fs-micro); font-weight: 600; color: inherit;
+  background: transparent; border: 1px solid currentColor; border-radius: 999px;
+  padding: 0 var(--sp-2); line-height: 1.7; cursor: pointer; opacity: .8; white-space: nowrap; }
+.r-warn-act:hover { opacity: 1; }
+/* A dismissed check is still shown — a dismissal nobody can see is a dismissal
+   nobody can trust — but it stops looking like an open problem. */
+.rsection .r-warn.is-dismissed, .fx-warns .r-warn.is-dismissed {
+  color: var(--ink-soft); background: var(--surface-2); font-weight: 500; }
 .report-map { margin: 0; }
 .report-map img { display: block; width: 100%; max-width: 420px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
 .report-map figcaption { font-size: var(--fs-micro); color: var(--ink-soft); margin-top: var(--sp-1); }
@@ -2444,6 +2506,12 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
   /* Destructive, and irreversible — ruled off from the two preferences above it,
      the same way .menu-item.danger is on the card menus. */
   #btn-cache-blaster { color: var(--failed); }
+
+  /* The timer keeps its action and loses its prose — the header is one row here,
+     and "Start timer" on its own says the same thing the sentence did. Declining
+     is a desktop nicety; on a phone an offer nobody presses is already declined. */
+  .tmr-ask, .tmr-no { display: none; }
+  .topbar-timer .ghost-link { min-height: 44px; display: inline-flex; align-items: center; }
 
   /* ---- 44px targets ----
      Everything the operator presses to get through a site. Sized by min-height
