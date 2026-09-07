@@ -321,7 +321,23 @@ Vanilla JS, no dependencies, no build. It:
   print string injected into the live document carries no duplicate ids), and in
   Print/PDF the rows are inert. The card re-renders with the report, and
   `refreshSummaryCard()` replaces it in place from `refreshSection()`, so a
-  statement change moves its marker without rebuilding an image-heavy pane;
+  statement change moves its marker without rebuilding an image-heavy pane. The
+  table tells the reader *which* sections have findings; ten pages later, on the
+  section itself, that was a fact they had to hold in their head. So **in the
+  generated artefact every `found` section repeats the marker at the top of its own
+  card** — `● Found — read this section`, the same glyph and the same words, from
+  the same `SUM_STATES.found`, in the same red the table's found rows wear
+  (`foundFlag` → `.pr-sec-flag`, and `.pr-sec-found` on the card). One glance at
+  the table, then the same ● waiting on the card it pointed at, and a card read on
+  its own still says it has findings. It is computed from `summaryRollup()`, never
+  from the section body, so it cannot disagree with the row that sent the reader
+  there — including for a source that came back **Found** and was never pressed
+  into the report. Glyph, words, a rule and a tint carry it and the red only
+  confirms, so it survives a greyscale photocopy; the space between glyph and words
+  is in the markup, not only in the margin, so a stylesheet that never loaded still
+  reads `● Found`. Artefact only (`buildReportHtml`, hence Print/PDF, the HTML
+  export and the read-the-whole-report preview): on screen the pane already puts
+  the summary card a scroll away from the sections, and the row itself is a jump;
 - lays the workspace out as **two independently scrolling columns** (collection
   left, report right) sized to the viewport below the topbar. Each column pins
   what has to stay reachable while the other content scrolls: the progress card on

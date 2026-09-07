@@ -8440,7 +8440,28 @@
     // standalone HTML export. The print build's string is injected into the LIVE
     // document (#print-root, and the on-screen preview), where a second set of ids
     // would be a duplicate-id bug, and on paper a link is a promise it cannot keep.
-    const secRows = r.sections.map((sec) => `<div class="pr-sec"${interactive ? ` id="pr-sec-${esc(sec.id)}"` : ""}><h2>${esc(sec.title)}</h2>
+    /* The summary card at the head of the report tells the reader WHICH sections
+       have findings; ten pages later, on the section itself, that is a fact they
+       have to hold in their head. So every section the rollup marks `found` wears
+       the same marker and the same words at the top of its own card — one glance
+       at the table, then the same red ● waiting on the card it pointed at.
+
+       From summaryRollup(), never from the section body: the rollup counts EVERY
+       applicable source (see its own note), so a source that came back Found but
+       was never pressed into the report still flags its section here, exactly as
+       it does in the table. One definition of "found", two places it is said. */
+    const foundSections = {};
+    summaryRollup().forEach((row) => { if (row.state === "found") foundSections[row.section] = true; });
+    // Glyph AND words, like every other marker in this artefact: colour is the
+    // confirmation, never the message, so the flag survives a greyscale photocopy.
+    const foundFlag = (id) => foundSections[id]
+      // The space is in the markup, not only in the margin: this string is also
+      // read as plain text (a stylesheet that never loaded, a text extractor), and
+      // "●Found" is not what the summary table says.
+      ? `<p class="pr-sec-flag"><span class="pr-sec-flag-mark" aria-hidden="true">${SUM_STATES.found.glyph}</span> ${esc(SUM_STATES.found.label)}</p>`
+      : "";
+    const secRows = r.sections.map((sec) => `<div class="pr-sec${foundSections[sec.id] ? " pr-sec-found" : ""}"${interactive ? ` id="pr-sec-${esc(sec.id)}"` : ""}><h2>${esc(sec.title)}</h2>
+      ${foundFlag(sec.id)}
       ${sec.choice ? `<p><b>${esc(sec.choice)}</b></p>` : ""}
       ${sec.detail ? `<p>${nl2br(sec.detail)}</p>` : ""}
       ${sec.note ? `<p>${nl2br(sec.note)}</p>` : ""}
@@ -8623,6 +8644,13 @@
       .pr-sum-clear .pr-sum-mark,.pr-sum-clear .pr-sum-state{color:#555}
       .pr-sum-na td,.pr-sum-na .pr-sum-name a{color:#8a8a8a}
       .pr-sum-foot{font-size:10px;color:#666;margin:6px 0 0}
+      /* The summary's ● repeated at the top of the section it points at, so a card
+         read on its own still says it has findings. Glyph, words and a rule carry
+         it; the red only confirms. */
+      .pr-sec-flag{font-size:11.5px;font-weight:700;color:#c1123c;margin:0 0 6px;padding:3px 7px;
+        background:#fdeef1;border-left:3px solid #c1123c;border-radius:3px}
+      .pr-sec-flag-mark{margin-right:2px;font-size:13px;line-height:1;
+        font-family:"Segoe UI Symbol","Apple Symbols","Noto Sans Symbols 2","DejaVu Sans",sans-serif}
       .pr-maps{display:flex;gap:12px;align-items:flex-start}
       .pr-map-fig{margin:0;flex:1 1 0;min-width:0}
       /* 4/3 rather than square: the stitched image is square and centred on the pin,

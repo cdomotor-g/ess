@@ -2676,6 +2676,14 @@ input[type=file] { font: inherit; font-size: var(--fs-body); padding: var(--sp-1
 .pr-paper .pr .pr-sum-clear .pr-sum-mark, .pr-paper .pr .pr-sum-clear .pr-sum-state { color: #555; }
 .pr-paper .pr .pr-sum-na td { color: #8a8a8a; }
 .pr-paper .pr .pr-sum-foot { font-size: 10px; color: #666; margin: var(--sp-1) 0 0; }
+/* The same marker the summary table carries, repeated at the top of the section
+   it points at (#65). A reader who skimmed the table ten pages ago should not have
+   to remember which rows were red: the card says so itself. Glyph + words + rule,
+   so it reads on a greyscale photocopy; the red is the confirmation. */
+.pr-paper .pr .pr-sec-flag { font-size: 11px; font-weight: 700; color: #c1123c; margin: 0 0 var(--sp-1);
+  padding: var(--sp-0) var(--sp-1); background: #fdeef1; border-left: 3px solid #c1123c; border-radius: 3px; }
+.pr-paper .pr .pr-sec-flag-mark { margin-right: var(--sp-hair); font-size: 12px; line-height: 1;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; }
 /* Both locator maps in the printed report: side by side, equal, full width, and a
    quarter shorter than they were — 4/3 windows onto the square stitched image, which
    crops evenly around the centred pin and gives the page back the height. */
